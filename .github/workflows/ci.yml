@@ -14,8 +14,8 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - name: Install Python dependencies
@@ -23,7 +23,7 @@ jobs:
       - name: Validate repository
         run: python3 scripts/validate.py
       - name: Helm lint
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
       - run: helm lint helm/city-intersection-platform
       - name: Render chart
         run: helm template city-intersection-project helm/city-intersection-platform -n city-intersection -f helm/city-intersection-platform/values.yaml > rendered.yaml
@@ -33,7 +33,7 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Trivy filesystem scan
         uses: aquasecurity/trivy-action@master
         with:
