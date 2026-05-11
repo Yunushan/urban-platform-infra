@@ -29,6 +29,7 @@
   <a href="docs/helm-hardening.md">Helm Hardening</a> •
   <a href="docs/kubernetes-security-posture.md">Kubernetes Security</a> •
   <a href="docs/deployment-topologies.md">Topologies</a> •
+  <a href="docs/three-node-rke2-tarball-deploy.md">3-Node Deploy</a> •
   <a href="docs/secrets-management.md">Secrets</a> •
   <a href="docs/supply-chain.md">Supply Chain</a> •
   <a href="docs/image-governance.md">Images</a> •
@@ -67,6 +68,8 @@ make install-operators
 make deploy ENV=prod
 make status
 ```
+
+For deploying a previously packaged application archive onto three local RKE2 nodes, use the sanitized runbook in [`docs/three-node-rke2-tarball-deploy.md`](docs/three-node-rke2-tarball-deploy.md). It covers image build/preload, private inventory setup, RKE2 bootstrap, Helm deployment, and verification without committing real node addresses or credentials.
 
 Local Docker profile:
 
