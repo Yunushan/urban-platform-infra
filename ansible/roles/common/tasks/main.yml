@@ -36,4 +36,5 @@
   loop:
     - {name: 'net.ipv4.ip_forward', value: '1'}
     - {name: 'net.bridge.bridge-nf-call-iptables', value: '1'}
+    - {name: 'net.ipv4.ip_nonlocal_bind', value: '1'}
   when: ansible_system == 'Linux'

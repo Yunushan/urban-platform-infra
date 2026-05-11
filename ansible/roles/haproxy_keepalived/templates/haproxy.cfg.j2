@@ -13,7 +13,7 @@ defaults
   timeout server 50s
 
 frontend kubernetes_api
-  bind *:6443
+  bind {{ cluster_vip }}:6443
   default_backend kubernetes_api_servers
 
 backend kubernetes_api_servers
@@ -24,7 +24,7 @@ backend kubernetes_api_servers
 {% endfor %}
 
 frontend rke2_registration
-  bind *:9345
+  bind {{ cluster_vip }}:9345
   default_backend rke2_registration_servers
 
 backend rke2_registration_servers
