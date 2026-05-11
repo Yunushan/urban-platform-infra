@@ -51,13 +51,28 @@ tasks:
     deps:
       - package-chart
     cmds:
-      - helm template urban-platform-infra helm/urban-platform-infra --namespace urban-platform -f helm/urban-platform-infra/values.yaml > dist/rendered.yaml
-      - python3 scripts/release/generate_sbom.py --chart helm/urban-platform-infra --dist dist --rendered dist/rendered.yaml --sbom dist/urban-platform-infra.spdx.json --checksums dist/SHA256SUMS
+      - >-
+        helm template urban-platform-infra helm/urban-platform-infra
+        --namespace urban-platform
+        -f helm/urban-platform-infra/values.yaml
+        > dist/rendered.yaml
+      - >-
+        python3 scripts/release/generate_sbom.py
+        --chart helm/urban-platform-infra
+        --dist dist
+        --rendered dist/rendered.yaml
+        --sbom dist/urban-platform-infra.spdx.json
+        --checksums dist/SHA256SUMS
   deploy:
     vars:
       TOPOLOGY: '{{.TOPOLOGY | default "three-node-ha"}}'
     cmds:
-      - helm upgrade --install urban-platform-infra helm/urban-platform-infra --namespace urban-platform --create-namespace -f helm/urban-platform-infra/values.yaml -f helm/urban-platform-infra/topologies/{{.TOPOLOGY}}.yaml
+      - >-
+        helm upgrade --install urban-platform-infra helm/urban-platform-infra
+        --namespace urban-platform
+        --create-namespace
+        -f helm/urban-platform-infra/values.yaml
+        -f helm/urban-platform-infra/topologies/{{.TOPOLOGY}}.yaml
   observability-status:
     cmds:
       - kubectl -n urban-platform get prometheusrules.monitoring.coreos.com,servicemonitors.monitoring.coreos.com 2>/dev/null || true

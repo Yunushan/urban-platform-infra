@@ -4,9 +4,12 @@ extends: default
 ignore: |
   helm/*/templates/
   deploy/helmfile.yaml
+  reports/
 
 rules:
   document-start: disable
+  indentation:
+    indent-sequences: consistent
   line-length:
     max: 160
     level: warning

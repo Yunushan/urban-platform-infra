@@ -59,8 +59,18 @@ release-evidence:
     - helm dependency build helm/urban-platform-infra
     - helm lint helm/urban-platform-infra
     - helm package helm/urban-platform-infra -d dist
-    - helm template urban-platform-infra helm/urban-platform-infra -n urban-platform -f helm/urban-platform-infra/values.yaml > dist/rendered.yaml
-    - python3 scripts/release/generate_sbom.py --chart helm/urban-platform-infra --dist dist --rendered dist/rendered.yaml --sbom dist/urban-platform-infra.spdx.json --checksums dist/SHA256SUMS
+    - >-
+      helm template urban-platform-infra helm/urban-platform-infra
+      -n urban-platform
+      -f helm/urban-platform-infra/values.yaml
+      > dist/rendered.yaml
+    - >-
+      python3 scripts/release/generate_sbom.py
+      --chart helm/urban-platform-infra
+      --dist dist
+      --rendered dist/rendered.yaml
+      --sbom dist/urban-platform-infra.spdx.json
+      --checksums dist/SHA256SUMS
   artifacts:
     paths:
       - dist/*.tgz

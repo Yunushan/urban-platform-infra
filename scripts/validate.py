@@ -198,14 +198,8 @@ for release_token in [
         errors.append(f'Release workflow missing supply-chain control: {release_token}')
 
 ci_workflow_text = (ROOT / '.github/workflows/ci.yml').read_text(encoding='utf-8')
-if not any(
-    action_ref in ci_workflow_text
-    for action_ref in [
-        'actions/dependency-review-action@v4',
-        'actions/dependency-review-action@v5',
-    ]
-):
-    errors.append('CI must review dependency changes on pull requests')
+if 'actions/dependency-review-action@v5' not in ci_workflow_text:
+    errors.append('CI must review dependency changes with dependency-review-action@v5')
 
 dependabot_text = (ROOT / '.github/dependabot.yml').read_text(encoding='utf-8')
 for dependabot_token in [
