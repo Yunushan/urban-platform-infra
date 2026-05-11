@@ -8,6 +8,7 @@
       - iproute
       - nfs-utils
       - iscsi-initiator-utils
+      - policycoreutils-python-utils
       - unzip
     state: present
 

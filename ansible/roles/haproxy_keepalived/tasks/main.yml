@@ -17,6 +17,50 @@
     state: present
   when: ansible_system == 'Linux'
 
+- name: Allow HAProxy to bind Kubernetes ports under SELinux
+  ansible.builtin.shell: |
+    set -euo pipefail
+    port="{{ item }}"
+    if semanage port -l | awk '$1 == "http_port_t" && $2 == "tcp" {print $0}' | grep -Eq "(^|[ ,])${port}([, ]|$)"; then
+      echo unchanged
+    elif semanage port -l | awk '$2 == "tcp" {print $0}' | grep -Eq "(^|[ ,])${port}([, ]|$)"; then
+      semanage port -m -t http_port_t -p tcp "${port}"
+      echo changed
+    else
+      semanage port -a -t http_port_t -p tcp "${port}"
+      echo changed
+    fi
+  args:
+    executable: /bin/bash
+  loop:
+    - 6443
+    - 9345
+  register: haproxy_selinux_port
+  changed_when: "'changed' in haproxy_selinux_port.stdout"
+  when:
+    - ansible_os_family == 'RedHat'
+    - ansible_selinux.status | default('disabled') == 'enabled'
+    - not ansible_check_mode
+
+- name: Read HAProxy SELinux backend connection boolean
+  ansible.builtin.command: getsebool haproxy_connect_any
+  register: haproxy_connect_any_boolean
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_os_family == 'RedHat'
+    - ansible_selinux.status | default('disabled') == 'enabled'
+    - not ansible_check_mode
+
+- name: Allow HAProxy SELinux backend connections
+  ansible.builtin.command: setsebool -P haproxy_connect_any 1
+  when:
+    - ansible_os_family == 'RedHat'
+    - ansible_selinux.status | default('disabled') == 'enabled'
+    - not ansible_check_mode
+    - haproxy_connect_any_boolean.rc == 0
+    - "'off' in haproxy_connect_any_boolean.stdout"
+
 - name: Configure HAProxy for RKE2/Kubernetes API and registration ports
   ansible.builtin.template:
     src: haproxy.cfg.j2
