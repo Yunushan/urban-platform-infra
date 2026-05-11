@@ -4,19 +4,114 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Optional version to compare with Chart.yaml, for example v0.1.0.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: '3.12'
+  HELM_CHART: helm/city-intersection-platform
+  RELEASE_NAME: city-intersection-project
+  NAMESPACE: city-intersection
+  VALUES_FILE: helm/city-intersection-platform/values.yaml
+  DIST_DIR: dist
+  RENDERED_MANIFEST: dist/rendered.yaml
+  SBOM_FILE: dist/city-intersection-platform.spdx.json
+  CHECKSUM_FILE: dist/SHA256SUMS
 
 jobs:
   package:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
       - uses: azure/setup-helm@v5
-      - name: Package Helm chart
+
+      - name: Validate release tag matches chart version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version || '' }}
         run: |
-          mkdir -p dist
-          helm package helm/city-intersection-platform -d dist
-      - name: Upload artifact
+          set -euo pipefail
+          chart_version="$(python3 scripts/release/generate_sbom.py --chart "${HELM_CHART}" --print-chart-version)"
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            tag_version="${GITHUB_REF_NAME#v}"
+            if [[ "${tag_version}" != "${chart_version}" ]]; then
+              echo "Release tag ${GITHUB_REF_NAME} does not match Chart.yaml version ${chart_version}" >&2
+              exit 1
+            fi
+          fi
+
+          requested_version="${INPUT_VERSION#v}"
+          if [[ -n "${requested_version}" && "${requested_version}" != "${chart_version}" ]]; then
+            echo "Requested version ${INPUT_VERSION} does not match Chart.yaml version ${chart_version}" >&2
+            exit 1
+          fi
+
+      - name: Package Helm chart
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${DIST_DIR}"
+          helm dependency build "${HELM_CHART}"
+          helm lint "${HELM_CHART}"
+          helm package "${HELM_CHART}" -d "${DIST_DIR}"
+
+      - name: Render release manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          helm template "${RELEASE_NAME}" "${HELM_CHART}" \
+            --namespace "${NAMESPACE}" \
+            -f "${VALUES_FILE}" \
+            > "${RENDERED_MANIFEST}"
+
+      - name: Generate SBOM and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release/generate_sbom.py \
+            --chart "${HELM_CHART}" \
+            --dist "${DIST_DIR}" \
+            --rendered "${RENDERED_MANIFEST}" \
+            --sbom "${SBOM_FILE}" \
+            --checksums "${CHECKSUM_FILE}"
+
+      - name: Attest release artifact provenance
+        uses: actions/attest@v4
+        with:
+          subject-checksums: ${{ env.CHECKSUM_FILE }}
+
+      - name: Attest release SBOM
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ env.DIST_DIR }}/*.tgz
+          sbom-path: ${{ env.SBOM_FILE }}
+
+      - name: Upload release evidence
         uses: actions/upload-artifact@v7
         with:
-          name: city-intersection-platform-chart
-          path: dist/*.tgz
+          name: city-intersection-platform-release-evidence
+          path: |
+            ${{ env.DIST_DIR }}/*.tgz
+            ${{ env.RENDERED_MANIFEST }}
+            ${{ env.SBOM_FILE }}
+            ${{ env.CHECKSUM_FILE }}

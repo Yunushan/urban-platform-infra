@@ -4,6 +4,14 @@ tasks:
   validate:
     cmds:
       - python3 scripts/validate.py
+      - python3 scripts/images/validate-images.py
+  image-policy:
+    cmds:
+      - python3 scripts/images/validate-images.py
+  lint:
+    cmds:
+      - yamllint .
+      - shellcheck $(git ls-files '*.sh')
   configure:
     vars:
       ENGINE: '{{.ENGINE | default "rke2"}}'
@@ -12,6 +20,45 @@ tasks:
       OBS: '{{.OBS | default "elasticsearch"}}'
     cmds:
       - python3 scripts/configure.py --engine {{.ENGINE}} --webserver {{.WEB}} --database {{.DB}} --observability {{.OBS}}
-  deploy:
+  preflight:
+    vars:
+      ENV: '{{.ENV | default "prod"}}'
+      ENGINE: '{{.ENGINE | default "rke2"}}'
+      INVENTORY: 'inventories/{{.ENV}}/hosts.yml'
     cmds:
-      - helm upgrade --install city-intersection-project helm/city-intersection-platform --namespace city-intersection --create-namespace -f helm/city-intersection-platform/values.yaml
+      - ansible-playbook -i {{.INVENTORY}} ansible/playbooks/preflight.yml -e cluster_engine={{.ENGINE}} -e deployment_environment={{.ENV}}
+  bootstrap-check:
+    vars:
+      ENV: '{{.ENV | default "prod"}}'
+      ENGINE: '{{.ENGINE | default "rke2"}}'
+      INVENTORY: 'inventories/{{.ENV}}/hosts.yml'
+    cmds:
+      - ansible-playbook -i {{.INVENTORY}} ansible/playbooks/bootstrap.yml -e cluster_engine={{.ENGINE}} -e deployment_environment={{.ENV}} --check --diff
+  install-cluster-check:
+    vars:
+      ENV: '{{.ENV | default "prod"}}'
+      ENGINE: '{{.ENGINE | default "rke2"}}'
+      INVENTORY: 'inventories/{{.ENV}}/hosts.yml'
+    cmds:
+      - ansible-playbook -i {{.INVENTORY}} ansible/playbooks/install-cluster.yml -e cluster_engine={{.ENGINE}} -e deployment_environment={{.ENV}} --check --diff
+  package-chart:
+    cmds:
+      - mkdir -p dist
+      - helm dependency build helm/city-intersection-platform
+      - helm lint helm/city-intersection-platform
+      - helm package helm/city-intersection-platform -d dist
+  release-evidence:
+    deps:
+      - package-chart
+    cmds:
+      - helm template city-intersection-project helm/city-intersection-platform --namespace city-intersection -f helm/city-intersection-platform/values.yaml > dist/rendered.yaml
+      - python3 scripts/release/generate_sbom.py --chart helm/city-intersection-platform --dist dist --rendered dist/rendered.yaml --sbom dist/city-intersection-platform.spdx.json --checksums dist/SHA256SUMS
+  deploy:
+    vars:
+      TOPOLOGY: '{{.TOPOLOGY | default "three-node-ha"}}'
+    cmds:
+      - helm upgrade --install city-intersection-project helm/city-intersection-platform --namespace city-intersection --create-namespace -f helm/city-intersection-platform/values.yaml -f helm/city-intersection-platform/topologies/{{.TOPOLOGY}}.yaml
+  observability-status:
+    cmds:
+      - kubectl -n city-intersection get prometheusrules.monitoring.coreos.com,servicemonitors.monitoring.coreos.com 2>/dev/null || true
+      - kubectl -n observability get pods,svc 2>/dev/null || true

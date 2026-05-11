@@ -15,9 +15,15 @@ Thumbs.db
 *.pem
 *.p12
 *.kubeconfig
+*.decrypted.*
+*.plain.*
+*.unsealed.*
+*.sops.dec.*
 secrets/*
 !secrets/.gitkeep
 *.age
+.sops.keys
+sops/age/keys.txt
 
 # Terraform
 .terraform/

@@ -1,0 +1,45 @@
+window: 30d
+owner: platform
+reviewCadence: monthly
+objectives:
+  workload_availability:
+    target: 99.9
+    sli: desired Kubernetes workload replicas are available
+    source: kube-state-metrics
+    alert: CityIntersectionDeploymentReplicasUnavailable
+    runbook: docs/runbooks.md#deployment-replicas-unavailable
+  stateful_dependency_availability:
+    target: 99.9
+    sli: Kafka, ZooKeeper, and Redis ready replicas match desired replicas
+    source: kube-state-metrics
+    alert: CityIntersectionStatefulSetReplicasUnavailable
+    runbook: docs/runbooks.md#statefulset-replicas-unavailable
+  restart_stability:
+    target: 99.5
+    sli: containers avoid repeated restarts over 15-minute windows
+    source: kube-state-metrics
+    alert: CityIntersectionContainerRestartingTooOften
+    runbook: docs/runbooks.md#container-restarts
+  capacity_headroom:
+    target: 99.0
+    sli: autoscalers avoid sustained maximum replica saturation
+    source: kube-state-metrics
+    alert: CityIntersectionHPASaturated
+    runbook: docs/runbooks.md#hpa-saturated
+  persistent_storage_headroom:
+    target: 99.0
+    sli: persistent volumes keep at least 15 percent free capacity
+    source: kubelet volume stats
+    alert: CityIntersectionPersistentVolumeFilling
+    runbook: docs/runbooks.md#persistent-volume-filling
+alertRouting:
+  pageSeverity: critical
+  ticketSeverity: warning
+  escalation: platform-on-call
+dashboards:
+  required:
+    - cluster-capacity
+    - workload-availability
+    - data-dependencies
+    - ingress-and-edge
+    - release-and-deployments

@@ -15,7 +15,7 @@ spec:
   {{- if eq $kind "StatefulSet" }}
   serviceName: {{ $name }}-headless
   {{- end }}
-  replicas: {{ $svc.replicas | default $.Values.global.defaultReplicas }}
+  replicas: {{ include "cip.replicaCount" (list $ ($svc.replicas | default $.Values.global.defaultReplicas)) }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ $name }}
@@ -27,17 +27,28 @@ spec:
         app.kubernetes.io/part-of: city-intersection-project
         city-intersection.io/category: {{ $svc.category | default "application" | quote }}
     spec:
+      serviceAccountName: {{ include "cip.serviceAccountName" $ }}
+      automountServiceAccountToken: {{ $.Values.global.serviceAccount.automountServiceAccountToken | default false }}
+      enableServiceLinks: {{ $.Values.global.enableServiceLinks | default false }}
+      {{- if $.Values.global.podSecurityContext.enabled }}
+      podSecurityContext:
+        {{- include "cip.podSecurityContext" $ | nindent 8 }}
+      {{- end }}
       {{- if $.Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- range $.Values.global.imagePullSecrets }}
         - name: {{ . }}
         {{- end }}
       {{- end }}
+      {{- if $.Values.global.scheduling.topologySpread }}
+      topologySpreadConstraints:
+        {{- include "cip.topologySpreadConstraints" (list $ $name) | nindent 8 }}
+      {{- end }}
       terminationGracePeriodSeconds: 30
       containers:
         - name: {{ $name }}
           image: {{ include "cip.image" (list $ $svc.image) | quote }}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: {{ $svc.imagePullPolicy | default $.Values.global.imagePullPolicy | quote }}
           securityContext:
             {{- include "cip.securityContext" $ | nindent 12 }}
           {{- if $svc.env }}
@@ -109,8 +120,16 @@ metadata:
   labels:
     {{- include "cip.labels" $ | nindent 4 }}
     app.kubernetes.io/name: {{ $name }}
+  {{- with (dig "service" "annotations" dict $svc) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   type: {{ dig "service" "type" "ClusterIP" $svc }}
+  {{- with (dig "service" "loadBalancerSourceRanges" list $svc) }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     app.kubernetes.io/name: {{ $name }}
     app.kubernetes.io/part-of: city-intersection-project

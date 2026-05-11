@@ -8,6 +8,8 @@ This project is ready for GitHub and GitLab. It includes:
 - `CODEOWNERS`
 - `SECURITY.md`
 - `CONTRIBUTING.md`
+- Dependabot updates for GitHub Actions and Python CI dependencies
+- release evidence with checksums, SPDX SBOM metadata, and GitHub artifact attestations
 - scripts for creating and pushing remotes
 
 ## Local repository

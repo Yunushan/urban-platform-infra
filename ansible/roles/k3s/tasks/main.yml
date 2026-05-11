@@ -1,4 +1,14 @@
 ---
+- name: Validate K3s role inputs
+  ansible.builtin.assert:
+    that:
+      - (k3s_token | default('') | length) >= 16
+      - (k3s_token | default('') | regex_search('^CHANGE_ME')) is none
+      - cluster_vip | default('') | length > 0
+      - cluster_domain | default('') | length > 0
+    fail_msg: "K3s role requires a vaulted token, cluster_vip, and cluster_domain."
+  no_log: true
+
 - name: Create K3s config directory
   ansible.builtin.file:
     path: /etc/rancher/k3s
@@ -10,6 +20,8 @@
     src: config.yaml.j2
     dest: /etc/rancher/k3s/config.yaml
     mode: '0600'
+    backup: true
+  diff: false
 
 - name: Install K3s server or agent
   ansible.builtin.shell: |
@@ -18,3 +30,4 @@
   args:
     executable: /bin/bash
     creates: /usr/local/bin/k3s
+  when: not ansible_check_mode

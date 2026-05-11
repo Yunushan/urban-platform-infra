@@ -5,6 +5,9 @@ kind: Service
 metadata:
   name: zookeeper-headless
   namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+    app.kubernetes.io/name: zookeeper
 spec:
   clusterIP: None
   selector:
@@ -24,7 +27,7 @@ metadata:
   namespace: {{ include "cip.namespace" . }}
 spec:
   serviceName: zookeeper-headless
-  replicas: {{ .Values.messaging.kafka.zookeeper.replicas | default 3 }}
+  replicas: {{ include "cip.replicaCount" (list . (.Values.messaging.kafka.zookeeper.replicas | default 3)) }}
   selector:
     matchLabels:
       app.kubernetes.io/name: zookeeper
@@ -34,9 +37,11 @@ spec:
         app.kubernetes.io/name: zookeeper
         app.kubernetes.io/part-of: city-intersection-project
     spec:
+      {{- include "cip.podSpecDefaults" . | nindent 6 }}
       containers:
         - name: zookeeper
           image: {{ include "cip.image" (list . .Values.messaging.kafka.zookeeper.image) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy | quote }}
           command: ["/bin/bash", "-ec"]
           args:
             - |
@@ -70,6 +75,9 @@ kind: Service
 metadata:
   name: kafka-headless
   namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+    app.kubernetes.io/name: kafka
 spec:
   clusterIP: None
   selector:
@@ -87,9 +95,12 @@ kind: StatefulSet
 metadata:
   name: kafka
   namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+    app.kubernetes.io/name: kafka
 spec:
   serviceName: kafka-headless
-  replicas: {{ .Values.messaging.kafka.replicas | default 3 }}
+  replicas: {{ include "cip.replicaCount" (list . (.Values.messaging.kafka.replicas | default 3)) }}
   selector:
     matchLabels:
       app.kubernetes.io/name: kafka
@@ -99,9 +110,11 @@ spec:
         app.kubernetes.io/name: kafka
         app.kubernetes.io/part-of: city-intersection-project
     spec:
+      {{- include "cip.podSpecDefaults" . | nindent 6 }}
       containers:
         - name: kafka
           image: {{ include "cip.image" (list . .Values.messaging.kafka.image) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy | quote }}
           env:
             - name: POD_NAME
               valueFrom:
@@ -164,8 +177,11 @@ kind: Deployment
 metadata:
   name: kafka-ui
   namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+    app.kubernetes.io/name: kafka-ui
 spec:
-  replicas: {{ .Values.messaging.kafka.ui.replicas | default 2 }}
+  replicas: {{ include "cip.replicaCount" (list . (.Values.messaging.kafka.ui.replicas | default 2)) }}
   selector:
     matchLabels:
       app.kubernetes.io/name: kafka-ui
@@ -175,9 +191,11 @@ spec:
         app.kubernetes.io/name: kafka-ui
         app.kubernetes.io/part-of: city-intersection-project
     spec:
+      {{- include "cip.podSpecDefaults" . | nindent 6 }}
       containers:
         - name: kafka-ui
           image: {{ include "cip.image" (list . .Values.messaging.kafka.ui.image) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy | quote }}
           env:
             - name: KAFKA_CLUSTERS_0_NAME
               value: city-intersection

@@ -1,0 +1,79 @@
+---
+- name: Validate bootstrap inventory and operator intent
+  hosts: localhost
+  gather_facts: false
+  vars:
+    selected_cluster_engine: "{{ cluster_engine | default('rke2') }}"
+    supported_cluster_engines:
+      - rke2
+      - k3s
+      - microk8s
+      - docker
+      - raw
+  tasks:
+    - name: Validate selected cluster engine
+      ansible.builtin.assert:
+        that:
+          - selected_cluster_engine in supported_cluster_engines
+        fail_msg: "cluster_engine must be one of: {{ supported_cluster_engines | join(', ') }}"
+
+    - name: Validate inventory groups
+      ansible.builtin.assert:
+        that:
+          - (groups.get('cluster_nodes', []) | length) > 0
+          - selected_cluster_engine not in ['rke2', 'k3s'] or (groups.get('rke2_servers', []) | length) >= 1
+        fail_msg: "Inventory must define cluster_nodes and at least one rke2_servers host for Kubernetes engines."
+
+    - name: Validate RKE2 production inputs
+      ansible.builtin.assert:
+        that:
+          - (rke2_token | default('') | length) >= 16
+          - (rke2_token | default('') | regex_search('^CHANGE_ME')) is none
+          - (rke2_version | default('')) is match('^v[0-9]+\\.[0-9]+\\.[0-9]+\\+rke2r[0-9]+$')
+          - cluster_vip | default('') | length > 0
+          - cluster_domain | default('') | length > 0
+        fail_msg: "RKE2 requires a vaulted token, pinned rke2_version, cluster_vip, and cluster_domain."
+      no_log: true
+      when: selected_cluster_engine == 'rke2'
+
+    - name: Validate K3s production inputs
+      ansible.builtin.assert:
+        that:
+          - (k3s_token | default('') | length) >= 16
+          - (k3s_token | default('') | regex_search('^CHANGE_ME')) is none
+          - cluster_vip | default('') | length > 0
+          - cluster_domain | default('') | length > 0
+        fail_msg: "K3s requires a vaulted token, cluster_vip, and cluster_domain."
+      no_log: true
+      when: selected_cluster_engine == 'k3s'
+
+    - name: Validate load balancer secret inputs
+      ansible.builtin.assert:
+        that:
+          - keepalived_auth_pass | default('') | length > 0
+          - (keepalived_auth_pass | default('') | regex_search('^CHANGE_ME')) is none
+          - keepalived_auth_pass | default('') != 'changeMe'
+        fail_msg: "Keepalived auth password must be provided through inventory or vault."
+      no_log: true
+      when:
+        - selected_cluster_engine in ['rke2', 'k3s']
+        - (groups.get('load_balancers', []) | length) > 0
+
+- name: Validate target host readiness
+  hosts: cluster_nodes
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Validate host operating system for cluster bootstrap
+      ansible.builtin.assert:
+        that:
+          - ansible_system == 'Linux'
+        fail_msg: "Cluster bootstrap targets must be Linux hosts for rke2, k3s, microk8s, and docker profiles."
+      when: cluster_engine | default('rke2') in ['rke2', 'k3s', 'microk8s', 'docker']
+
+    - name: Validate node address variables
+      ansible.builtin.assert:
+        that:
+          - ansible_host | default('') | length > 0
+          - node_ip | default(ansible_host) | length > 0
+        fail_msg: "Each cluster node must define ansible_host and should define node_ip explicitly."

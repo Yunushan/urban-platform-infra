@@ -35,3 +35,22 @@ Install operators:
 make install-operators
 kubectl get crd | grep -E 'postgresql.cnpg|elastic'
 ```
+
+## PrometheusRule or ServiceMonitor resources not recognized
+
+Install kube-prometheus-stack before enabling `monitoring.enabled=true`:
+
+```bash
+make install-operators
+kubectl get crd | grep -E 'prometheusrules|servicemonitors'
+kubectl -n observability get pods,svc
+```
+
+## Alert fires without a matching dashboard
+
+Check the runbook first, then open the required dashboard list:
+
+```bash
+grep -A20 '^dashboards:' config/slo.yaml
+kubectl -n city-intersection get prometheusrules.monitoring.coreos.com
+```

@@ -1,0 +1,43 @@
+global:
+  environment: single-node
+  defaultReplicas: 1
+  replicaOverride: 1
+  cluster:
+    nodes: 1
+    vip: 192.0.2.11
+    domain: single-node.example
+  scheduling:
+    topologySpread: false
+    antiAffinity: disabled
+autoscaling:
+  enabled: false
+  default:
+    minReplicas: 1
+    maxReplicas: 1
+    targetCPUUtilizationPercentage: 70
+messaging:
+  kafka:
+    replicas: 1
+    zookeeper:
+      replicas: 1
+    ui:
+      replicas: 1
+  redis:
+    replicas: 1
+    sentinel:
+      enabled: false
+      replicas: 1
+databases:
+  defaultInstances: 1
+observability:
+  elasticsearch:
+    nodeSets:
+      - name: default
+        count: 1
+        storage: 50Gi
+  kibana:
+    count: 1
+  logstash:
+    replicas: 1
+zabbixAgent:
+  replicas: 1

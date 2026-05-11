@@ -3,7 +3,14 @@ global:
   environment: production
   imageRegistry: ''
   imagePullSecrets: []
+  imagePullPolicy: IfNotPresent
+  enableServiceLinks: false
   defaultReplicas: 3
+  replicaOverride: null
+  serviceAccount:
+    create: true
+    name: ''
+    automountServiceAccountToken: false
   cluster:
     engine: rke2
     nodes: 3
@@ -14,13 +21,25 @@ global:
     runAsNonRoot: true
     readOnlyRootFilesystem: false
     allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+      - ALL
+  podSecurityContext:
+    enabled: true
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
   scheduling:
     topologySpread: true
     antiAffinity: preferred
 namespace:
   create: true
   name: city-intersection
-  podSecurity: baseline
+  podSecurity:
+    enforce: baseline
+    audit: restricted
+    warn: restricted
+    version: latest
 ingress:
   enabled: true
   className: nginx
@@ -28,6 +47,39 @@ ingress:
   tls:
     enabled: false
     secretName: city-intersection-tls
+secretManagement:
+  enabled: false
+  provider: external-secrets
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault
+    kind: ClusterSecretStore
+  externalSecrets:
+    registryCredentials:
+      enabled: false
+      targetName: registry-credentials
+      type: kubernetes.io/dockerconfigjson
+      creationPolicy: Owner
+      immutable: true
+      data:
+      - secretKey: .dockerconfigjson
+        remoteRef:
+          key: example/city-intersection/registry/dockerconfigjson
+    ingressTls:
+      enabled: false
+      targetName: city-intersection-tls
+      type: kubernetes.io/tls
+      creationPolicy: Owner
+      immutable: false
+      data:
+      - secretKey: tls.crt
+        remoteRef:
+          key: example/city-intersection/ingress/tls
+          property: tls.crt
+      - secretKey: tls.key
+        remoteRef:
+          key: example/city-intersection/ingress/tls
+          property: tls.key
 autoscaling:
   enabled: true
   default:
@@ -36,8 +88,32 @@ autoscaling:
     targetCPUUtilizationPercentage: 70
 networkPolicy:
   enabled: true
+  defaultDeny:
+    enabled: true
+  sameNamespace:
+    enabled: true
+  ingress:
+    enabled: true
+    namespaces:
+    - ingress-nginx
+  dns:
+    enabled: true
+    namespace: kube-system
+    podLabels:
+      k8s-app: kube-dns
+  externalWeb:
+    enabled: true
+    cidrs:
+    - 0.0.0.0/0
+    ports:
+    - 80
+    - 443
 webserver:
   provider: nginx
+  service:
+    type: ClusterIP
+    annotations: {}
+    loadBalancerSourceRanges: []
   providers:
     nginx:
       enabled: true
@@ -118,7 +194,7 @@ messaging:
       replicas: 3
       image:
         repository: confluentinc/cp-zookeeper
-        tag: latest
+        tag: 7.5.0
       storage:
         size: 10Gi
         className: ''
@@ -127,7 +203,7 @@ messaging:
       replicas: 2
       image:
         repository: provectuslabs/kafka-ui
-        tag: latest
+        tag: v0.7.2
       port: 8080
   redis:
     enabled: true
@@ -428,7 +504,7 @@ databases:
       engine: timescaledb
       image:
         repository: timescale/timescaledb
-        tag: latest-pg16
+        tag: 2.26.4-pg16
       database: timeseries
       owner: timeseries
       instances: 3
@@ -488,6 +564,27 @@ observability:
   clickhouse:
     enabled: false
     replicas: 3
+monitoring:
+  enabled: false
+  prometheus:
+    releaseLabel: kube-prometheus-stack
+    ruleLabels: {}
+  prometheusRules:
+    enabled: true
+    evaluationInterval: 1m
+    runbookBaseUrl: https://example.com/runbooks/city-intersection
+    severity:
+      page: critical
+      ticket: warning
+  serviceMonitors:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+    targets: []
+  dashboards:
+    enabled: false
+    folder: city-intersection
 workloads:
   app-01:
     enabled: true
@@ -496,7 +593,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-01
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5013
@@ -532,7 +629,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-02
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5006
@@ -565,7 +662,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-03
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5019
@@ -601,7 +698,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-04
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5020
@@ -637,7 +734,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-05
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5004
@@ -670,7 +767,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-06
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5023
@@ -703,7 +800,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-07
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5036
@@ -736,7 +833,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-08
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5037
@@ -769,7 +866,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-09
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5009
@@ -802,7 +899,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-10
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5032
@@ -835,7 +932,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-11
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5040
@@ -868,7 +965,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-12
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5031
@@ -901,7 +998,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-13
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5010
@@ -934,7 +1031,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-14
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5024
@@ -967,7 +1064,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-15
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: tcp-range
       range:
@@ -1000,7 +1097,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-16
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5021
@@ -1033,7 +1130,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-17
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5035
@@ -1066,7 +1163,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-18
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5005
@@ -1099,7 +1196,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-19
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5001
@@ -1132,7 +1229,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-20
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5029
@@ -1165,7 +1262,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-21
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5030
@@ -1198,7 +1295,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-22
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5025
@@ -1231,7 +1328,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-23
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5027
@@ -1264,7 +1361,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-24
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5034
@@ -1297,7 +1394,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-25
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5008
@@ -1330,7 +1427,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-26
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5028
@@ -1363,7 +1460,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-27
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5000
@@ -1396,7 +1493,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-28
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5011
@@ -1429,7 +1526,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-29
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5007
@@ -1462,7 +1559,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-30
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5038
@@ -1495,7 +1592,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-31
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5026
@@ -1528,7 +1625,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-32
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5022
@@ -1561,7 +1658,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-33
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5002
@@ -1594,7 +1691,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-34
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5003
@@ -1627,7 +1724,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-35
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5033
@@ -1660,7 +1757,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-36
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5017
@@ -1693,7 +1790,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-37
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5015
@@ -1726,7 +1823,7 @@ workloads:
     replicas: 3
     image:
       repository: example-app-38
-      tag: latest
+      tag: '0.1.0'
     ports:
     - name: http
       containerPort: 5018
@@ -1756,7 +1853,7 @@ zabbixAgent:
   enabled: true
   image:
     repository: zabbix/zabbix-agent2
-    tag: latest
+    tag: ubuntu-7.0.25
   replicas: 3
   ports:
   - name: agent

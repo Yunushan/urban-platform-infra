@@ -1,0 +1,4 @@
+creation_rules:
+  - path_regex: ^secrets/.*\.sops\.ya?ml$
+    encrypted_regex: ^(data|stringData|password|token|key|secret|credentials|auth|connection)$
+    age: age1replacewithpublicrecipient0000000000000000000000000000000000000000000

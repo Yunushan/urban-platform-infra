@@ -6,7 +6,7 @@ x-defaults:
   - city-intersection
 services:
   app-01:
-    image: ${REGISTRY_PREFIX:-}example-app-01:latest
+    image: ${REGISTRY_PREFIX:-}example-app-01:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -18,7 +18,7 @@ services:
     - 5013:5013
     - 5021:5021
   app-02:
-    image: ${REGISTRY_PREFIX:-}example-app-02:latest
+    image: ${REGISTRY_PREFIX:-}example-app-02:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -29,7 +29,7 @@ services:
     ports:
     - 5006:5006
   app-03:
-    image: ${REGISTRY_PREFIX:-}example-app-03:latest
+    image: ${REGISTRY_PREFIX:-}example-app-03:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -41,7 +41,7 @@ services:
     - 5019:5019
     - 3000:3000
   app-04:
-    image: ${REGISTRY_PREFIX:-}example-app-04:latest
+    image: ${REGISTRY_PREFIX:-}example-app-04:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -53,7 +53,7 @@ services:
     - 5020:5020
     - 3001:3001
   app-05:
-    image: ${REGISTRY_PREFIX:-}example-app-05:latest
+    image: ${REGISTRY_PREFIX:-}example-app-05:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -64,7 +64,7 @@ services:
     ports:
     - 5004:5004
   app-06:
-    image: ${REGISTRY_PREFIX:-}example-app-06:latest
+    image: ${REGISTRY_PREFIX:-}example-app-06:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -75,7 +75,7 @@ services:
     ports:
     - 5023:5023
   app-07:
-    image: ${REGISTRY_PREFIX:-}example-app-07:latest
+    image: ${REGISTRY_PREFIX:-}example-app-07:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -86,7 +86,7 @@ services:
     ports:
     - 5036:5036
   app-08:
-    image: ${REGISTRY_PREFIX:-}example-app-08:latest
+    image: ${REGISTRY_PREFIX:-}example-app-08:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -97,7 +97,7 @@ services:
     ports:
     - 5037:5037
   app-09:
-    image: ${REGISTRY_PREFIX:-}example-app-09:latest
+    image: ${REGISTRY_PREFIX:-}example-app-09:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -108,7 +108,7 @@ services:
     ports:
     - 5009:5009
   app-10:
-    image: ${REGISTRY_PREFIX:-}example-app-10:latest
+    image: ${REGISTRY_PREFIX:-}example-app-10:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -119,7 +119,7 @@ services:
     ports:
     - 5032:5032
   app-11:
-    image: ${REGISTRY_PREFIX:-}example-app-11:latest
+    image: ${REGISTRY_PREFIX:-}example-app-11:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -130,7 +130,7 @@ services:
     ports:
     - 5040:5040
   app-12:
-    image: ${REGISTRY_PREFIX:-}example-app-12:latest
+    image: ${REGISTRY_PREFIX:-}example-app-12:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -141,7 +141,7 @@ services:
     ports:
     - 5031:5031
   app-13:
-    image: ${REGISTRY_PREFIX:-}example-app-13:latest
+    image: ${REGISTRY_PREFIX:-}example-app-13:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -152,7 +152,7 @@ services:
     ports:
     - 5010:5010
   app-14:
-    image: ${REGISTRY_PREFIX:-}example-app-14:latest
+    image: ${REGISTRY_PREFIX:-}example-app-14:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -163,7 +163,7 @@ services:
     ports:
     - 5024:5024
   app-15:
-    image: ${REGISTRY_PREFIX:-}example-app-15:latest
+    image: ${REGISTRY_PREFIX:-}example-app-15:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -174,7 +174,7 @@ services:
     ports:
     - 4000-4199:4000-4199
   app-16:
-    image: ${REGISTRY_PREFIX:-}example-app-16:latest
+    image: ${REGISTRY_PREFIX:-}example-app-16:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -185,7 +185,7 @@ services:
     ports:
     - 5021:5021
   app-17:
-    image: ${REGISTRY_PREFIX:-}example-app-17:latest
+    image: ${REGISTRY_PREFIX:-}example-app-17:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -196,7 +196,7 @@ services:
     ports:
     - 5035:5035
   app-18:
-    image: ${REGISTRY_PREFIX:-}example-app-18:latest
+    image: ${REGISTRY_PREFIX:-}example-app-18:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -207,7 +207,7 @@ services:
     ports:
     - 5005:5005
   app-19:
-    image: ${REGISTRY_PREFIX:-}example-app-19:latest
+    image: ${REGISTRY_PREFIX:-}example-app-19:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -218,7 +218,7 @@ services:
     ports:
     - 5001:5001
   app-20:
-    image: ${REGISTRY_PREFIX:-}example-app-20:latest
+    image: ${REGISTRY_PREFIX:-}example-app-20:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -229,7 +229,7 @@ services:
     ports:
     - 5029:5029
   app-21:
-    image: ${REGISTRY_PREFIX:-}example-app-21:latest
+    image: ${REGISTRY_PREFIX:-}example-app-21:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -240,7 +240,7 @@ services:
     ports:
     - 5030:5030
   app-22:
-    image: ${REGISTRY_PREFIX:-}example-app-22:latest
+    image: ${REGISTRY_PREFIX:-}example-app-22:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -251,7 +251,7 @@ services:
     ports:
     - 5025:5025
   app-23:
-    image: ${REGISTRY_PREFIX:-}example-app-23:latest
+    image: ${REGISTRY_PREFIX:-}example-app-23:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -262,7 +262,7 @@ services:
     ports:
     - 5027:5027
   app-24:
-    image: ${REGISTRY_PREFIX:-}example-app-24:latest
+    image: ${REGISTRY_PREFIX:-}example-app-24:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -273,7 +273,7 @@ services:
     ports:
     - 5034:5034
   app-25:
-    image: ${REGISTRY_PREFIX:-}example-app-25:latest
+    image: ${REGISTRY_PREFIX:-}example-app-25:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -284,7 +284,7 @@ services:
     ports:
     - 5008:5008
   app-26:
-    image: ${REGISTRY_PREFIX:-}example-app-26:latest
+    image: ${REGISTRY_PREFIX:-}example-app-26:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -295,7 +295,7 @@ services:
     ports:
     - 5028:5028
   app-27:
-    image: ${REGISTRY_PREFIX:-}example-app-27:latest
+    image: ${REGISTRY_PREFIX:-}example-app-27:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -306,7 +306,7 @@ services:
     ports:
     - 5000:5000
   app-28:
-    image: ${REGISTRY_PREFIX:-}example-app-28:latest
+    image: ${REGISTRY_PREFIX:-}example-app-28:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -317,7 +317,7 @@ services:
     ports:
     - 5011:5011
   app-29:
-    image: ${REGISTRY_PREFIX:-}example-app-29:latest
+    image: ${REGISTRY_PREFIX:-}example-app-29:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -328,7 +328,7 @@ services:
     ports:
     - 5007:5007
   app-30:
-    image: ${REGISTRY_PREFIX:-}example-app-30:latest
+    image: ${REGISTRY_PREFIX:-}example-app-30:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -339,7 +339,7 @@ services:
     ports:
     - 5038:5038
   app-31:
-    image: ${REGISTRY_PREFIX:-}example-app-31:latest
+    image: ${REGISTRY_PREFIX:-}example-app-31:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -350,7 +350,7 @@ services:
     ports:
     - 5026:5026
   app-32:
-    image: ${REGISTRY_PREFIX:-}example-app-32:latest
+    image: ${REGISTRY_PREFIX:-}example-app-32:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -361,7 +361,7 @@ services:
     ports:
     - 5022:5022
   app-33:
-    image: ${REGISTRY_PREFIX:-}example-app-33:latest
+    image: ${REGISTRY_PREFIX:-}example-app-33:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -372,7 +372,7 @@ services:
     ports:
     - 5002:5002
   app-34:
-    image: ${REGISTRY_PREFIX:-}example-app-34:latest
+    image: ${REGISTRY_PREFIX:-}example-app-34:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -383,7 +383,7 @@ services:
     ports:
     - 5003:5003
   app-35:
-    image: ${REGISTRY_PREFIX:-}example-app-35:latest
+    image: ${REGISTRY_PREFIX:-}example-app-35:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -394,7 +394,7 @@ services:
     ports:
     - 5033:5033
   app-36:
-    image: ${REGISTRY_PREFIX:-}example-app-36:latest
+    image: ${REGISTRY_PREFIX:-}example-app-36:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -405,7 +405,7 @@ services:
     ports:
     - 5017:5017
   app-37:
-    image: ${REGISTRY_PREFIX:-}example-app-37:latest
+    image: ${REGISTRY_PREFIX:-}example-app-37:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -416,7 +416,7 @@ services:
     ports:
     - 5015:5015
   app-38:
-    image: ${REGISTRY_PREFIX:-}example-app-38:latest
+    image: ${REGISTRY_PREFIX:-}example-app-38:0.1.0
     restart: unless-stopped
     networks:
     - city-intersection
@@ -437,7 +437,7 @@ services:
     deploy:
       replicas: 3
   zookeeper:
-    image: confluentinc/cp-zookeeper:latest
+    image: confluentinc/cp-zookeeper:7.5.0
     restart: unless-stopped
     environment:
     - ZOOKEEPER_CLIENT_PORT=2181
@@ -463,7 +463,7 @@ services:
     networks:
     - city-intersection
   kafka-ui:
-    image: provectuslabs/kafka-ui:latest
+    image: provectuslabs/kafka-ui:v0.7.2
     restart: unless-stopped
     ports:
     - 8080:8080
@@ -513,7 +513,7 @@ services:
     networks:
     - city-intersection
   zabbix-agent2:
-    image: zabbix/zabbix-agent2:latest
+    image: zabbix/zabbix-agent2:ubuntu-7.0.25
     restart: unless-stopped
     ports:
     - 10050:10050
@@ -741,7 +741,7 @@ services:
     networks:
     - city-intersection
   timescaledb:
-    image: timescale/timescaledb:latest-pg16
+    image: timescale/timescaledb:2.26.4-pg16
     restart: unless-stopped
     ports:
     - 5448:5432

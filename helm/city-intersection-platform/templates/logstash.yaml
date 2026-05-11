@@ -9,7 +9,7 @@ metadata:
     {{- include "cip.labels" . | nindent 4 }}
     app.kubernetes.io/name: logstash
 spec:
-  replicas: {{ .Values.observability.logstash.replicas | default 2 }}
+  replicas: {{ include "cip.replicaCount" (list . (.Values.observability.logstash.replicas | default 2)) }}
   selector:
     matchLabels:
       app.kubernetes.io/name: logstash
@@ -19,9 +19,11 @@ spec:
         app.kubernetes.io/name: logstash
         app.kubernetes.io/part-of: city-intersection-project
     spec:
+      {{- include "cip.podSpecDefaults" . | nindent 6 }}
       containers:
         - name: logstash
           image: {{ include "cip.image" (list . .Values.observability.logstash.image) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy | quote }}
           ports:
             {{- range .Values.observability.logstash.ports }}
             - name: {{ .name | quote }}
@@ -38,6 +40,9 @@ kind: Service
 metadata:
   name: logstash
   namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+    app.kubernetes.io/name: logstash
 spec:
   selector:
     app.kubernetes.io/name: logstash

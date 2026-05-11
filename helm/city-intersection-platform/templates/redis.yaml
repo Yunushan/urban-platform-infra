@@ -21,6 +21,9 @@ kind: Service
 metadata:
   name: redis-headless
   namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+    app.kubernetes.io/name: redis
 spec:
   clusterIP: None
   selector:
@@ -36,9 +39,12 @@ kind: StatefulSet
 metadata:
   name: redis
   namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+    app.kubernetes.io/name: redis
 spec:
   serviceName: redis-headless
-  replicas: {{ .Values.messaging.redis.replicas | default 3 }}
+  replicas: {{ include "cip.replicaCount" (list . (.Values.messaging.redis.replicas | default 3)) }}
   selector:
     matchLabels:
       app.kubernetes.io/name: redis
@@ -48,9 +54,11 @@ spec:
         app.kubernetes.io/name: redis
         app.kubernetes.io/part-of: city-intersection-project
     spec:
+      {{- include "cip.podSpecDefaults" . | nindent 6 }}
       containers:
         - name: redis
           image: {{ include "cip.image" (list . .Values.messaging.redis.image) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy | quote }}
           command: ["/bin/sh", "-ec"]
           args:
             - |
@@ -69,6 +77,7 @@ spec:
               mountPath: /data
         - name: sentinel
           image: {{ include "cip.image" (list . .Values.messaging.redis.image) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy | quote }}
           command: ["redis-sentinel", "/config/sentinel.conf"]
           ports:
             - name: sentinel

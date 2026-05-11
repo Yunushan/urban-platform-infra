@@ -16,8 +16,19 @@ repositories:
     url: https://opensearch-project.github.io/helm-charts
   - name: bitnami
     url: https://charts.bitnami.com/bitnami
+  - name: external-secrets
+    url: https://charts.external-secrets.io
 
 releases:
+  - name: external-secrets
+    namespace: external-secrets
+    chart: external-secrets/external-secrets
+    version: 2.3.0
+    installed: {{ env "INSTALL_EXTERNAL_SECRETS" | default "false" }}
+    createNamespace: true
+    values:
+      - installCRDs: true
+
   - name: cert-manager
     namespace: cert-manager
     chart: jetstack/cert-manager

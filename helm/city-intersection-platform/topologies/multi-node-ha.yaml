@@ -1,0 +1,43 @@
+global:
+  environment: production
+  defaultReplicas: 3
+  replicaOverride: null
+  cluster:
+    nodes: 5
+    vip: 192.0.2.10
+    domain: city-intersection.example
+  scheduling:
+    topologySpread: true
+    antiAffinity: preferred
+autoscaling:
+  enabled: true
+  default:
+    minReplicas: 3
+    maxReplicas: 15
+    targetCPUUtilizationPercentage: 70
+messaging:
+  kafka:
+    replicas: 3
+    zookeeper:
+      replicas: 3
+    ui:
+      replicas: 2
+  redis:
+    replicas: 3
+    sentinel:
+      enabled: true
+      replicas: 3
+databases:
+  defaultInstances: 3
+observability:
+  elasticsearch:
+    nodeSets:
+      - name: default
+        count: 3
+        storage: 100Gi
+  kibana:
+    count: 2
+  logstash:
+    replicas: 2
+zabbixAgent:
+  replicas: 3

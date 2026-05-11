@@ -25,6 +25,14 @@
   <a href="#what-this-repository-deploys">Workloads</a> •
   <a href="#changeable-defaults">Change Defaults</a> •
   <a href="docs/high-availability.md">HA Guide</a> •
+  <a href="docs/bootstrap-safety.md">Bootstrap Safety</a> •
+  <a href="docs/helm-hardening.md">Helm Hardening</a> •
+  <a href="docs/kubernetes-security-posture.md">Kubernetes Security</a> •
+  <a href="docs/deployment-topologies.md">Topologies</a> •
+  <a href="docs/secrets-management.md">Secrets</a> •
+  <a href="docs/supply-chain.md">Supply Chain</a> •
+  <a href="docs/image-governance.md">Images</a> •
+  <a href="docs/observability-slo.md">SLOs</a> •
   <a href="docs/platform-support.md">Platform Support</a> •
   <a href="docs/repository-setup.md">GitHub/GitLab</a> •
   <a href="docs/release-guide.md">Release Guide</a> •
@@ -49,8 +57,12 @@ cp .env.example .env
 $EDITOR inventories/prod/hosts.yml .env
 
 make validate
-make bootstrap ENV=prod ENGINE=rke2
-make install-cluster ENV=prod ENGINE=rke2
+make lint
+make preflight ENV=prod ENGINE=rke2
+make bootstrap-check ENV=prod ENGINE=rke2
+make install-cluster-check ENV=prod ENGINE=rke2
+make bootstrap ENV=prod ENGINE=rke2 CONFIRM_PROD=true
+make install-cluster ENV=prod ENGINE=rke2 CONFIRM_PROD=true
 make install-operators
 make deploy ENV=prod
 make status
@@ -83,12 +95,21 @@ By default the Kubernetes profile deploys:
 | Time sync | Chrony | Installed on every node |
 | Web gateway | nginx `1.18` | 3 replicas, swappable with Apache HTTPD, Tomcat, or Traefik |
 | Application services | Sanitized `example-app-*` images | 3 replicas, PDB, HPA, anti-affinity/topology spread |
-| Kafka | `confluentinc/cp-kafka:7.5.0` + `confluentinc/cp-zookeeper:latest` | 3 brokers, 3 ZooKeeper pods, Kafka UI |
+| Kafka | `confluentinc/cp-kafka:7.5.0` + `confluentinc/cp-zookeeper:7.5.0` | 3 brokers, 3 ZooKeeper pods, Kafka UI |
 | Redis | `redis:6.2` | 3 Redis pods + Sentinel scaffolding |
-| PostgreSQL/PostGIS/TimescaleDB | `postgres:16.2`, `postgis/postgis:16-3.4`, `timescale/timescaledb:latest-pg16` | CloudNativePG custom resources with 3 instances per database |
+| PostgreSQL/PostGIS/TimescaleDB | `postgres:16.2`, `postgis/postgis:16-3.4`, `timescale/timescaledb:2.26.4-pg16` | CloudNativePG custom resources with 3 instances per database |
 | Observability | Elasticsearch/Kibana/Logstash `8.12.0`, Grafana option | ECK custom resources for Elasticsearch/Kibana, Logstash replicas |
 | Optional observability | Grafana Loki, OpenSearch, Graylog, ClickHouse | Switchable by Helmfile values/profile |
-| Agent monitoring | `zabbix/zabbix-agent2:latest` | 3 replicas |
+| Agent monitoring | `zabbix/zabbix-agent2:ubuntu-7.0.25` | 3 replicas |
+
+Supported topology profiles:
+
+- `single-node`: one VM/server, non-HA.
+- `two-node-lab`: one server plus one worker, lab/staging only.
+- `three-node-ha`: default production HA.
+- `multi-node-ha`: three or five control-plane nodes plus scalable workers.
+
+Topology contracts are in [`config/deployment-topologies.yaml`](config/deployment-topologies.yaml), Helm overrides are in [`helm/city-intersection-platform/topologies/`](helm/city-intersection-platform/topologies/), and starter inventories are in [`inventories/topologies/`](inventories/topologies/).
 
 The image and port inventory is stored in [`config/services.catalog.yaml`](config/services.catalog.yaml). Helm values are stored in [`helm/city-intersection-platform/values.yaml`](helm/city-intersection-platform/values.yaml).
 
@@ -139,11 +160,16 @@ Supported database profiles are defined in [`config/databases.catalog.yaml`](con
 
 1. Replace example IP addresses in `inventories/prod/hosts.yml`.
 2. Set a real VIP and DNS record in `.env` and `helm/.../values.yaml`.
-3. Push local/private images to a registry or preload them onto all RKE2 nodes with `scripts/images/preload-rke2.sh`.
-4. Enable TLS and cert-manager in `deploy/helmfile.yaml`.
-5. Put secrets in SOPS/External Secrets/Sealed Secrets. Do not commit database passwords.
-6. Choose storage classes for CloudNativePG, Kafka, Redis, Elasticsearch, and ClickHouse/OpenSearch if enabled.
-7. Run `make validate`, `make policy`, and `make deploy-dry-run` before production deploy.
+3. Vault bootstrap tokens and keepalived shared secrets before running mutating Ansible targets.
+4. Pin `rke2_version` in production inventory.
+5. Push local/private images to a registry or preload them onto all RKE2 nodes with `scripts/images/preload-rke2.sh`.
+6. Enable TLS and cert-manager in `deploy/helmfile.yaml`.
+7. Review `config/secrets.contract.yaml` and put secret values in SOPS, External Secrets, Sealed Secrets, or Vault.
+8. Choose storage classes for CloudNativePG, Kafka, Redis, Elasticsearch, and ClickHouse/OpenSearch if enabled.
+9. Run `make lint`, `make validate`, `make policy`, `make deploy-dry-run`, and Ansible check targets before production deploy.
+10. Run `make image-policy` and use private-registry digest pins for production image overrides.
+11. Review `config/slo.yaml`, install kube-prometheus-stack, and enable `monitoring.enabled=true` only after Prometheus Operator CRDs exist.
+12. Release only signed/evidenced chart artifacts with `make release-evidence`, SHA-256 checksums, SBOM metadata, and GitHub artifact attestations.
 
 ## License
 

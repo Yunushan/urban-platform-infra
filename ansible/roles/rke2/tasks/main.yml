@@ -1,4 +1,15 @@
 ---
+- name: Validate RKE2 role inputs
+  ansible.builtin.assert:
+    that:
+      - (rke2_token | default('') | length) >= 16
+      - (rke2_token | default('') | regex_search('^CHANGE_ME')) is none
+      - (rke2_version | default('')) is match('^v[0-9]+\\.[0-9]+\\.[0-9]+\\+rke2r[0-9]+$')
+      - cluster_vip | default('') | length > 0
+      - cluster_domain | default('') | length > 0
+    fail_msg: "RKE2 role requires a vaulted token, pinned rke2_version, cluster_vip, and cluster_domain."
+  no_log: true
+
 - name: Create RKE2 config directory
   ansible.builtin.file:
     path: /etc/rancher/rke2
@@ -10,6 +21,9 @@
     src: config.yaml.j2
     dest: /etc/rancher/rke2/config.yaml
     mode: '0600'
+    backup: true
+  diff: false
+  notify: Restart rke2-server
   when: inventory_hostname in groups['rke2_servers']
 
 - name: Render RKE2 agent config
@@ -17,28 +31,42 @@
     src: agent-config.yaml.j2
     dest: /etc/rancher/rke2/config.yaml
     mode: '0600'
+    backup: true
+  diff: false
+  notify: Restart rke2-agent
   when: inventory_hostname in groups.get('rke2_agents', [])
 
 - name: Install RKE2 server
   ansible.builtin.shell: |
     set -euo pipefail
-    curl -sfL https://get.rke2.io | INSTALL_RKE2_TYPE=server INSTALL_RKE2_VERSION="{{ rke2_version | default('') }}" sh -
+    curl -sfL https://get.rke2.io | sh -
   args:
     executable: /bin/bash
     creates: /usr/local/bin/rke2
-  when: inventory_hostname in groups['rke2_servers']
+  environment:
+    INSTALL_RKE2_TYPE: server
+    INSTALL_RKE2_VERSION: "{{ rke2_version }}"
+  when:
+    - inventory_hostname in groups['rke2_servers']
+    - not ansible_check_mode
 
 - name: Install RKE2 agent
   ansible.builtin.shell: |
     set -euo pipefail
-    curl -sfL https://get.rke2.io | INSTALL_RKE2_TYPE=agent INSTALL_RKE2_VERSION="{{ rke2_version | default('') }}" sh -
+    curl -sfL https://get.rke2.io | sh -
   args:
     executable: /bin/bash
     creates: /usr/local/bin/rke2
-  when: inventory_hostname in groups.get('rke2_agents', [])
+  environment:
+    INSTALL_RKE2_TYPE: agent
+    INSTALL_RKE2_VERSION: "{{ rke2_version }}"
+  when:
+    - inventory_hostname in groups.get('rke2_agents', [])
+    - not ansible_check_mode
 
 - name: Enable RKE2 services
   ansible.builtin.service:
     name: "{{ 'rke2-server' if inventory_hostname in groups['rke2_servers'] else 'rke2-agent' }}"
     enabled: true
     state: started
+  when: not ansible_check_mode

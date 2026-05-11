@@ -12,7 +12,7 @@ metadata:
     app.kubernetes.io/name: webserver-{{ $providerName }}
     city-intersection.io/component: webserver
 spec:
-  replicas: {{ $provider.replicas | default 3 }}
+  replicas: {{ include "cip.replicaCount" (list . ($provider.replicas | default 3)) }}
   selector:
     matchLabels:
       app.kubernetes.io/name: webserver-{{ $providerName }}
@@ -22,10 +22,27 @@ spec:
         app.kubernetes.io/name: webserver-{{ $providerName }}
         app.kubernetes.io/part-of: city-intersection-project
     spec:
+      serviceAccountName: {{ include "cip.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.global.serviceAccount.automountServiceAccountToken | default false }}
+      enableServiceLinks: {{ .Values.global.enableServiceLinks | default false }}
+      {{- if .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range .Values.global.imagePullSecrets }}
+        - name: {{ . }}
+        {{- end }}
+      {{- end }}
+      {{- if .Values.global.scheduling.topologySpread }}
+      topologySpreadConstraints:
+        {{- include "cip.topologySpreadConstraints" (list . (printf "webserver-%s" $providerName)) | nindent 8 }}
+      {{- end }}
       containers:
         - name: webserver
           image: {{ include "cip.image" (list . $provider.image) | quote }}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: {{ $provider.imagePullPolicy | default .Values.global.imagePullPolicy | quote }}
+          {{- if $provider.securityContext }}
+          securityContext:
+            {{- toYaml $provider.securityContext | nindent 12 }}
+          {{- end }}
           ports:
             {{- range $p := $provider.ports }}
             - name: {{ $p.name | quote }}
@@ -49,8 +66,16 @@ metadata:
   namespace: {{ include "cip.namespace" . }}
   labels:
     app.kubernetes.io/name: webserver-{{ $providerName }}
+  {{- with .Values.webserver.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
-  type: LoadBalancer
+  type: {{ .Values.webserver.service.type | default "ClusterIP" }}
+  {{- with .Values.webserver.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     app.kubernetes.io/name: webserver-{{ $providerName }}
   ports:

@@ -4,10 +4,20 @@
 - Keep private data, customer data, internal inventories, and confidential disclosure material out of Git.
 - Use `example.com`, `.example` names, and RFC 5737 documentation IP ranges in samples.
 - Use SOPS/age, Sealed Secrets, External Secrets, Vault, or cloud secret managers.
+- Keep only secret contracts and encrypted/externally referenced secret material in Git.
+- Do not commit plain Kubernetes `Secret` manifests.
 - Rotate bootstrap tokens after cluster creation.
+- Run Ansible preflight and check-mode targets before mutating production hosts.
 - Use private registries and imagePullSecrets.
+- Block mutable image tags in deployment defaults and production overrides; promote images by digest.
+- Release chart artifacts only with SHA-256 checksums, SBOM metadata, and provenance attestations.
+- Avoid floating GitHub Action refs such as `@main` and `@master`; promote reviewed full-length SHA pins for regulated production.
 - Enable TLS for ingress and internal services where required.
 - Set NetworkPolicies to least privilege.
+- Use namespace Pod Security Admission labels; start with `baseline` enforcement and `restricted` audit/warn for compatibility discovery.
+- Disable service account token automount unless a workload explicitly needs Kubernetes API access.
+- Disable pod service links by default to avoid injecting cluster service inventory into workload environments.
 - Run `make policy` and CI scans before merge.
-- Avoid `latest` tags for third-party production images unless deliberately accepted.
+- Run `make image-policy` before release or production deployment.
+- Keep SLOs and runbooks public-safe; never place private endpoints, customer data, or incident disclosure details in observability configs.
 - Restrict Kubernetes API and VIP access to management networks.

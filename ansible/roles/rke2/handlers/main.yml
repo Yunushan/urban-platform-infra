@@ -1,0 +1,16 @@
+---
+- name: Restart rke2-server
+  ansible.builtin.service:
+    name: rke2-server
+    state: restarted
+  when:
+    - not ansible_check_mode
+    - inventory_hostname in groups['rke2_servers']
+
+- name: Restart rke2-agent
+  ansible.builtin.service:
+    name: rke2-agent
+    state: restarted
+  when:
+    - not ansible_check_mode
+    - inventory_hostname in groups.get('rke2_agents', [])

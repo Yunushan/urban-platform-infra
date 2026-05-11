@@ -12,7 +12,7 @@ metadata:
     app.kubernetes.io/name: {{ $name }}
     city-intersection.io/database-engine: {{ $db.engine | quote }}
 spec:
-  instances: {{ $db.instances | default $.Values.databases.defaultInstances }}
+  instances: {{ include "cip.replicaCount" (list $ ($db.instances | default $.Values.databases.defaultInstances)) }}
   imageName: {{ include "cip.image" (list $ $db.image) | quote }}
   primaryUpdateStrategy: unsupervised
   bootstrap:

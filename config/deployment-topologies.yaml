@@ -1,0 +1,69 @@
+default: three-node-ha
+topologies:
+  single-node:
+    description: One VM or one physical server for development, demos, or constrained non-HA deployments.
+    production: false
+    minimumNodes: 1
+    controlPlaneNodes: 1
+    workerNodes: 0
+    loadBalancerNodes: 0
+    recommendedEngines:
+      - rke2
+      - k3s
+      - docker
+    helmValues: helm/city-intersection-platform/topologies/single-node.yaml
+    inventory: inventories/topologies/single-node/hosts.yml
+    notes:
+      - No quorum or host-level high availability.
+      - Set cluster_vip to the node address unless an external load balancer is provided.
+      - Use reduced replicas and disable autoscaling by default.
+  two-node-lab:
+    description: Two-node lab topology using one server and one agent; not recommended for embedded-etcd production HA.
+    production: false
+    minimumNodes: 2
+    controlPlaneNodes: 1
+    workerNodes: 1
+    loadBalancerNodes: 0
+    recommendedEngines:
+      - rke2
+      - k3s
+    helmValues: helm/city-intersection-platform/topologies/two-node-lab.yaml
+    inventory: inventories/topologies/two-node-lab/hosts.yml
+    notes:
+      - Prefer one control-plane server and one worker/agent.
+      - For two control-plane nodes, use K3s with an external datastore instead of embedded etcd.
+      - Treat this as staging/lab, not production HA.
+  three-node-ha:
+    description: Default production topology with three control-plane/load-balancer nodes.
+    production: true
+    default: true
+    minimumNodes: 3
+    controlPlaneNodes: 3
+    workerNodes: 0
+    loadBalancerNodes: 3
+    recommendedEngines:
+      - rke2
+      - k3s
+      - microk8s
+    helmValues: helm/city-intersection-platform/topologies/three-node-ha.yaml
+    inventory: inventories/topologies/three-node-ha/hosts.yml
+    notes:
+      - Best-supported default for RKE2 embedded-etcd HA.
+      - Keep an odd number of control-plane/etcd members.
+      - Add worker nodes when application capacity grows.
+  multi-node-ha:
+    description: Production HA topology with three or five control-plane nodes plus scalable workers.
+    production: true
+    minimumNodes: 4
+    controlPlaneNodes: 3
+    workerNodes: scalable
+    loadBalancerNodes: 3
+    recommendedEngines:
+      - rke2
+      - k3s
+    helmValues: helm/city-intersection-platform/topologies/multi-node-ha.yaml
+    inventory: inventories/topologies/multi-node-ha/hosts.yml
+    notes:
+      - Keep control-plane count odd, normally 3 or 5.
+      - Scale application capacity through rke2_agents.
+      - Increase replica counts intentionally after capacity testing.

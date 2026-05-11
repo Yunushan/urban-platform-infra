@@ -1,0 +1,32 @@
+{{- if and .Values.monitoring.enabled .Values.monitoring.serviceMonitors.enabled }}
+{{- $namespace := include "cip.namespace" . -}}
+{{- range .Values.monitoring.serviceMonitors.targets }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .name }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "cip.labels" $ | nindent 4 }}
+    app.kubernetes.io/name: {{ .name }}
+    release: {{ $.Values.monitoring.prometheus.releaseLabel | quote }}
+    {{- with $.Values.monitoring.serviceMonitors.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ $namespace }}
+  selector:
+    matchLabels:
+      {{- toYaml .selector.matchLabels | nindent 6 }}
+  endpoints:
+    {{- range .endpoints }}
+    - port: {{ .port | quote }}
+      path: {{ .path | default "/metrics" | quote }}
+      interval: {{ .interval | default $.Values.monitoring.serviceMonitors.interval | quote }}
+      scrapeTimeout: {{ .scrapeTimeout | default $.Values.monitoring.serviceMonitors.scrapeTimeout | quote }}
+    {{- end }}
+{{- end }}
+{{- end }}

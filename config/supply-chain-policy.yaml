@@ -1,0 +1,25 @@
+policy:
+  nodeLtsMajor: 24
+  releaseIntegrity:
+    requireChartVersionMatchesTag: true
+    requireChecksums: true
+    requireSbom: true
+    requireGithubArtifactAttestations: true
+    requireOidcForSigning: true
+  githubActions:
+    disallowFloatingRefs:
+      - master
+      - main
+    preferFullLengthShaPins: true
+    allowedTaggedActionOwners:
+      - actions
+      - azure
+      - aquasecurity
+  dependencyReview:
+    enabledForPullRequests: true
+    failOnSeverity: high
+  releaseArtifacts:
+    chartPackage: dist/city-intersection-platform-<version>.tgz
+    renderedManifest: dist/rendered.yaml
+    sbom: dist/city-intersection-platform.spdx.json
+    checksums: dist/SHA256SUMS

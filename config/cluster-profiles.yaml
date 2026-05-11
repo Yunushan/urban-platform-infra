@@ -1,4 +1,6 @@
 default: rke2
+defaultTopology: three-node-ha
+topologyCatalog: config/deployment-topologies.yaml
 profiles:
   rke2:
     enabled: true

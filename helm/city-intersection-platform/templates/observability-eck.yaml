@@ -13,7 +13,7 @@ spec:
   nodeSets:
     {{- range .Values.observability.elasticsearch.nodeSets }}
     - name: {{ .name }}
-      count: {{ .count }}
+      count: {{ include "cip.replicaCount" (list $ .count) }}
       config:
         node.store.allow_mmap: false
       volumeClaimTemplates:
@@ -36,7 +36,7 @@ metadata:
 spec:
   version: {{ .Values.observability.kibana.version | quote }}
   image: {{ include "cip.image" (list . .Values.observability.kibana.image) | quote }}
-  count: {{ .Values.observability.kibana.count | default 2 }}
+  count: {{ include "cip.replicaCount" (list . (.Values.observability.kibana.count | default 2)) }}
   elasticsearchRef:
     name: {{ .Values.observability.elasticsearch.name }}
   http:

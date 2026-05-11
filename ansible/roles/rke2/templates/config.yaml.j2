@@ -3,7 +3,8 @@ tls-san:
   - "{{ cluster_vip }}"
   - "{{ cluster_domain }}"
 node-ip: "{{ node_ip | default(ansible_host) }}"
-write-kubeconfig-mode: "0644"
+write-kubeconfig-mode: "0600"
+secrets-encryption: true
 cni: canal
 cluster-cidr: "{{ pod_cidr | default('10.42.0.0/16') }}"
 service-cidr: "{{ service_cidr | default('10.43.0.0/16') }}"

@@ -1,0 +1,59 @@
+policy:
+  requireExplicitTags: true
+  disallowMutableTags:
+    - latest
+    - latest-pg16
+    - latest-pg17
+  requireDigestsForProduction: true
+  defaultApplicationTag: 0.1.0
+  approvedRuntimeImages:
+    - repository: nginx
+      tag: '1.18'
+      owner: webserver
+    - repository: httpd
+      tag: '2.4'
+      owner: webserver
+    - repository: tomcat
+      tag: '10.1'
+      owner: webserver
+    - repository: traefik
+      tag: v3.1
+      owner: webserver
+    - repository: confluentinc/cp-kafka
+      tag: 7.5.0
+      owner: messaging
+    - repository: confluentinc/cp-zookeeper
+      tag: 7.5.0
+      owner: messaging
+    - repository: provectuslabs/kafka-ui
+      tag: v0.7.2
+      owner: messaging
+    - repository: redis
+      tag: '6.2'
+      owner: messaging
+    - repository: postgres
+      tag: '16.2'
+      owner: database
+    - repository: postgis/postgis
+      tag: 16-3.4
+      owner: database
+    - repository: timescale/timescaledb
+      tag: 2.26.4-pg16
+      owner: database
+    - repository: elasticsearch
+      tag: 8.12.0
+      owner: observability
+    - repository: kibana
+      tag: 8.12.0
+      owner: observability
+    - repository: logstash
+      tag: 8.12.0
+      owner: observability
+    - repository: zabbix/zabbix-agent2
+      tag: ubuntu-7.0.25
+      owner: monitoring
+  productionRequirements:
+    - Mirror third-party images into an approved private registry before production deployment.
+    - Use digest pins in production override files after image promotion.
+    - Attach SBOM and vulnerability scan evidence to promoted application images.
+    - Keep placeholder example-app images sanitized; replace them with private application images before real deployment.

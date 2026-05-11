@@ -1,8 +1,13 @@
 ---
+- import_playbook: preflight.yml
+
 - name: Bootstrap city-intersection cluster nodes
   hosts: cluster_nodes
   become: true
   gather_facts: true
+  any_errors_fatal: true
+  force_handlers: true
+  serial: "{{ bootstrap_serial | default('50%') }}"
   roles:
     - role: common
     - role: chrony
@@ -11,5 +16,8 @@
   hosts: load_balancers
   become: true
   gather_facts: true
+  any_errors_fatal: true
+  force_handlers: true
+  serial: 1
   roles:
     - role: haproxy_keepalived

@@ -1,5 +1,6 @@
 token: "{{ k3s_token }}"
 node-ip: "{{ node_ip | default(ansible_host) }}"
+write-kubeconfig-mode: "0600"
 tls-san:
   - "{{ cluster_vip }}"
   - "{{ cluster_domain }}"

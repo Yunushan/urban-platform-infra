@@ -5,7 +5,10 @@ metadata:
   name: {{ include "cip.namespace" . }}
   labels:
     {{- include "cip.labels" . | nindent 4 }}
-    pod-security.kubernetes.io/enforce: {{ .Values.namespace.podSecurity | default "baseline" | quote }}
-    pod-security.kubernetes.io/audit: {{ .Values.namespace.podSecurity | default "baseline" | quote }}
-    pod-security.kubernetes.io/warn: {{ .Values.namespace.podSecurity | default "baseline" | quote }}
+    pod-security.kubernetes.io/enforce: {{ .Values.namespace.podSecurity.enforce | default "baseline" | quote }}
+    pod-security.kubernetes.io/audit: {{ .Values.namespace.podSecurity.audit | default "restricted" | quote }}
+    pod-security.kubernetes.io/warn: {{ .Values.namespace.podSecurity.warn | default "restricted" | quote }}
+    pod-security.kubernetes.io/enforce-version: {{ .Values.namespace.podSecurity.version | default "latest" | quote }}
+    pod-security.kubernetes.io/audit-version: {{ .Values.namespace.podSecurity.version | default "latest" | quote }}
+    pod-security.kubernetes.io/warn-version: {{ .Values.namespace.podSecurity.version | default "latest" | quote }}
 {{- end }}

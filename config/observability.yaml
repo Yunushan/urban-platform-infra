@@ -1,4 +1,13 @@
 default: elasticsearch
+retention:
+  metrics: 30d
+  logs: 30d
+  traces: 7d
+alerting:
+  defaultSeverity: warning
+  pageSeverity: critical
+  route: platform-on-call
+  runbooks: docs/runbooks.md
 profiles:
   grafana:
     enabled: true
@@ -42,3 +51,10 @@ pipelines:
   - vector|fluent-bit
   - clickhouse
   - grafana
+dashboards:
+  required:
+  - cluster-capacity
+  - workload-availability
+  - data-dependencies
+  - ingress-and-edge
+  - release-and-deployments

@@ -1,0 +1,43 @@
+global:
+  environment: two-node-lab
+  defaultReplicas: 2
+  replicaOverride: 2
+  cluster:
+    nodes: 2
+    vip: 192.0.2.21
+    domain: two-node-lab.example
+  scheduling:
+    topologySpread: true
+    antiAffinity: preferred
+autoscaling:
+  enabled: true
+  default:
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
+messaging:
+  kafka:
+    replicas: 2
+    zookeeper:
+      replicas: 2
+    ui:
+      replicas: 2
+  redis:
+    replicas: 2
+    sentinel:
+      enabled: true
+      replicas: 2
+databases:
+  defaultInstances: 2
+observability:
+  elasticsearch:
+    nodeSets:
+      - name: default
+        count: 2
+        storage: 75Gi
+  kibana:
+    count: 2
+  logstash:
+    replicas: 2
+zabbixAgent:
+  replicas: 2

@@ -1,0 +1,14 @@
+---
+extends: default
+
+ignore: |
+  helm/*/templates/
+  deploy/helmfile.yaml
+
+rules:
+  document-start: disable
+  line-length:
+    max: 160
+    level: warning
+  truthy:
+    allowed-values: ["true", "false", "on", "off"]

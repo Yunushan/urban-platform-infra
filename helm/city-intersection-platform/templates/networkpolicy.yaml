@@ -1,9 +1,27 @@
 {{- if .Values.networkPolicy.enabled }}
+{{- if .Values.networkPolicy.defaultDeny.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: city-intersection-default
+  name: city-intersection-default-deny
   namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+{{- end }}
+{{- if .Values.networkPolicy.sameNamespace.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: city-intersection-same-namespace
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
 spec:
   podSelector: {}
   policyTypes:
@@ -12,25 +30,83 @@ spec:
   ingress:
     - from:
         - podSelector: {}
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ingress-nginx
   egress:
     - to:
         - podSelector: {}
+{{- end }}
+{{- if and .Values.networkPolicy.ingress.enabled .Values.networkPolicy.ingress.namespaces }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: city-intersection-ingress-controller
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        {{- range .Values.networkPolicy.ingress.namespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . | quote }}
+        {{- end }}
+{{- end }}
+{{- if .Values.networkPolicy.dns.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: city-intersection-dns-egress
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
     - to:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.dns.namespace | quote }}
+          {{- with .Values.networkPolicy.dns.podLabels }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
       ports:
         - protocol: UDP
           port: 53
         - protocol: TCP
           port: 53
+{{- end }}
+{{- if .Values.networkPolicy.externalWeb.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: city-intersection-external-web-egress
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
     - to:
+        {{- range .Values.networkPolicy.externalWeb.cidrs }}
         - ipBlock:
-            cidr: 0.0.0.0/0
+            cidr: {{ . | quote }}
+        {{- end }}
       ports:
+        {{- range .Values.networkPolicy.externalWeb.ports }}
         - protocol: TCP
-          port: 80
-        - protocol: TCP
-          port: 443
+          port: {{ . }}
+        {{- end }}
+{{- end }}
 {{- end }}

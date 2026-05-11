@@ -1,4 +1,14 @@
 ---
+- name: Validate Keepalived shared secret
+  ansible.builtin.assert:
+    that:
+      - keepalived_auth_pass | default('') | length > 0
+      - (keepalived_auth_pass | default('') | regex_search('^CHANGE_ME')) is none
+      - keepalived_auth_pass | default('') != 'changeMe'
+    fail_msg: "keepalived_auth_pass must be provided from inventory or vault."
+  no_log: true
+  when: ansible_system == 'Linux'
+
 - name: Install HAProxy and Keepalived
   ansible.builtin.package:
     name:
@@ -12,6 +22,8 @@
     src: haproxy.cfg.j2
     dest: /etc/haproxy/haproxy.cfg
     mode: '0644'
+    backup: true
+    validate: haproxy -c -f %s
   notify: Restart haproxy
   when: ansible_system == 'Linux'
 
@@ -19,7 +31,10 @@
   ansible.builtin.template:
     src: keepalived.conf.j2
     dest: /etc/keepalived/keepalived.conf
-    mode: '0644'
+    mode: '0600'
+    backup: true
+    validate: keepalived -t -f %s
+  diff: false
   notify: Restart keepalived
   when: ansible_system == 'Linux'
 

@@ -5,8 +5,11 @@ kind: Deployment
 metadata:
   name: zabbix-agent2
   namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+    app.kubernetes.io/name: zabbix-agent2
 spec:
-  replicas: {{ .Values.zabbixAgent.replicas | default 3 }}
+  replicas: {{ include "cip.replicaCount" (list . (.Values.zabbixAgent.replicas | default 3)) }}
   selector:
     matchLabels:
       app.kubernetes.io/name: zabbix-agent2
@@ -16,9 +19,11 @@ spec:
         app.kubernetes.io/name: zabbix-agent2
         app.kubernetes.io/part-of: city-intersection-project
     spec:
+      {{- include "cip.podSpecDefaults" . | nindent 6 }}
       containers:
         - name: zabbix-agent2
           image: {{ include "cip.image" (list . .Values.zabbixAgent.image) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy | quote }}
           ports:
             {{- range .Values.zabbixAgent.ports }}
             - name: {{ .name | quote }}
@@ -30,6 +35,9 @@ kind: Service
 metadata:
   name: zabbix-agent2
   namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+    app.kubernetes.io/name: zabbix-agent2
 spec:
   selector:
     app.kubernetes.io/name: zabbix-agent2

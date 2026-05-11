@@ -16,7 +16,7 @@ profiles:
     status: default-for-timeseries
     haProvider: cloudnative-pg
     images:
-    - timescale/timescaledb:latest-pg16
+    - timescale/timescaledb:2.26.4-pg16
   redis:
     status: enabled
     haProvider: sentinel|operator
