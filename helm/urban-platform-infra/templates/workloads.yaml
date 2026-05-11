@@ -31,7 +31,7 @@ spec:
       automountServiceAccountToken: {{ $.Values.global.serviceAccount.automountServiceAccountToken | default false }}
       enableServiceLinks: {{ $.Values.global.enableServiceLinks | default false }}
       {{- if $.Values.global.podSecurityContext.enabled }}
-      podSecurityContext:
+      securityContext:
         {{- include "cip.podSecurityContext" $ | nindent 8 }}
       {{- end }}
       {{- if $.Values.global.imagePullSecrets }}
