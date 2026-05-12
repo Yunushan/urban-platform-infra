@@ -286,6 +286,8 @@ if 'cluster-init:' in rke2_server_config_template:
 
 rke2_role_tasks_text = (ROOT / 'ansible/roles/rke2/tasks/main.yml').read_text(encoding='utf-8')
 for rke2_wait_token in [
+    'Reject unsupported RKE2 cluster-init config',
+    'Show initial RKE2 startup state',
     'ExecMainStatus',
     'systemctl is-failed --quiet "{{ rke2_service_name }}"',
     'rke2_registration_probe',

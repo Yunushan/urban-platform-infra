@@ -22,6 +22,8 @@ curl -k https://<vip>:7443/readyz
 
 The first RKE2 server must open local port `9345` before the VIP can forward registration traffic. The first server config intentionally omits `server:` so it can bootstrap the embedded datastore; later servers use the VIP registration address. The install role probes the local listener in a retry loop that fails with RKE2 service, journal, and socket diagnostics.
 
+The role also rejects any rendered `/etc/rancher/rke2/config.yaml` that still contains `cluster-init:` and prints an initial service/journal snapshot before waiting. If the first snapshot already shows `ExecMainStatus=2`, use the printed journal lines as the root cause.
+
 If HAProxy is running but reports `backend rke2_registration_servers has no server available`, check the RKE2 service diagnostics from the failed play output first. HAProxy will stay down until at least one server listens on `9345`.
 
 ## Images cannot be pulled

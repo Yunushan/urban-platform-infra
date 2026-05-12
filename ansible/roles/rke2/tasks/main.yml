@@ -44,6 +44,13 @@
   register: rke2_agent_config
   when: inventory_hostname in groups.get('rke2_agents', [])
 
+- name: Reject unsupported RKE2 cluster-init config
+  ansible.builtin.command: grep -n '^cluster-init:' /etc/rancher/rke2/config.yaml
+  register: rke2_unsupported_cluster_init
+  changed_when: false
+  failed_when: rke2_unsupported_cluster_init.rc == 0
+  when: inventory_hostname in groups['rke2_servers']
+
 - name: Install RKE2 server
   ansible.builtin.shell: |
     set -euo pipefail
@@ -132,6 +139,35 @@
   changed_when: true
   when: not ansible_check_mode
 
+- name: Give RKE2 service an initial startup window
+  ansible.builtin.pause:
+    seconds: "{{ rke2_initial_startup_delay | default(20) }}"
+  when:
+    - inventory_hostname in groups['rke2_servers']
+    - not ansible_check_mode
+
+- name: Read initial RKE2 startup state
+  ansible.builtin.shell: |
+    set -euo pipefail
+    echo "service_state=$(systemctl show "{{ rke2_service_name }}" --property=ActiveState --property=SubState --property=Result --property=ExecMainStatus --value | paste -sd ' ' -)"
+    echo "listeners=$(ss -ltnH | awk '{print $4}' | grep -E '(:|\\])((6443)|(9345)|(2379)|(2380)|(10250))$' || true)"
+    journalctl -u "{{ rke2_service_name }}" --no-pager -n "{{ rke2_initial_journal_lines | default(40) }}"
+  args:
+    executable: /bin/bash
+  register: rke2_initial_startup_state
+  changed_when: false
+  failed_when: false
+  when:
+    - inventory_hostname in groups['rke2_servers']
+    - not ansible_check_mode
+
+- name: Show initial RKE2 startup state
+  ansible.builtin.debug:
+    msg: "{{ rke2_initial_startup_state.stdout_lines | default([]) }}"
+  when:
+    - inventory_hostname in groups['rke2_servers']
+    - not ansible_check_mode
+
 - name: Wait for local RKE2 registration endpoint
   block:
     - name: Wait for local RKE2 registration endpoint
@@ -160,7 +196,7 @@
       register: rke2_registration_probe
       changed_when: false
       failed_when: rke2_registration_probe.rc == 2
-      retries: "{{ rke2_local_registration_retries | default(90) }}"
+      retries: "{{ rke2_local_registration_retries | default(30) }}"
       delay: "{{ rke2_local_registration_delay | default(10) }}"
       until: rke2_registration_probe.rc == 0
   rescue:
