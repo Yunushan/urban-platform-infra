@@ -50,6 +50,20 @@ SENSITIVE_DIRS = [
 TEXT_SCAN_SKIP = {
     Path('scripts/validate.py'),
 }
+TEXT_SCAN_EXCLUDED_DIRS = {
+    '.ansible',
+    '.git',
+    '.terraform',
+    '.venv',
+    'build',
+    'charts',
+    'coverage',
+    'dist',
+    'node_modules',
+    'rendered',
+    'reports',
+    'venv',
+}
 LEGACY_ACTION_REFS = [
     'actions/checkout@v4',
     'actions/setup-python@v5',
@@ -94,7 +108,9 @@ def text_files():
         relative_path = path.relative_to(ROOT)
         if relative_path in TEXT_SCAN_SKIP:
             continue
-        if path.is_file() and '.git' not in path.parts:
+        if any(part in TEXT_SCAN_EXCLUDED_DIRS for part in relative_path.parts):
+            continue
+        if path.is_file():
             try:
                 path.read_text(encoding='utf-8')
             except UnicodeDecodeError:
@@ -429,7 +445,14 @@ if 'CONFIRM_PROD' not in bootstrap_script:
     errors.append('scripts/bootstrap.sh must require production confirmation')
 
 gitignore_text = (ROOT / '.gitignore').read_text(encoding='utf-8')
-for required_ignore in ['secrets/*', 'inventories/prod/*', '*.decrypted.*', '*.plain.*', '*.sops.dec.*']:
+for required_ignore in [
+    '.ansible/',
+    'secrets/*',
+    'inventories/prod/*',
+    '*.decrypted.*',
+    '*.plain.*',
+    '*.sops.dec.*',
+]:
     if required_ignore not in gitignore_text:
         errors.append(f'.gitignore must protect secret artifact pattern: {required_ignore}')
 
