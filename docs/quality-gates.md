@@ -16,6 +16,13 @@ make deploy-dry-run
 make policy
 ```
 
+For the modern control-node lane, use Python 3.12, 3.13, or 3.14 and install the modern pins:
+
+```bash
+pip install -r requirements-ci-modern.txt
+make ansible-collections ANSIBLE_COLLECTION_REQUIREMENTS=ansible/requirements-modern.yml
+```
+
 The local gates cover:
 
 - YAML style and parse checks for repository configuration.
@@ -34,7 +41,8 @@ The local gates cover:
 The GitHub Actions workflow separates concerns into these jobs:
 
 - `static`: yamllint, Ansible syntax checks, and shellcheck.
-- `validate`: repository structure, YAML parsing, sanitized examples, and workflow-generation checks.
+- `static (ansible-2.20-py312/py313/py314)`: modern Ansible syntax checks through Python 3.14.
+- `validate`: repository structure, YAML parsing, sanitized examples, and workflow-generation checks on Python 3.11 through 3.14.
 - `render`: Helm lint, manifest rendering, policy checks, and rendered manifest upload.
 - `security`: Trivy filesystem scan.
 

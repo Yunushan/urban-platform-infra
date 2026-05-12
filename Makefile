@@ -15,7 +15,8 @@ ANSIBLE_GALAXY ?= ansible-galaxy
 ANSIBLE_CONFIG ?= ansible/ansible.cfg
 ANSIBLE_ARGS ?=
 ANSIBLE_DIFF ?= --diff
-ANSIBLE_COLLECTIONS_STAMP ?= .ansible/collections/.requirements.stamp
+ANSIBLE_COLLECTION_REQUIREMENTS ?= ansible/requirements.yml
+ANSIBLE_COLLECTIONS_STAMP ?= .ansible/collections/.$(subst /,_,$(ANSIBLE_COLLECTION_REQUIREMENTS)).stamp
 CONFIRM_PROD ?= false
 
 .PHONY: help validate image-policy lint configure ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster install-operators deploy deploy-dry-run package-chart release-evidence status observability-status docker-up docker-down docker-status policy clean
@@ -44,9 +45,9 @@ lint: ## Run local static checks that mirror the CI static gate.
 configure: ## Update selected runtime defaults in Helm values.
 	python3 scripts/configure.py --engine $(ENGINE) --webserver $(WEB) --database $(DB) --observability $(OBS) --values $(VALUES)
 
-$(ANSIBLE_COLLECTIONS_STAMP): ansible/requirements.yml
+$(ANSIBLE_COLLECTIONS_STAMP): $(ANSIBLE_COLLECTION_REQUIREMENTS)
 	mkdir -p .ansible/collections
-	ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) $(ANSIBLE_GALAXY) collection install -r ansible/requirements.yml --force
+	ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) $(ANSIBLE_GALAXY) collection install -r $(ANSIBLE_COLLECTION_REQUIREMENTS) --force
 	touch $(ANSIBLE_COLLECTIONS_STAMP)
 
 ansible-collections: $(ANSIBLE_COLLECTIONS_STAMP) ## Install repo-pinned Ansible collections.

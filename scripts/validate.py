@@ -20,7 +20,8 @@ YAML_SKIP = {
 REQUIRED = [
     'README.md', 'LICENSE', '.github/workflows/ci.yml', '.gitlab-ci.yml',
     '.github/workflows/release.yml', '.github/dependabot.yml', '.pre-commit-config.yaml',
-    'requirements-ci.txt',
+    'requirements-ci.txt', 'requirements-ci-modern.txt',
+    'ansible/requirements.yml', 'ansible/requirements-modern.yml',
     '.sops.yaml.example', 'ansible/playbooks/preflight.yml',
     'helm/urban-platform-infra/Chart.yaml', 'helm/urban-platform-infra/values.yaml',
     'config/services.catalog.yaml', 'config/cluster-profiles.yaml',
@@ -200,6 +201,38 @@ for release_token in [
 ci_workflow_text = (ROOT / '.github/workflows/ci.yml').read_text(encoding='utf-8')
 if 'actions/dependency-review-action@v5' not in ci_workflow_text:
     errors.append('CI must review dependency changes with dependency-review-action@v5')
+for ci_token in [
+    'ansible-2.14-py311',
+    'ansible-2.20-py312',
+    'ansible-2.20-py313',
+    'ansible-2.20-py314',
+    'python-3.12',
+    'python-3.13',
+    'python-3.14',
+    'requirements-ci-modern.txt',
+    'ansible/requirements-modern.yml',
+]:
+    if ci_token not in ci_workflow_text:
+        errors.append(f'CI missing Python/Ansible compatibility lane token: {ci_token}')
+
+modern_requirements_text = (ROOT / 'requirements-ci-modern.txt').read_text(encoding='utf-8')
+for modern_requirement in [
+    'ansible-core==2.20.5',
+    'PyYAML==6.0.3',
+    'yamllint==1.38.0',
+]:
+    if modern_requirement not in modern_requirements_text:
+        errors.append(f'Modern CI requirements missing pinned dependency: {modern_requirement}')
+
+modern_ansible_requirements_text = (ROOT / 'ansible/requirements-modern.yml').read_text(encoding='utf-8')
+for modern_collection in [
+    'version: "2.1.0"',
+    'version: "12.6.0"',
+    'version: "6.3.0"',
+    'version: "5.2.0"',
+]:
+    if modern_collection not in modern_ansible_requirements_text:
+        errors.append(f'Modern Ansible collection requirements missing pin: {modern_collection}')
 
 dependabot_text = (ROOT / '.github/dependabot.yml').read_text(encoding='utf-8')
 for dependabot_token in [
@@ -227,6 +260,19 @@ if 'aquasec/trivy:latest' in gitlab_ci_text:
 ansible_cfg_text = (ROOT / 'ansible/ansible.cfg').read_text(encoding='utf-8')
 if re.search(r'(?m)^\s*host_key_checking\s*=\s*False\s*$', ansible_cfg_text):
     errors.append('Ansible host key checking must not be disabled')
+
+preflight_text = (ROOT / 'ansible/playbooks/preflight.yml').read_text(encoding='utf-8')
+for preflight_token in [
+    'oraclelinux',
+    'oracle-linux-server',
+    'supported_oracle_linux_major_versions',
+    'supported_oracle_linux_distributions',
+    'Validate RedHat-family major 10 target Python compatibility',
+    'supported_ansible_220_target_python_min: "3.9"',
+    'supported_ansible_220_target_python_max_exclusive: "3.15"',
+]:
+    if preflight_token not in preflight_text:
+        errors.append(f'Ansible preflight missing RedHat-family major 10 compatibility token: {preflight_token}')
 
 makefile_text = (ROOT / 'Makefile').read_text(encoding='utf-8')
 if 'CONFIRM_PROD' not in makefile_text:
@@ -291,6 +337,7 @@ required_rhel_family_platforms = {
     'rhel-7', 'rhel-8', 'rhel-9', 'rhel-10',
     'rocky-linux-7', 'rocky-linux-8', 'rocky-linux-9', 'rocky-linux-10',
     'alma-linux-7', 'alma-linux-8', 'alma-linux-9', 'alma-linux-10',
+    'oracle-linux-10',
     'centos-stream-9', 'centos-stream-10',
 }
 linux_production_nodes = set(platforms.get('linuxProductionNodes', []))
@@ -320,6 +367,7 @@ for family, expected_versions in {
     'rhel': {'7', '8', '9', '10'},
     'rocky-linux': {'7', '8', '9', '10'},
     'alma-linux': {'7', '8', '9', '10'},
+    'oracle-linux': {'10'},
     'centos-stream': {'9', '10'},
 }.items():
     actual_versions = set(str(version) for version in rhel_family_versions.get(family, []))

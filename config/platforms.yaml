@@ -18,6 +18,7 @@ linuxProductionNodes:
 - alma-linux-8
 - alma-linux-9
 - alma-linux-10
+- oracle-linux-10
 - centos-stream-9
 - centos-stream-10
 debianFamilyVersions:
@@ -44,6 +45,8 @@ rhelFamilyMajorVersions:
   - "7"
   - "8"
   - "9"
+  - "10"
+  oracle-linux:
   - "10"
   centos-stream:
   - "9"

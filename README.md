@@ -42,9 +42,11 @@
 
 ---
 
-A desktop/operator-first and production-ready deployment workspace for the **urban-platform-infra** stack. It is centered on a default **3-node RKE2 Kubernetes cluster** running on **Ubuntu 24.04**, with full Ubuntu 22.04/24.04/26.04, Debian 11/12/13, RHEL/Rocky Linux/AlmaLinux 7-10, and CentOS Stream 9-10 node profile support, HAProxy/Keepalived for the control-plane virtual IP, Chrony for time sync, Helm-based application deployment, Docker Swarm/Compose fallback, raw-install scaffolding, and GitHub/GitLab private-repository readiness.
+A desktop/operator-first and production-ready deployment workspace for the **urban-platform-infra** stack. It is centered on a default **3-node RKE2 Kubernetes cluster** running on **Ubuntu 24.04**, with full Ubuntu 22.04/24.04/26.04, Debian 11/12/13, RHEL/Rocky Linux/AlmaLinux 7-10, Oracle Linux 10, and CentOS Stream 9-10 node profile support, HAProxy/Keepalived for the control-plane virtual IP, Chrony for time sync, Helm-based application deployment, Docker Swarm/Compose fallback, raw-install scaffolding, and GitHub/GitLab private-repository readiness.
 
 The project is designed so defaults can be changed from configuration instead of editing templates: cluster engine, web server, database family, observability backend, registry, replica counts, hostnames, storage class, TLS, image tags, and platform profile all live under `config/` and `helm/urban-platform-infra/values.yaml`.
+
+Control-node automation is tested in two lanes: a legacy enterprise lane with Python 3.11 and ansible-core 2.14.18, and a modern lane with Python 3.12/3.13/3.14 and ansible-core 2.20.5.
 
 ## Quick Start
 

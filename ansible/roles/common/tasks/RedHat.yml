@@ -1,5 +1,5 @@
 ---
-- name: Install common RHEL/Rocky/Alma/CentOS packages
+- name: Install common RHEL/Rocky/Alma/Oracle/CentOS packages
   ansible.builtin.package:
     name:
       - curl

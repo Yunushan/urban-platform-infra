@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 env:
-  PYTHON_VERSION: '3.12'
+  PYTHON_VERSION: '3.11'
   HELM_CHART: helm/urban-platform-infra
   RELEASE_NAME: urban-platform-infra
   NAMESPACE: urban-platform
@@ -25,17 +25,38 @@ env:
 jobs:
   static:
     runs-on: ubuntu-latest
+    name: static (${{ matrix.lane }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: ansible-2.14-py311
+            python-version: '3.11'
+            requirements-file: requirements-ci.txt
+            ansible-requirements-file: ansible/requirements.yml
+          - lane: ansible-2.20-py312
+            python-version: '3.12'
+            requirements-file: requirements-ci-modern.txt
+            ansible-requirements-file: ansible/requirements-modern.yml
+          - lane: ansible-2.20-py313
+            python-version: '3.13'
+            requirements-file: requirements-ci-modern.txt
+            ansible-requirements-file: ansible/requirements-modern.yml
+          - lane: ansible-2.20-py314
+            python-version: '3.14'
+            requirements-file: requirements-ci-modern.txt
+            ansible-requirements-file: ansible/requirements-modern.yml
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: ${{ matrix.python-version }}
           cache: pip
-          cache-dependency-path: requirements-ci.txt
+          cache-dependency-path: ${{ matrix.requirements-file }}
       - name: Install static analysis dependencies
-        run: pip install -r requirements-ci.txt
+        run: pip install -r "${{ matrix.requirements-file }}"
       - name: Install Ansible collections
-        run: ansible-galaxy collection install -r ansible/requirements.yml
+        run: ansible-galaxy collection install -r "${{ matrix.ansible-requirements-file }}"
       - name: Run yamllint
         run: yamllint .
       - name: Run Ansible syntax checks
@@ -79,16 +100,33 @@ jobs:
 
   validate:
     runs-on: ubuntu-latest
+    name: validate (${{ matrix.lane }})
     needs: static
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: python-3.11
+            python-version: '3.11'
+            requirements-file: requirements-ci.txt
+          - lane: python-3.12
+            python-version: '3.12'
+            requirements-file: requirements-ci-modern.txt
+          - lane: python-3.13
+            python-version: '3.13'
+            requirements-file: requirements-ci-modern.txt
+          - lane: python-3.14
+            python-version: '3.14'
+            requirements-file: requirements-ci-modern.txt
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: ${{ matrix.python-version }}
           cache: pip
-          cache-dependency-path: requirements-ci.txt
+          cache-dependency-path: ${{ matrix.requirements-file }}
       - name: Install Python dependencies
-        run: pip install -r requirements-ci.txt
+        run: pip install -r "${{ matrix.requirements-file }}"
       - name: Validate repository
         run: |
           python3 scripts/validate.py

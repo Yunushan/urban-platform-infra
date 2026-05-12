@@ -77,9 +77,13 @@
       - "8"
       - "9"
       - "10"
+    supported_oracle_linux_major_versions:
+      - "10"
     supported_centos_stream_major_versions:
       - "9"
       - "10"
+    supported_ansible_220_target_python_min: "3.9"
+    supported_ansible_220_target_python_max_exclusive: "3.15"
     supported_rhel_family_distributions:
       - redhat
       - redhat-enterprise-linux
@@ -87,6 +91,10 @@
       - rocky-linux
       - almalinux
       - almalinux-os
+    supported_oracle_linux_distributions:
+      - oraclelinux
+      - oracle-linux
+      - oracle-linux-server
     supported_centos_stream_distributions:
       - centos
       - centos-stream
@@ -142,6 +150,11 @@
             )
             or
             (
+              platform_distribution_name in supported_oracle_linux_distributions
+              and platform_distribution_major in supported_oracle_linux_major_versions
+            )
+            or
+            (
               platform_distribution_name in supported_centos_stream_distributions
               and platform_distribution_major in supported_centos_stream_major_versions
               and (
@@ -151,10 +164,24 @@
             )
         fail_msg: >-
           RedHat-family cluster nodes must be RHEL, Rocky Linux, or AlmaLinux major 7/8/9/10,
-          or CentOS Stream major 9/10. Detected {{ ansible_distribution }} {{ ansible_distribution_version }}.
+          Oracle Linux major 10, or CentOS Stream major 9/10.
+          Detected {{ ansible_distribution }} {{ ansible_distribution_version }}.
       when:
         - cluster_engine | default('rke2') in ['rke2', 'k3s', 'docker']
         - ansible_os_family == 'RedHat'
+
+    - name: Validate RedHat-family major 10 target Python compatibility
+      ansible.builtin.assert:
+        that:
+          - ansible_python_version is version(supported_ansible_220_target_python_min, '>=')
+          - ansible_python_version is version(supported_ansible_220_target_python_max_exclusive, '<')
+        fail_msg: >-
+          RedHat-family major 10 nodes must expose Python 3.9 through 3.14 for
+          ansible-core 2.20 compatibility. Detected Python {{ ansible_python_version }}.
+      when:
+        - cluster_engine | default('rke2') in ['rke2', 'k3s', 'docker']
+        - ansible_os_family == 'RedHat'
+        - platform_distribution_major == '10'
 
     - name: Validate node address variables
       ansible.builtin.assert:

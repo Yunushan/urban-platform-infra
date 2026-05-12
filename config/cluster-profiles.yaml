@@ -30,6 +30,7 @@ profiles:
     - alma-linux-8
     - alma-linux-9
     - alma-linux-10
+    - oracle-linux-10
     - centos-stream-9
     - centos-stream-10
     installRole: ansible/roles/rke2
@@ -61,6 +62,7 @@ profiles:
     - alma-linux-8
     - alma-linux-9
     - alma-linux-10
+    - oracle-linux-10
     - centos-stream-9
     - centos-stream-10
     installRole: ansible/roles/k3s
@@ -101,6 +103,7 @@ profiles:
     - alma-linux-8
     - alma-linux-9
     - alma-linux-10
+    - oracle-linux-10
     - centos-stream-9
     - centos-stream-10
     - windows-server-with-docker
@@ -131,6 +134,7 @@ profiles:
     - alma-linux-8
     - alma-linux-9
     - alma-linux-10
+    - oracle-linux-10
     - centos-stream-9
     - centos-stream-10
     - freebsd

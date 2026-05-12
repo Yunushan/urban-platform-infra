@@ -31,7 +31,7 @@ On each target node:
 - Ensure the nodes can reach each other.
 - Reserve one unused virtual IP on the same network for Keepalived.
 
-Supported RKE2 node operating systems include Ubuntu 22.04/24.04/26.04, Debian 11/12/13, RHEL 7/8/9/10, Rocky Linux 7/8/9/10, AlmaLinux 7/8/9/10, and CentOS Stream 9/10. Keep all three nodes on the same OS family and major version for predictable kernel, SELinux, package manager, and service behavior.
+Supported RKE2 node operating systems include Ubuntu 22.04/24.04/26.04, Debian 11/12/13, RHEL 7/8/9/10, Rocky Linux 7/8/9/10, AlmaLinux 7/8/9/10, Oracle Linux 10, and CentOS Stream 9/10. Keep all three nodes on the same OS family and major version for predictable kernel, SELinux, package manager, and service behavior.
 
 ## Prepare The Application Archive
 
