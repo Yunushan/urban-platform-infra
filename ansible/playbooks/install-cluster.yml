@@ -52,6 +52,120 @@
     - role: rke2
       when: cluster_engine | default('rke2') == 'rke2'
 
+- name: Configure operator Kubernetes access
+  hosts: localhost
+  gather_facts: true
+  any_errors_fatal: true
+  vars:
+    operator_kubeconfig_path: "{{ ansible_env.HOME }}/.kube/config"
+    operator_client_tools_cache_dir: "{{ ansible_env.HOME }}/.cache/urban-platform-infra/client-tools"
+    operator_client_bin_dir: "{{ '/usr/local/bin' if ansible_user_id == 'root' else ansible_env.HOME + '/.local/bin' }}"
+    rke2_primary_server: "{{ groups['rke2_servers'][0] }}"
+    rke2_operator_api_url: "https://{{ cluster_vip }}:{{ kubernetes_api_vip_port | default(7443) }}"
+  tasks:
+    - name: Read kubeconfig from the first RKE2 server
+      ansible.builtin.slurp:
+        src: /etc/rancher/rke2/rke2.yaml
+      become: true
+      delegate_to: "{{ rke2_primary_server }}"
+      register: rke2_operator_kubeconfig
+      no_log: true
+      when:
+        - cluster_engine | default('rke2') == 'rke2'
+        - not ansible_check_mode
+
+    - name: Create operator kubeconfig directory
+      ansible.builtin.file:
+        path: "{{ operator_kubeconfig_path | dirname }}"
+        state: directory
+        mode: '0700'
+      when:
+        - cluster_engine | default('rke2') == 'rke2'
+        - not ansible_check_mode
+
+    - name: Install operator kubeconfig as kubectl default
+      ansible.builtin.copy:
+        dest: "{{ operator_kubeconfig_path }}"
+        mode: '0600'
+        backup: true
+        content: >-
+          {{
+            rke2_operator_kubeconfig.content |
+            b64decode |
+            regex_replace('server: https://127\\.0\\.0\\.1:6443', 'server: ' ~ rke2_operator_api_url)
+          }}
+      diff: false
+      no_log: true
+      when:
+        - cluster_engine | default('rke2') == 'rke2'
+        - not ansible_check_mode
+
+    - name: Check operator kubectl availability
+      ansible.builtin.command: kubectl version --client=true
+      register: operator_kubectl_command
+      changed_when: false
+      failed_when: false
+      when:
+        - cluster_engine | default('rke2') == 'rke2'
+        - not ansible_check_mode
+
+    - name: Check RKE2 bundled kubectl on first server
+      ansible.builtin.stat:
+        path: /var/lib/rancher/rke2/bin/kubectl
+      become: true
+      delegate_to: "{{ rke2_primary_server }}"
+      register: rke2_bundled_kubectl
+      when:
+        - cluster_engine | default('rke2') == 'rke2'
+        - not ansible_check_mode
+        - operator_kubectl_command.rc | default(1) != 0
+
+    - name: Create operator client tools cache directory
+      ansible.builtin.file:
+        path: "{{ operator_client_tools_cache_dir }}"
+        state: directory
+        mode: '0755'
+      when:
+        - cluster_engine | default('rke2') == 'rke2'
+        - not ansible_check_mode
+        - operator_kubectl_command.rc | default(1) != 0
+        - rke2_bundled_kubectl.stat.exists | default(false)
+
+    - name: Fetch RKE2-matched kubectl to operator cache
+      ansible.builtin.fetch:
+        src: /var/lib/rancher/rke2/bin/kubectl
+        dest: "{{ operator_client_tools_cache_dir }}/kubectl"
+        flat: true
+      become: true
+      delegate_to: "{{ rke2_primary_server }}"
+      when:
+        - cluster_engine | default('rke2') == 'rke2'
+        - not ansible_check_mode
+        - operator_kubectl_command.rc | default(1) != 0
+        - rke2_bundled_kubectl.stat.exists | default(false)
+
+    - name: Create operator client binary directory
+      ansible.builtin.file:
+        path: "{{ operator_client_bin_dir }}"
+        state: directory
+        mode: '0755'
+      when:
+        - cluster_engine | default('rke2') == 'rke2'
+        - not ansible_check_mode
+        - operator_kubectl_command.rc | default(1) != 0
+        - rke2_bundled_kubectl.stat.exists | default(false)
+
+    - name: Install RKE2-matched kubectl on operator
+      ansible.builtin.copy:
+        src: "{{ operator_client_tools_cache_dir }}/kubectl"
+        dest: "{{ operator_client_bin_dir }}/kubectl"
+        mode: '0755'
+      when:
+        - cluster_engine | default('rke2') == 'rke2'
+        - not ansible_check_mode
+        - operator_kubectl_command.rc | default(1) != 0
+        - rke2_bundled_kubectl.stat.exists | default(false)
+
 - name: Install K3s
   hosts: cluster_nodes
   become: true

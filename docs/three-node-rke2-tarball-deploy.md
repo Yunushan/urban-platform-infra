@@ -191,14 +191,16 @@ make bootstrap ENV=prod ENGINE=rke2 INVENTORY=inventories/prod/hosts.yml CONFIRM
 make install-cluster ENV=prod ENGINE=rke2 INVENTORY=inventories/prod/hosts.yml CONFIRM_PROD=true
 ```
 
-Copy kubeconfig from the first server node, then replace the server address with the cluster VIP or DNS name and the configured Kubernetes API VIP port:
+The `install-cluster` playbook writes the operator kubeconfig to the default kubectl location, `~/.kube/config`.
+It points the kubeconfig at the configured Kubernetes API VIP port.
+After the playbook finishes, kubectl should work without exporting `KUBECONFIG`:
 
 ```bash
-scp <ssh-user>@<node-1>:/etc/rancher/rke2/rke2.yaml ./kubeconfig-rke2
-sed -i 's#https://127.0.0.1:6443#https://<unused-lan-vip>:7443#g' ./kubeconfig-rke2
-export KUBECONFIG="$PWD/kubeconfig-rke2"
 kubectl get nodes -o wide
 ```
+
+If the operator does not already have kubectl, the playbook installs the RKE2-matched kubectl binary from the first server node.
+To write kubeconfig somewhere else, pass `-e operator_kubeconfig_path=<path>` to the Ansible run.
 
 ## Deploy The Application
 
