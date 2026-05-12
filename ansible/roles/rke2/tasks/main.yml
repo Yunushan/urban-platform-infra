@@ -137,6 +137,14 @@
     - name: Wait for local RKE2 registration endpoint
       ansible.builtin.shell: |
         set -euo pipefail
+        active_state="$(systemctl show "{{ rke2_service_name }}" --property=ActiveState --value)"
+        sub_state="$(systemctl show "{{ rke2_service_name }}" --property=SubState --value)"
+        result="$(systemctl show "{{ rke2_service_name }}" --property=Result --value)"
+        exec_status="$(systemctl show "{{ rke2_service_name }}" --property=ExecMainStatus --value)"
+        if [ "${result}" = "exit-code" ] || { [ -n "${exec_status}" ] && [ "${exec_status}" != "0" ]; }; then
+          echo "service_failed active=${active_state} sub=${sub_state} result=${result} exec_status=${exec_status}"
+          exit 2
+        fi
         if systemctl is-failed --quiet "{{ rke2_service_name }}"; then
           echo "service_failed"
           exit 2

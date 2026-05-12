@@ -9,8 +9,6 @@ secrets-encryption: true
 cni: canal
 cluster-cidr: "{{ pod_cidr | default('10.42.0.0/16') }}"
 service-cidr: "{{ service_cidr | default('10.43.0.0/16') }}"
-{% if inventory_hostname == groups['rke2_servers'][0] %}
-cluster-init: true
-{% else %}
+{% if inventory_hostname != groups['rke2_servers'][0] %}
 server: "https://{{ cluster_vip }}:{{ rke2_registration_vip_port | default(9346) }}"
 {% endif %}

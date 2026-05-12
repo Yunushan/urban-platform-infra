@@ -276,14 +276,17 @@ for preflight_token in [
 
 rke2_server_config_template = (ROOT / 'ansible/roles/rke2/templates/config.yaml.j2').read_text(encoding='utf-8')
 for rke2_config_token in [
-    'cluster-init: true',
+    "{% if inventory_hostname != groups['rke2_servers'][0] %}",
     'server: "https://{{ cluster_vip }}:{{ rke2_registration_vip_port | default(9346) }}"',
 ]:
     if rke2_config_token not in rke2_server_config_template:
         errors.append(f'RKE2 server config template missing HA bootstrap token: {rke2_config_token}')
+if 'cluster-init:' in rke2_server_config_template:
+    errors.append('RKE2 server config template must not set cluster-init; first server bootstraps by omitting server')
 
 rke2_role_tasks_text = (ROOT / 'ansible/roles/rke2/tasks/main.yml').read_text(encoding='utf-8')
 for rke2_wait_token in [
+    'ExecMainStatus',
     'systemctl is-failed --quiet "{{ rke2_service_name }}"',
     'rke2_registration_probe',
     'failed_when: rke2_registration_probe.rc == 2',
