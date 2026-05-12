@@ -86,6 +86,11 @@ make install-operators
 kubectl get crd | grep -E 'postgresql.cnpg|elastic'
 ```
 
+If Helmfile reports `unknown command "diff" for "helm"`, use
+`helmfile -f deploy/helmfile.yaml.gotmpl sync` or run `make install-operators`
+from a version of this repository that uses `sync`. The normal operator install
+path intentionally avoids requiring the Helm diff plugin.
+
 ## PrometheusRule or ServiceMonitor resources not recognized
 
 Install kube-prometheus-stack before enabling `monitoring.enabled=true`:

@@ -12,6 +12,9 @@ The deployment target installs Helm and Helmfile when missing, applies the
 templated operator Helmfile, waits for CNPG and ECK CRDs, then installs the
 platform chart.
 
+The operator step uses `helmfile sync`, so the Helm diff plugin is not required
+on the operator machine.
+
 ## Observe
 
 ```bash

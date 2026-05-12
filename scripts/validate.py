@@ -370,6 +370,7 @@ for makefile_helm_token in [
     'deploy/helmfile.yaml.gotmpl',
     'HELMFILE_INSTALL_SCRIPT',
     'wait-operator-crds:',
+    '$(HELMFILE) -f $(HELMFILE_CONFIG) sync',
     'crd/clusters.postgresql.cnpg.io',
     'crd/elasticsearches.elasticsearch.k8s.elastic.co',
     'crd/kibanas.kibana.k8s.elastic.co',
