@@ -21,6 +21,7 @@ CONFIRM_PROD ?= false
 HELM ?= helm
 HELM_INSTALL_SCRIPT ?= scripts/tools/install-helm.sh
 HELMFILE ?= helmfile
+HELMFILE_CONFIG ?= deploy/helmfile.yaml.gotmpl
 HELMFILE_INSTALL_SCRIPT ?= scripts/tools/install-helmfile.sh
 OPERATOR_CRD_TIMEOUT ?= 180s
 
@@ -86,7 +87,7 @@ wait-operator-crds: ## Wait until CRDs required by the default platform chart ex
 	kubectl wait --for=condition=Established crd/kibanas.kibana.k8s.elastic.co --timeout=$(OPERATOR_CRD_TIMEOUT)
 
 install-operators: install-helmfile ## Install optional operators/charts needed for HA data and observability profiles.
-	$(HELMFILE) -f deploy/helmfile.yaml apply
+	$(HELMFILE) -f $(HELMFILE_CONFIG) apply
 	$(MAKE) wait-operator-crds OPERATOR_CRD_TIMEOUT=$(OPERATOR_CRD_TIMEOUT)
 
 deploy-dry-run: install-helm ## Render the Helm chart without applying it.

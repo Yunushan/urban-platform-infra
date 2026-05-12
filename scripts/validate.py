@@ -15,7 +15,7 @@ YAML_DIRS = [
     'inventories',
 ]
 YAML_SKIP = {
-    Path('deploy/helmfile.yaml'),
+    Path('deploy/helmfile.yaml.gotmpl'),
 }
 REQUIRED = [
     'README.md', 'LICENSE', '.github/workflows/ci.yml', '.gitlab-ci.yml',
@@ -366,6 +366,8 @@ for makefile_helm_token in [
     'install-helm:',
     'HELM_INSTALL_SCRIPT',
     'install-helmfile:',
+    'HELMFILE_CONFIG',
+    'deploy/helmfile.yaml.gotmpl',
     'HELMFILE_INSTALL_SCRIPT',
     'wait-operator-crds:',
     'crd/clusters.postgresql.cnpg.io',
@@ -652,7 +654,7 @@ if observability_contract.get('defaultStack') != 'elastic-eck-prometheus-grafana
 for observability_profile in ['elasticsearch', 'grafana', 'prometheus', 'opentelemetry']:
     if observability_contract.get('profiles', {}).get(observability_profile, {}).get('enabled') is not True:
         errors.append(f'Observability contract must enable default profile: {observability_profile}')
-helmfile_text = (ROOT / 'deploy/helmfile.yaml').read_text(encoding='utf-8')
+helmfile_text = (ROOT / 'deploy/helmfile.yaml.gotmpl').read_text(encoding='utf-8')
 for helmfile_token in [
     'open-telemetry.github.io/opentelemetry-helm-charts',
     'opentelemetry-collector',

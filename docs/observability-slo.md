@@ -6,7 +6,7 @@ This project should be observable before it is scaled. The default enterprise st
 
 The production baseline is:
 
-1. Install ECK, kube-prometheus-stack/Grafana, and OpenTelemetry Collector through `deploy/helmfile.yaml`.
+1. Install ECK, kube-prometheus-stack/Grafana, and OpenTelemetry Collector through `deploy/helmfile.yaml.gotmpl`.
 2. Enable chart monitoring only after the Prometheus Operator CRDs exist.
 3. Keep service objectives in `config/slo.yaml`.
 4. Keep alert runbooks in `docs/runbooks.md`.

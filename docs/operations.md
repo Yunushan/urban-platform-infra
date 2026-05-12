@@ -9,7 +9,8 @@ make deploy
 ```
 
 The deployment target installs Helm and Helmfile when missing, applies the
-operator Helmfile, waits for CNPG and ECK CRDs, then installs the platform chart.
+templated operator Helmfile, waits for CNPG and ECK CRDs, then installs the
+platform chart.
 
 ## Observe
 
