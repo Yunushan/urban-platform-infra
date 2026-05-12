@@ -136,6 +136,14 @@ if values['webserver']['provider'] != 'nginx':
     errors.append('Default webserver must be nginx')
 if values.get('secretManagement', {}).get('enabled') is not False:
     errors.append('Secret management chart rendering must be disabled by default')
+ingress_values = values.get('ingress', {})
+if ingress_values.get('tls', {}).get('enabled') is not True:
+    errors.append('Ingress TLS must be enabled by default so HTTPS is available')
+for redirect_key in ['sslRedirect', 'forceSslRedirect']:
+    if ingress_values.get(redirect_key) is not True:
+        errors.append(f'Ingress HTTPS redirect must be enabled by default: {redirect_key}')
+if values.get('webserver', {}).get('ingress', {}).get('enabled') is not True:
+    errors.append('Webserver root ingress must be enabled by default')
 if values.get('monitoring', {}).get('enabled') is not False:
     errors.append('Monitoring CRDs must be disabled by default so the chart renders before operators are installed')
 observability_values = values.get('observability', {})
@@ -315,6 +323,25 @@ for rke2_wait_token in [
 ]:
     if rke2_wait_token not in rke2_role_tasks_text:
         errors.append(f'RKE2 role missing registration wait diagnostic token: {rke2_wait_token}')
+
+workload_template_text = (ROOT / 'helm/urban-platform-infra/templates/workloads.yaml').read_text(encoding='utf-8')
+webserver_template_text = (ROOT / 'helm/urban-platform-infra/templates/webserver.yaml').read_text(encoding='utf-8')
+for ingress_template_token in [
+    'nginx.ingress.kubernetes.io/ssl-redirect',
+    'nginx.ingress.kubernetes.io/force-ssl-redirect',
+    'secretName: {{ $.Values.ingress.tls.secretName | quote }}',
+]:
+    if ingress_template_token not in workload_template_text:
+        errors.append(f'Workload ingress template missing HTTPS token: {ingress_template_token}')
+for webserver_ingress_token in [
+    'kind: Ingress',
+    'name: webserver',
+    'path: {{ .Values.webserver.ingress.path | default "/" | quote }}',
+    'number: {{ .Values.webserver.ingress.servicePort | default 80 }}',
+    'nginx.ingress.kubernetes.io/ssl-redirect',
+]:
+    if webserver_ingress_token not in webserver_template_text:
+        errors.append(f'Webserver template missing root HTTPS ingress token: {webserver_ingress_token}')
 
 makefile_text = (ROOT / 'Makefile').read_text(encoding='utf-8')
 if 'CONFIRM_PROD' not in makefile_text:

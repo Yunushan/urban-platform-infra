@@ -43,9 +43,12 @@ namespace:
 ingress:
   enabled: true
   className: nginx
-  host: urban-platform.example
+  host: ''
+  annotations: {}
+  sslRedirect: true
+  forceSslRedirect: true
   tls:
-    enabled: false
+    enabled: true
     secretName: urban-platform-tls
 secretManagement:
   enabled: false
@@ -110,6 +113,10 @@ networkPolicy:
     - 443
 webserver:
   provider: nginx
+  ingress:
+    enabled: true
+    path: /
+    servicePort: 80
   service:
     type: ClusterIP
     annotations: {}

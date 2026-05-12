@@ -98,7 +98,7 @@ By default the Kubernetes profile deploys:
 | Cluster | RKE2 | 3 server nodes, fixed VIP, etcd quorum |
 | Control-plane access | HAProxy + Keepalived | VIP failover on `7443` for the API and `9346` for RKE2 registration |
 | Time sync | Chrony | Installed on every node |
-| Web gateway | nginx `1.30.0` | 3 replicas, swappable with Apache HTTPD, Tomcat, or Traefik |
+| Web gateway | nginx `1.30.0` | 3 replicas, root ingress, HTTPS redirect, swappable with Apache HTTPD, Tomcat, or Traefik |
 | Application services | Sanitized `example-app-*` images | 3 replicas, PDB, HPA, anti-affinity/topology spread |
 | Kafka | `confluentinc/cp-kafka:7.9.6` + `confluentinc/cp-zookeeper:7.9.6` | 3 brokers, 3 ZooKeeper pods, Kafka UI |
 | Redis | `redis:8.6.2` | 3 Redis pods + Sentinel scaffolding |
@@ -168,7 +168,7 @@ Supported database profiles are defined in [`config/databases.catalog.yaml`](con
 3. Vault bootstrap tokens and keepalived shared secrets before running mutating Ansible targets.
 4. Pin `rke2_version` in production inventory.
 5. Push local/private images to a registry or preload them onto all RKE2 nodes with `scripts/images/preload-rke2.sh`.
-6. Enable TLS and cert-manager in `deploy/helmfile.yaml`.
+6. Keep HTTPS redirect enabled; provide `ingress.tls.secretName` through cert-manager, External Secrets, SOPS, Sealed Secrets, or Vault before live production.
 7. Review `config/secrets.contract.yaml` and put secret values in SOPS, External Secrets, Sealed Secrets, or Vault.
 8. Choose storage classes for CloudNativePG, Kafka, Redis, Elasticsearch, and ClickHouse/OpenSearch if enabled.
 9. Run `make lint`, `make validate`, `make policy`, `make deploy-dry-run`, and Ansible check targets before production deploy.

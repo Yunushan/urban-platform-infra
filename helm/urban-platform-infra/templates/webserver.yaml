@@ -84,4 +84,43 @@ spec:
       port: {{ $p.servicePort }}
       targetPort: {{ $p.containerPort }}
     {{- end }}
+{{- if and .Values.ingress.enabled (.Values.webserver.ingress.enabled | default true) }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: webserver
+  namespace: {{ include "cip.namespace" . }}
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/ssl-redirect: {{ .Values.ingress.sslRedirect | default true | quote }}
+    nginx.ingress.kubernetes.io/force-ssl-redirect: {{ .Values.ingress.forceSslRedirect | default true | quote }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - secretName: {{ .Values.ingress.tls.secretName | quote }}
+      {{- if .Values.ingress.host }}
+      hosts: [{{ .Values.ingress.host | quote }}]
+      {{- end }}
+  {{- end }}
+  rules:
+    {{- if .Values.ingress.host }}
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+    {{- else }}
+    - http:
+    {{- end }}
+        paths:
+          - path: {{ .Values.webserver.ingress.path | default "/" | quote }}
+            pathType: Prefix
+            backend:
+              service:
+                name: webserver
+                port:
+                  number: {{ .Values.webserver.ingress.servicePort | default 80 }}
+{{- end }}
 {{- end }}

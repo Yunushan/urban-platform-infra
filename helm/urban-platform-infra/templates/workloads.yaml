@@ -213,16 +213,27 @@ metadata:
   namespace: {{ include "cip.namespace" $ }}
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/ssl-redirect: {{ $.Values.ingress.sslRedirect | default true | quote }}
+    nginx.ingress.kubernetes.io/force-ssl-redirect: {{ $.Values.ingress.forceSslRedirect | default true | quote }}
+    {{- with $.Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   ingressClassName: {{ $.Values.ingress.className | quote }}
   {{- if $.Values.ingress.tls.enabled }}
   tls:
-    - hosts: [{{ $.Values.ingress.host | quote }}]
-      secretName: {{ $.Values.ingress.tls.secretName | quote }}
+    - secretName: {{ $.Values.ingress.tls.secretName | quote }}
+      {{- if $.Values.ingress.host }}
+      hosts: [{{ $.Values.ingress.host | quote }}]
+      {{- end }}
   {{- end }}
   rules:
+    {{- if $.Values.ingress.host }}
     - host: {{ $.Values.ingress.host | quote }}
       http:
+    {{- else }}
+    - http:
+    {{- end }}
         paths:
           - path: {{ $svc.ingress.path | default (printf "/%s" $name) | quote }}
             pathType: Prefix

@@ -222,7 +222,11 @@ global:
     - registry-credentials
 
 ingress:
-  host: <application-domain>
+  # Empty host matches the local VIP/IP in a lab. Use a real FQDN in production.
+  host: ""
+  tls:
+    enabled: true
+    secretName: urban-platform-tls
 ```
 
 Deploy with the three-node topology override:
