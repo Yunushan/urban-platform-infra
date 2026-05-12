@@ -36,6 +36,16 @@
       no_log: true
       when: selected_cluster_engine == 'rke2'
 
+    - name: Build cluster node IP list for CIDR validation
+      ansible.builtin.set_fact:
+        cluster_node_ips_for_cidr_validation: >-
+          {{
+            (cluster_node_ips_for_cidr_validation | default([])) +
+            [hostvars[item].node_ip | default(hostvars[item].ansible_host | default(''))]
+          }}
+      loop: "{{ groups.get('cluster_nodes', []) }}"
+      when: selected_cluster_engine == 'rke2'
+
     - name: Validate RKE2 pod and service CIDR plan
       ansible.builtin.shell: |
         set -euo pipefail
@@ -87,13 +97,7 @@
         CLUSTER_DNS: "{{ cluster_dns | default('100.65.0.10') }}"
         CLUSTER_VIP: "{{ cluster_vip | default('') }}"
         UNDERLAY_CIDRS_JSON: "{{ cluster_underlay_cidrs | default([]) | to_json }}"
-        NODE_IPS_JSON: >-
-          [
-          {%- for host in groups.get('cluster_nodes', []) -%}
-          "{{ hostvars[host].node_ip | default(hostvars[host].ansible_host | default('')) }}"
-          {%- if not loop.last -%},{%- endif -%}
-          {%- endfor -%}
-          ]
+        NODE_IPS_JSON: "{{ cluster_node_ips_for_cidr_validation | default([]) | to_json }}"
       changed_when: false
       when: selected_cluster_engine == 'rke2'
 
