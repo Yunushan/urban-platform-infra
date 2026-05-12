@@ -24,6 +24,8 @@ The first RKE2 server must open local port `9345` before the VIP can forward reg
 
 The role also rejects any rendered `/etc/rancher/rke2/config.yaml` that still contains `cluster-init:` and prints an initial service/journal snapshot before waiting. If the first snapshot already shows `ExecMainStatus=2`, use the printed journal lines as the root cause.
 
+The first server must not have a `server:` entry in `/etc/rancher/rke2/config.yaml`; later servers must have one. The role validates this before starting RKE2 to prevent the first server from trying to join through a VIP that has no healthy backend yet.
+
 If HAProxy is running but reports `backend rke2_registration_servers has no server available`, check the RKE2 service diagnostics from the failed play output first. HAProxy will stay down until at least one server listens on `9345`.
 
 ## Images cannot be pulled

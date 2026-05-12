@@ -287,11 +287,15 @@ if 'cluster-init:' in rke2_server_config_template:
 rke2_role_tasks_text = (ROOT / 'ansible/roles/rke2/tasks/main.yml').read_text(encoding='utf-8')
 for rke2_wait_token in [
     'Reject unsupported RKE2 cluster-init config',
+    'Check RKE2 server join URL in rendered config',
     'Show initial RKE2 startup state',
     'ExecMainStatus',
     'systemctl is-failed --quiet "{{ rke2_service_name }}"',
     'rke2_registration_probe',
-    'failed_when: rke2_registration_probe.rc == 2',
+    'until: rke2_registration_probe.rc in [0, 2]',
+    'Fail when RKE2 service fails during registration wait',
+    'RKE2 did not open local registration port 9345 before timeout.',
+    'Recent journal:',
     'registration_waiting',
     'ss -ltnH',
 ]:

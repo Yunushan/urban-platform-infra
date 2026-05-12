@@ -51,6 +51,22 @@
   failed_when: rke2_unsupported_cluster_init.rc == 0
   when: inventory_hostname in groups['rke2_servers']
 
+- name: Check RKE2 server join URL in rendered config
+  ansible.builtin.command: grep -n '^server:' /etc/rancher/rke2/config.yaml
+  register: rke2_server_join_url
+  changed_when: false
+  failed_when: >-
+    (
+      inventory_hostname == groups['rke2_servers'][0]
+      and rke2_server_join_url.rc == 0
+    )
+    or
+    (
+      inventory_hostname != groups['rke2_servers'][0]
+      and rke2_server_join_url.rc != 0
+    )
+  when: inventory_hostname in groups['rke2_servers']
+
 - name: Install RKE2 server
   ansible.builtin.shell: |
     set -euo pipefail
@@ -195,10 +211,15 @@
         executable: /bin/bash
       register: rke2_registration_probe
       changed_when: false
-      failed_when: rke2_registration_probe.rc == 2
+      failed_when: false
       retries: "{{ rke2_local_registration_retries | default(30) }}"
       delay: "{{ rke2_local_registration_delay | default(10) }}"
-      until: rke2_registration_probe.rc == 0
+      until: rke2_registration_probe.rc in [0, 2]
+
+    - name: Fail when RKE2 service fails during registration wait
+      ansible.builtin.fail:
+        msg: "{{ rke2_registration_probe.stdout | default('RKE2 service failed before registration port 9345 opened.') }}"
+      when: rke2_registration_probe.rc == 2
   rescue:
     - name: Read RKE2 service status after registration wait failure
       ansible.builtin.command: "systemctl status {{ rke2_service_name }} --no-pager -l"
@@ -227,7 +248,14 @@
 
     - name: Fail because RKE2 registration endpoint did not open
       ansible.builtin.fail:
-        msg: "RKE2 did not open local registration port 9345 before timeout. See the diagnostics printed above."
+        msg:
+          - "RKE2 did not open local registration port 9345 before timeout."
+          - "Service status:"
+          - "{{ rke2_service_status.stdout_lines | default([]) }}"
+          - "Recent journal:"
+          - "{{ rke2_service_journal.stdout_lines | default([]) }}"
+          - "Relevant listeners:"
+          - "{{ rke2_socket_state.stdout_lines | default([]) | select('search', ':6443|:9345|:2379|:2380|:10250') | list }}"
   when:
     - inventory_hostname in groups['rke2_servers']
     - not ansible_check_mode
