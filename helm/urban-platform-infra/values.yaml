@@ -33,7 +33,7 @@ global:
     topologySpread: true
     antiAffinity: preferred
 namespace:
-  create: false
+  create: true
   name: urban-platform
   podSecurity:
     enforce: baseline

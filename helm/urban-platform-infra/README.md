@@ -10,7 +10,7 @@ helm template urban-platform-infra . -n urban-platform -f values.yaml
 
 # Install/upgrade
 kubectl create namespace urban-platform --dry-run=client -o yaml | kubectl apply -f -
-helm upgrade --install urban-platform-infra . -n urban-platform --cleanup-on-fail -f values.yaml
+helm upgrade --install urban-platform-infra . -n urban-platform --cleanup-on-fail --set namespace.create=false -f values.yaml
 ```
 
 Switches are handled in `values.yaml`:
@@ -24,3 +24,4 @@ Switches are handled in `values.yaml`:
 
 CloudNativePG and ECK CRs require operators. Install them with `make install-operators`.
 The default pins expect CloudNativePG 1.29+ and ECK 3.4+ for PostgreSQL 18 and Elastic Stack 9.x support.
+The chart renders a labeled Namespace by default for GitOps/policy checks; imperative `helm upgrade --install` paths should pre-create the namespace and set `namespace.create=false`.

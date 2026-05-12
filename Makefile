@@ -114,7 +114,7 @@ release-evidence: package-chart ## Generate rendered manifest, SPDX SBOM, and ch
 	python3 scripts/release/generate_sbom.py --chart helm/urban-platform-infra --dist dist --rendered dist/rendered.yaml --sbom dist/urban-platform-infra.spdx.json --checksums dist/SHA256SUMS
 
 deploy: install-operators ensure-namespace ## Deploy/upgrade the HA application platform.
-	$(HELM) upgrade --install $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) --cleanup-on-fail -f $(VALUES) -f $(TOPOLOGY_VALUES)
+	$(HELM) upgrade --install $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) --cleanup-on-fail --set namespace.create=false -f $(VALUES) -f $(TOPOLOGY_VALUES)
 
 status: ## Show cluster and workload status.
 	scripts/health/status.sh $(NAMESPACE)

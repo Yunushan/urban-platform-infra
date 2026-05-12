@@ -241,6 +241,7 @@ kubectl create namespace urban-platform --dry-run=client -o yaml | kubectl apply
 helm upgrade --install urban-platform-infra helm/urban-platform-infra \
   --namespace urban-platform \
   --cleanup-on-fail \
+  --set namespace.create=false \
   -f helm/urban-platform-infra/values.yaml \
   -f helm/urban-platform-infra/topologies/three-node-ha.yaml \
   -f <private-values-file>

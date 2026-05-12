@@ -83,6 +83,7 @@ tasks:
         helm upgrade --install urban-platform-infra helm/urban-platform-infra
         --namespace urban-platform
         --cleanup-on-fail
+        --set namespace.create=false
         -f helm/urban-platform-infra/values.yaml
         -f helm/urban-platform-infra/topologies/{{.TOPOLOGY}}.yaml
   observability-status:

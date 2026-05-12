@@ -146,8 +146,8 @@ for redirect_key in ['sslRedirect', 'forceSslRedirect']:
         errors.append(f'Ingress HTTPS redirect must be enabled by default: {redirect_key}')
 if values.get('webserver', {}).get('ingress', {}).get('enabled') is not True:
     errors.append('Webserver root ingress must be enabled by default')
-if values.get('namespace', {}).get('create') is not False:
-    errors.append('Namespace manifest rendering must be disabled by default; deploy tooling labels it first')
+if values.get('namespace', {}).get('create') is not True:
+    errors.append('Namespace manifest rendering must be enabled by default for GitOps and policy checks')
 if values.get('monitoring', {}).get('enabled') is not False:
     errors.append('Monitoring CRDs must be disabled by default so the chart renders before operators are installed')
 timescaledb_values = values.get('databases', {}).get('instances', {}).get('timescaledb', {})
@@ -399,6 +399,7 @@ for makefile_helm_token in [
     'ensure-namespace:',
     'kubectl create namespace $(NAMESPACE)',
     'kubectl label namespace $(NAMESPACE)',
+    '--set namespace.create=false',
     'deploy: install-operators ensure-namespace',
 ]:
     if makefile_helm_token not in makefile_text:
