@@ -18,8 +18,10 @@ ANSIBLE_DIFF ?= --diff
 ANSIBLE_COLLECTION_REQUIREMENTS ?= ansible/requirements.yml
 ANSIBLE_COLLECTIONS_STAMP ?= .ansible/collections/.$(subst /,_,$(ANSIBLE_COLLECTION_REQUIREMENTS)).stamp
 CONFIRM_PROD ?= false
+HELM ?= helm
+HELM_INSTALL_SCRIPT ?= scripts/tools/install-helm.sh
 
-.PHONY: help validate image-policy lint configure ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster install-operators deploy deploy-dry-run package-chart release-evidence status observability-status docker-up docker-down docker-status policy clean
+.PHONY: help validate image-policy lint configure ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster install-helm install-operators deploy deploy-dry-run package-chart release-evidence status observability-status docker-up docker-down docker-status policy clean
 
 define require_prod_confirmation
 	@if [ "$(ENV)" = "prod" ] && [ "$(CONFIRM_PROD)" != "true" ]; then \
@@ -69,29 +71,32 @@ install-cluster: ansible-collections ## Install selected cluster engine: rke2, k
 	$(call require_prod_confirmation)
 	ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) $(ANSIBLE_PLAYBOOK) -i $(INVENTORY) ansible/playbooks/install-cluster.yml -e cluster_engine=$(ENGINE) -e deployment_environment=$(ENV) $(ANSIBLE_ARGS)
 
-install-operators: ## Install optional operators/charts needed for HA data and observability profiles.
+install-helm: ## Install Helm on the operator machine when it is missing.
+	bash $(HELM_INSTALL_SCRIPT)
+
+install-operators: install-helm ## Install optional operators/charts needed for HA data and observability profiles.
 	helmfile -f deploy/helmfile.yaml apply
 
-deploy-dry-run: ## Render the Helm chart without applying it.
-	helm template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f $(VALUES) -f $(TOPOLOGY_VALUES) --dry-run > rendered.yaml
+deploy-dry-run: install-helm ## Render the Helm chart without applying it.
+	$(HELM) template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f $(VALUES) -f $(TOPOLOGY_VALUES) --dry-run > rendered.yaml
 
 policy: ## Run policy checks against rendered manifests.
 	mkdir -p reports
-	helm template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f $(VALUES) -f $(TOPOLOGY_VALUES) > reports/rendered.yaml
+	$(HELM) template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f $(VALUES) -f $(TOPOLOGY_VALUES) > reports/rendered.yaml
 	python3 tests/policy/basic_policy.py reports/rendered.yaml
 
-package-chart: ## Package the Helm chart into dist/.
+package-chart: install-helm ## Package the Helm chart into dist/.
 	mkdir -p dist
-	helm dependency build helm/urban-platform-infra
-	helm lint helm/urban-platform-infra
-	helm package helm/urban-platform-infra -d dist
+	$(HELM) dependency build helm/urban-platform-infra
+	$(HELM) lint helm/urban-platform-infra
+	$(HELM) package helm/urban-platform-infra -d dist
 
 release-evidence: package-chart ## Generate rendered manifest, SPDX SBOM, and checksums for a release.
-	helm template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f $(VALUES) > dist/rendered.yaml
+	$(HELM) template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f $(VALUES) > dist/rendered.yaml
 	python3 scripts/release/generate_sbom.py --chart helm/urban-platform-infra --dist dist --rendered dist/rendered.yaml --sbom dist/urban-platform-infra.spdx.json --checksums dist/SHA256SUMS
 
-deploy: ## Deploy/upgrade the HA application platform.
-	helm upgrade --install $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) --create-namespace -f $(VALUES) -f $(TOPOLOGY_VALUES)
+deploy: install-helm ## Deploy/upgrade the HA application platform.
+	$(HELM) upgrade --install $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) --create-namespace -f $(VALUES) -f $(TOPOLOGY_VALUES)
 
 status: ## Show cluster and workload status.
 	scripts/health/status.sh $(NAMESPACE)

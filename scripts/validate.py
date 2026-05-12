@@ -28,6 +28,7 @@ REQUIRED = [
     'config/deployment-topologies.yaml', 'config/secrets.contract.yaml',
     'config/supply-chain-policy.yaml', 'config/image-policy.yaml', 'config/slo.yaml',
     'scripts/images/validate-images.py', 'scripts/release/generate_sbom.py',
+    'scripts/tools/install-helm.sh',
     'tests/policy/basic_policy.py', 'docs/bootstrap-safety.md', 'docs/secrets-management.md',
     'docs/supply-chain.md', 'docs/image-governance.md', 'docs/observability-slo.md',
     'docs/deployment-topologies.md', 'docs/runbooks.md', 'docs/release-guide.md',
@@ -361,6 +362,18 @@ if 'CONFIRM_PROD' not in makefile_text:
     errors.append('Makefile mutating Ansible targets must require production confirmation')
 if 'bootstrap-check' not in makefile_text or 'install-cluster-check' not in makefile_text:
     errors.append('Makefile must expose Ansible check-mode targets')
+for makefile_helm_token in ['install-helm:', 'HELM_INSTALL_SCRIPT', 'deploy: install-helm']:
+    if makefile_helm_token not in makefile_text:
+        errors.append(f'Makefile must auto-install Helm before deploy: {makefile_helm_token}')
+
+helm_installer_text = (ROOT / 'scripts/tools/install-helm.sh').read_text(encoding='utf-8')
+for helm_installer_token in [
+    'command -v helm',
+    'https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3',
+    'helm version --short',
+]:
+    if helm_installer_token not in helm_installer_text:
+        errors.append(f'Helm installer script missing token: {helm_installer_token}')
 
 bootstrap_script = (ROOT / 'scripts/bootstrap.sh').read_text(encoding='utf-8')
 if 'CONFIRM_PROD' not in bootstrap_script:

@@ -8,6 +8,8 @@ make install-operators
 make deploy
 ```
 
+The deployment target installs Helm on the operator machine when it is missing.
+
 ## Observe
 
 ```bash
