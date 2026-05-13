@@ -98,7 +98,8 @@ install-operators: install-helmfile operator-kubeconfig ## Install optional oper
 	$(MAKE) wait-operator-crds OPERATOR_CRD_TIMEOUT=$(OPERATOR_CRD_TIMEOUT) OPERATOR_KUBECONFIG=$(OPERATOR_KUBECONFIG)
 
 ensure-namespace: ## Create and label the target namespace before deploying the platform chart.
-	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl create namespace $(NAMESPACE) --dry-run=client -o yaml | KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl apply -f -
+	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl get namespace $(NAMESPACE) >/dev/null 2>&1 || \
+		KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl create namespace $(NAMESPACE)
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl label namespace $(NAMESPACE) pod-security.kubernetes.io/enforce=baseline pod-security.kubernetes.io/audit=restricted pod-security.kubernetes.io/warn=restricted pod-security.kubernetes.io/enforce-version=latest pod-security.kubernetes.io/audit-version=latest pod-security.kubernetes.io/warn-version=latest --overwrite
 
 deploy-dry-run: install-helm ## Render the Helm chart without applying it.

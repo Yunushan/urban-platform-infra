@@ -249,7 +249,7 @@ ingress:
 Deploy with the three-node topology override:
 
 ```bash
-kubectl create namespace urban-platform --dry-run=client -o yaml | kubectl apply -f -
+kubectl get namespace urban-platform >/dev/null 2>&1 || kubectl create namespace urban-platform
 
 helm upgrade --install urban-platform-infra helm/urban-platform-infra \
   --namespace urban-platform \

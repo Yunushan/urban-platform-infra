@@ -38,7 +38,8 @@ releases:
     installed: {{ env "INSTALL_CERT_MANAGER" | default "true" }}
     createNamespace: true
     values:
-      - installCRDs: true
+      - crds:
+          enabled: true
 
   - name: cloudnative-pg
     namespace: cnpg-system

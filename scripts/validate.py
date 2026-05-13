@@ -512,6 +512,7 @@ for makefile_helm_token in [
     'crd/elasticsearches.elasticsearch.k8s.elastic.co',
     'crd/kibanas.kibana.k8s.elastic.co',
     'ensure-namespace:',
+    'kubectl get namespace $(NAMESPACE)',
     'kubectl create namespace $(NAMESPACE)',
     'kubectl label namespace $(NAMESPACE)',
     '--set namespace.create=false',
@@ -812,11 +813,23 @@ for helmfile_token in [
     'eck-operator',
     'version: 0.28.0',
     'version: 3.4.0',
-    'installCRDs: true',
     'memory: 512Mi',
 ]:
     if helmfile_token not in helmfile_text:
         errors.append(f'Helmfile missing default observability stack token: {helmfile_token}')
+
+cert_manager_release = re.search(
+    r'(?ms)^  - name: cert-manager\n.*?(?=^  - name:|\Z)',
+    helmfile_text,
+)
+if not cert_manager_release:
+    errors.append('Helmfile missing cert-manager release')
+else:
+    cert_manager_text = cert_manager_release.group(0)
+    if 'crds:' not in cert_manager_text or 'enabled: true' not in cert_manager_text:
+        errors.append('cert-manager Helmfile release must use crds.enabled=true')
+    if 'installCRDs' in cert_manager_text:
+        errors.append('cert-manager Helmfile release must not use deprecated installCRDs')
 
 for path in text_files():
     if any(marker in path.name for marker in ['.decrypted.', '.plain.', '.sops.dec.']):

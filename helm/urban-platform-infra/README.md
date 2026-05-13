@@ -9,7 +9,7 @@ This chart renders the default HA application stack for `urban-platform-infra`.
 helm template urban-platform-infra . -n urban-platform -f values.yaml
 
 # Install/upgrade
-kubectl create namespace urban-platform --dry-run=client -o yaml | kubectl apply -f -
+kubectl get namespace urban-platform >/dev/null 2>&1 || kubectl create namespace urban-platform
 helm upgrade --install urban-platform-infra . -n urban-platform --cleanup-on-fail --set namespace.create=false -f values.yaml
 ```
 
