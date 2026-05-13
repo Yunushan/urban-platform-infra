@@ -68,6 +68,18 @@ traefik.ingress.kubernetes.io/router.tls: "true"
 {{- end }}
 {{- end -}}
 
+{{- define "cip.traefikRedirectMiddlewareRef" -}}
+{{- printf "%s-redirect-https@kubernetescrd" (include "cip.namespace" .) -}}
+{{- end -}}
+
+{{- define "cip.traefikHttpRedirectAnnotations" -}}
+traefik.ingress.kubernetes.io/router.entrypoints: "web"
+traefik.ingress.kubernetes.io/router.middlewares: {{ include "cip.traefikRedirectMiddlewareRef" . | quote }}
+{{- with .Values.ingress.annotations }}
+{{- toYaml . }}
+{{- end }}
+{{- end -}}
+
 {{- define "cip.podSpecDefaults" -}}
 serviceAccountName: {{ include "cip.serviceAccountName" . }}
 automountServiceAccountToken: {{ .Values.global.serviceAccount.automountServiceAccountToken | default false }}

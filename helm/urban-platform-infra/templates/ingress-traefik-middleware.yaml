@@ -1,0 +1,13 @@
+{{- if and .Values.ingress.enabled (eq (.Values.ingress.className | default "traefik") "traefik") (or (.Values.ingress.sslRedirect | default true) (.Values.ingress.forceSslRedirect | default true)) }}
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-https
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+{{- end }}

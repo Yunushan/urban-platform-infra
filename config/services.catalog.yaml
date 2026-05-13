@@ -277,12 +277,11 @@ images:
   ports:
   - 5018
 - name: webserver-nginx
-  image: nginx:1.30.0
+  image: nginxinc/nginx-unprivileged:1.30.0
   category: webserver
   type: web
   ports:
   - 80
-  - 443
   replicas: 3
 - name: kafka
   image: confluentinc/cp-kafka:7.9.6

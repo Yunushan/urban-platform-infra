@@ -2,10 +2,9 @@ default: nginx
 defaultIngressClass: traefik
 providers:
   nginx:
-    image: nginx:1.30.0
+    image: nginxinc/nginx-unprivileged:1.30.0
     ports:
     - 80
-    - 443
     ingressClass: traefik
     status: default
   apache-httpd:

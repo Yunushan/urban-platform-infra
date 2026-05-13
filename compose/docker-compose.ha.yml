@@ -427,11 +427,10 @@ services:
     ports:
     - 5018:5018
   nginx:
-    image: nginx:1.30.0
+    image: nginxinc/nginx-unprivileged:1.30.0
     restart: unless-stopped
     ports:
-    - 80:80
-    - 443:443
+    - 80:8080
     networks:
     - urban-platform
     deploy:

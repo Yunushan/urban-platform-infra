@@ -456,8 +456,26 @@ for rke2_upstream_traefik_token in [
     if rke2_upstream_traefik_token not in rke2_upstream_traefik_template:
         errors.append(f'Upstream Traefik template missing pinning token: {rke2_upstream_traefik_token}')
 
+rke2_bundled_traefik_config_template = (
+    ROOT / 'ansible/roles/rke2/templates/traefik-config.yaml.j2'
+).read_text(encoding='utf-8')
+for rke2_bundled_traefik_token in [
+    'kind: HelmChartConfig',
+    'redirections:',
+    'entryPoint:',
+    'to: websecure',
+    'scheme: https',
+    'permanent: true',
+]:
+    if rke2_bundled_traefik_token not in rke2_bundled_traefik_config_template:
+        errors.append(f'Bundled Traefik config missing HTTPS redirect token: {rke2_bundled_traefik_token}')
+
 workload_template_text = (ROOT / 'helm/urban-platform-infra/templates/workloads.yaml').read_text(encoding='utf-8')
 webserver_template_text = (ROOT / 'helm/urban-platform-infra/templates/webserver.yaml').read_text(encoding='utf-8')
+helpers_template_text = (ROOT / 'helm/urban-platform-infra/templates/_helpers.tpl').read_text(encoding='utf-8')
+traefik_middleware_template_text = (
+    ROOT / 'helm/urban-platform-infra/templates/ingress-traefik-middleware.yaml'
+).read_text(encoding='utf-8')
 for ingress_template_token in [
     'include "cip.ingressAnnotations"',
     'secretName: {{ $.Values.ingress.tls.secretName | quote }}',
@@ -470,9 +488,30 @@ for webserver_ingress_token in [
     'path: {{ .Values.webserver.ingress.path | default "/" | quote }}',
     'number: {{ .Values.webserver.ingress.servicePort | default 80 }}',
     'include "cip.ingressAnnotations"',
+    'name: webserver-redirect',
+    'include "cip.traefikHttpRedirectAnnotations"',
+    'podSecurityContext',
+    'resources:',
 ]:
     if webserver_ingress_token not in webserver_template_text:
         errors.append(f'Webserver template missing root HTTPS ingress token: {webserver_ingress_token}')
+for traefik_redirect_token in [
+    'cip.traefikRedirectMiddlewareRef',
+    'cip.traefikHttpRedirectAnnotations',
+    'router.entrypoints: "web"',
+    'router.middlewares',
+]:
+    if traefik_redirect_token not in helpers_template_text:
+        errors.append(f'Ingress helpers missing Traefik redirect token: {traefik_redirect_token}')
+for traefik_middleware_token in [
+    'kind: Middleware',
+    'apiVersion: traefik.io/v1alpha1',
+    'name: redirect-https',
+    'redirectScheme:',
+    'permanent: true',
+]:
+    if traefik_middleware_token not in traefik_middleware_template_text:
+        errors.append(f'Traefik middleware template missing redirect token: {traefik_middleware_token}')
 
 cnpg_cluster_template_text = (ROOT / 'helm/urban-platform-infra/templates/databases-cnpg.yaml').read_text(encoding='utf-8')
 for cnpg_cluster_token in ['imageCatalogRef:', 'imageName:', '$db.imageCatalogRef.major']:
@@ -715,6 +754,7 @@ if 'latest-pg18' not in blocked_tags:
 if image_policy_controls.get('defaultApplicationTag') != '0.1.0':
     errors.append('Image policy must pin placeholder application images to 0.1.0')
 for approved_repository in [
+    'nginxinc/nginx-unprivileged',
     'confluentinc/cp-zookeeper',
     'provectuslabs/kafka-ui',
     'timescale/timescaledb',
@@ -736,7 +776,7 @@ runtime_image_surface_text = '\n'.join(
     ]
 )
 for current_runtime_image in [
-    'nginx:1.30.0',
+    'nginxinc/nginx-unprivileged:1.30.0',
     'confluentinc/cp-kafka:7.9.6',
     'confluentinc/cp-zookeeper:7.9.6',
     'redis:8.6.2',
