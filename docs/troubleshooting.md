@@ -52,7 +52,7 @@ The role also rejects any rendered `/etc/rancher/rke2/config.yaml` that still co
 
 The first server must not have a `server:` entry in `/etc/rancher/rke2/config.yaml`; later servers must have one. The role validates this before starting RKE2 to prevent the first server from trying to join through a VIP that has no healthy backend yet.
 
-If HAProxy is running but reports `backend rke2_registration_servers has no server available`, check the RKE2 service diagnostics from the failed play output first. HAProxy will stay down until at least one server listens on `9345`.
+If HAProxy is running but reports `backend rke2_registration_servers has no server available`, check the RKE2 service diagnostics from the failed play output first. HAProxy will stay down until at least one server can complete the TLS health check on `9345`.
 
 If the journal shows `failed to recover v3 backend from snapshot`, `failed to find database snapshot file`, or `snapshot file doesn't exist`, the node has a stale or corrupt embedded-etcd datastore from an interrupted bootstrap. The RKE2 role scans the recent journal for that exact panic before waiting on `9345`, stops the service, archives `/var/lib/rancher/rke2/server/db` to `/var/lib/rancher/rke2/server/db.corrupt.<timestamp>`, resets the failed unit, and retries startup. Set `rke2_auto_recover_corrupt_etcd_snapshot=false` in inventory if you want to inspect and recover an established production datastore manually.
 
@@ -69,8 +69,7 @@ metrics-server, and the host firewall is blocking cross-node pod traffic. The
 `<node-lan-cidr>` node network.
 
 The RKE2 role opens the RKE2 ports, trusts the configured pod and service CIDRs
-in firewalld, enables overlay egress masquerading, and pins flannel to the node
-default interface. Re-run `make bootstrap` and `make install-cluster` after
+in firewalld, and enables overlay egress masquerading. Re-run `make bootstrap` and `make install-cluster` after
 updating the inventory or role, then verify:
 
 ```bash

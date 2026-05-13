@@ -7,7 +7,6 @@ advertise-address: "{{ node_ip | default(ansible_host) }}"
 write-kubeconfig-mode: "0600"
 secrets-encryption: true
 cni: canal
-flannel-iface: "{{ rke2_flannel_iface | default(ansible_default_ipv4.interface) }}"
 cluster-cidr: "{{ pod_cidr | default('100.64.0.0/16') }}"
 service-cidr: "{{ service_cidr | default('100.65.0.0/16') }}"
 cluster-dns: "{{ cluster_dns | default('100.65.0.10') }}"

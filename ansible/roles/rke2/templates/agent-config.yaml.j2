@@ -1,4 +1,3 @@
 token: "{{ rke2_token }}"
 server: "https://{{ cluster_vip }}:{{ rke2_registration_vip_port | default(9346) }}"
 node-ip: "{{ node_ip | default(ansible_host) }}"
-flannel-iface: "{{ rke2_flannel_iface | default(ansible_default_ipv4.interface) }}"

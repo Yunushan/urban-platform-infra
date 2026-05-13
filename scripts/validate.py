@@ -331,7 +331,6 @@ rke2_server_config_template = (ROOT / 'ansible/roles/rke2/templates/config.yaml.
 for rke2_config_token in [
     "{% if inventory_hostname != groups['rke2_servers'][0] %}",
     'server: "https://{{ cluster_vip }}:{{ rke2_registration_vip_port | default(9346) }}"',
-    'flannel-iface: "{{ rke2_flannel_iface | default(ansible_default_ipv4.interface) }}"',
     'cluster-cidr: "{{ pod_cidr | default(\'100.64.0.0/16\') }}"',
     'service-cidr: "{{ service_cidr | default(\'100.65.0.0/16\') }}"',
     'cluster-dns: "{{ cluster_dns | default(\'100.65.0.10\') }}"',
@@ -368,6 +367,10 @@ for rke2_wait_token in [
     'systemctl is-failed --quiet "{{ rke2_service_name }}"',
     'rke2_registration_probe',
     'until: rke2_registration_probe.rc in [0, 2]',
+    'rke2_api_ready_probe',
+    '--request-timeout=10s',
+    'get --raw=/readyz',
+    'RKE2 local Kubernetes API did not become ready before timeout.',
     'Fail when RKE2 service fails during registration wait',
     'RKE2 did not open local registration port 9345 before timeout.',
     'Recent journal:',
@@ -382,6 +385,18 @@ for rke2_wait_token in [
 ]:
     if rke2_wait_token not in rke2_role_tasks_text:
         errors.append(f'RKE2 role missing registration wait diagnostic token: {rke2_wait_token}')
+
+haproxy_template_text = (ROOT / 'ansible/roles/haproxy_keepalived/templates/haproxy.cfg.j2').read_text(
+    encoding='utf-8'
+)
+for haproxy_tls_check_token in [
+    'timeout check 5s',
+    'default-server inter 2s fall 3 rise 2',
+    ':6443 check check-ssl verify none',
+    ':9345 check check-ssl verify none',
+]:
+    if haproxy_tls_check_token not in haproxy_template_text:
+        errors.append(f'HAProxy template missing TLS health-check token: {haproxy_tls_check_token}')
 
 rke2_upstream_traefik_template = (
     ROOT / 'ansible/roles/rke2/templates/traefik-helmchart.yaml.j2'
