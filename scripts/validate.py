@@ -386,6 +386,19 @@ for rke2_wait_token in [
     if rke2_wait_token not in rke2_role_tasks_text:
         errors.append(f'RKE2 role missing registration wait diagnostic token: {rke2_wait_token}')
 
+common_role_tasks_text = (ROOT / 'ansible/roles/common/tasks/main.yml').read_text(encoding='utf-8')
+for common_swap_token in [
+    'Disable Linux swap for Kubernetes',
+    'Disable persistent swap entries on Linux',
+    "common_swap_disable_strategy | default('swapoff')",
+    'Reboot Linux host to clear active swap',
+    'Verify Linux swap is disabled',
+]:
+    if common_swap_token not in common_role_tasks_text:
+        errors.append(f'Common role missing safe swap handling token: {common_swap_token}')
+if 'swapoff -a' in common_role_tasks_text:
+    errors.append('Common role must not use blind swapoff -a; disable active devices safely')
+
 haproxy_template_text = (ROOT / 'ansible/roles/haproxy_keepalived/templates/haproxy.cfg.j2').read_text(
     encoding='utf-8'
 )

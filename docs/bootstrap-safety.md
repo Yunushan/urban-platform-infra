@@ -1,6 +1,8 @@
 # Cluster Bootstrap Safety
 
-Bootstrap is the riskiest part of this repository because it changes remote hosts, installs cluster services, and renders token-bearing configuration. The default workflow is now preflight-first and confirmation-gated for production.
+Bootstrap is the riskiest part of this repository because it changes remote
+hosts, installs cluster services, and renders token-bearing configuration. The
+default workflow is now preflight-first and confirmation-gated for production.
 
 ## Required Flow
 
@@ -46,6 +48,15 @@ Use `ANSIBLE_ARGS` for a controlled limit or extra vars:
 
 ```bash
 make bootstrap-check ENV=prod ENGINE=rke2 ANSIBLE_ARGS="--limit cip-cp-01"
+```
+
+If a Linux node has active swap that cannot be drained safely while it is
+running, bootstrap can reboot that one host after commenting swap entries in
+`/etc/fstab`:
+
+```bash
+make bootstrap ENV=prod ENGINE=rke2 CONFIRM_PROD=true \
+  ANSIBLE_ARGS="--limit urban-platform-infra-2 -e common_swap_disable_strategy=reboot"
 ```
 
 Use `ansible-vault` or your existing secret manager for inventory secrets; never rely on placeholder values outside the example inventory.

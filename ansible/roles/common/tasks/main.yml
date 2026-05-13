@@ -3,10 +3,85 @@
   ansible.builtin.include_tasks: "{{ ansible_os_family }}.yml"
   when: ansible_os_family in ['Debian', 'RedHat', 'FreeBSD']
 
-- name: Disable swap on Linux
-  ansible.builtin.command: swapoff -a
+- name: Disable Linux swap for Kubernetes
+  block:
+    - name: Disable persistent swap entries on Linux
+      ansible.builtin.replace:
+        path: /etc/fstab
+        regexp: '^(\s*[^#\n]\S+\s+\S+\s+swap\s+\S+.*)$'
+        replace: '# \1'
+      register: common_fstab_swap
+
+    - name: Reload systemd after swap fstab update
+      ansible.builtin.command: systemctl daemon-reload
+      changed_when: false
+      when:
+        - common_fstab_swap is changed
+        - not ansible_check_mode
+
+    - name: Read active Linux swap devices
+      ansible.builtin.command:
+        argv:
+          - swapon
+          - --noheadings
+          - --show=NAME
+      register: common_active_swap_devices
+      changed_when: false
+      failed_when: false
+
+    - name: Disable active Linux swap devices
+      ansible.builtin.command:
+        argv:
+          - timeout
+          - "{{ common_swapoff_timeout | default(120) | string }}"
+          - swapoff
+          - "{{ item }}"
+      loop: "{{ common_active_swap_devices.stdout_lines | reject('equalto', '') | list }}"
+      register: common_swapoff_devices
+      changed_when: true
+      when:
+        - not ansible_check_mode
+        - (common_swap_disable_strategy | default('swapoff')) == 'swapoff'
+        - common_active_swap_devices.stdout_lines | reject('equalto', '') | list | length > 0
+
+    - name: Reboot Linux host to clear active swap
+      ansible.builtin.reboot:
+        msg: "Rebooting to finish Kubernetes swap disable."
+        reboot_timeout: "{{ common_swap_reboot_timeout | default(900) }}"
+      when:
+        - not ansible_check_mode
+        - (common_swap_disable_strategy | default('swapoff')) == 'reboot'
+        - common_active_swap_devices.stdout_lines | reject('equalto', '') | list | length > 0
+  rescue:
+    - name: Reboot Linux host after swapoff failure
+      ansible.builtin.reboot:
+        msg: "Rebooting because swapoff failed while preparing Kubernetes."
+        reboot_timeout: "{{ common_swap_reboot_timeout | default(900) }}"
+      when:
+        - not ansible_check_mode
+        - common_reboot_on_swapoff_failure | default(false) | bool
+
+    - name: Fail because Linux swap could not be disabled safely
+      ansible.builtin.fail:
+        msg:
+          - "Could not disable active swap safely."
+          - "Set common_swap_disable_strategy=reboot for this host, or reboot it"
+          - "manually after the role has commented swap entries in /etc/fstab."
+      when: not (common_reboot_on_swapoff_failure | default(false) | bool)
   when: ansible_system == 'Linux'
+
+- name: Verify Linux swap is disabled
+  ansible.builtin.command:
+    argv:
+      - swapon
+      - --noheadings
+      - --show=NAME
+  register: common_verify_swap_devices
   changed_when: false
+  failed_when: common_verify_swap_devices.stdout | trim | length > 0
+  when:
+    - ansible_system == 'Linux'
+    - not ansible_check_mode
 
 - name: Persist Kubernetes kernel modules
   ansible.builtin.copy:
