@@ -66,8 +66,12 @@ tasks:
         --checksums dist/SHA256SUMS
   deploy:
     vars:
+      ENV: '{{.ENV | default "prod"}}'
+      ENGINE: '{{.ENGINE | default "rke2"}}'
+      INVENTORY: '{{.INVENTORY | default "inventories/prod/hosts.yml"}}'
       TOPOLOGY: '{{.TOPOLOGY | default "three-node-ha"}}'
     cmds:
+      - ENV={{.ENV}} ENGINE={{.ENGINE}} INVENTORY={{.INVENTORY}} bash scripts/tools/ensure-kubeconfig.sh
       - >-
         kubectl create namespace urban-platform --dry-run=client -o yaml
         | kubectl apply -f -

@@ -18,6 +18,17 @@ ss -lntp | grep -E '6443|7443|9345|9346'
 curl -k https://<vip>:7443/readyz
 ```
 
+If Helm or kubectl tries `https://127.0.0.1:6443` on the operator machine,
+repair the operator kubeconfig through the project target instead of editing it
+by hand:
+
+```bash
+make operator-kubeconfig ENV=prod ENGINE=rke2 INVENTORY=<private-inventory>
+kubectl config view --minify | grep server
+```
+
+`make install-operators` and `make deploy` run this step automatically.
+
 ## VIP shows ingress 404
 
 A `404 Not Found` from Traefik or nginx at `http://<vip>` or `https://<vip>`

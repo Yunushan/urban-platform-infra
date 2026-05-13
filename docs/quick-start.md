@@ -17,6 +17,10 @@ make deploy ENV=prod
 missing, installs the required operator CRDs, waits for the default CNPG and ECK
 CRDs, then runs the chart upgrade/install.
 
+The install/deploy targets repair the operator kubeconfig automatically for
+RKE2. They copy it from the first server and rewrite `127.0.0.1:6443` to the
+configured Kubernetes API VIP port before running Helm or kubectl.
+
 Topology-specific starting points are also available:
 
 ```bash

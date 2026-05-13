@@ -12,6 +12,11 @@ The deployment target installs Helm and Helmfile when missing, applies the
 templated operator Helmfile, waits for CNPG and ECK CRDs, then installs the
 platform chart.
 
+Before Helmfile, kubectl, or Helm touches the cluster, `make install-operators`
+and `make deploy` run `scripts/tools/ensure-kubeconfig.sh`. That script fetches
+the RKE2 kubeconfig from the first server, rewrites the API endpoint to the
+configured VIP port, and writes it to `${KUBECONFIG}` or `~/.kube/config`.
+
 The default operator pins are intentionally current for this stack:
 CloudNativePG 1.29+ is required for PostgreSQL 18 defaults, and ECK 3.4+ is
 required for Kubernetes 1.34 and Elastic Stack 9.x.
