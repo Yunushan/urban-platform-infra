@@ -83,17 +83,25 @@
         - cluster_engine | default('rke2') == 'rke2'
         - not ansible_check_mode
 
-    - name: Install operator kubeconfig as kubectl default
-      ansible.builtin.copy:
-        dest: "{{ operator_kubeconfig_path }}"
-        mode: '0600'
-        backup: true
-        content: >-
+    - name: Build operator kubeconfig with VIP endpoint
+      ansible.builtin.set_fact:
+        operator_kubeconfig_rendered: >-
           {{
             rke2_operator_kubeconfig.content |
             b64decode |
             regex_replace('server: https://[^\\n]+', 'server: ' ~ rke2_operator_api_url)
           }}
+      no_log: true
+      when:
+        - cluster_engine | default('rke2') == 'rke2'
+        - not ansible_check_mode
+
+    - name: Install operator kubeconfig as kubectl default
+      ansible.builtin.copy:
+        dest: "{{ operator_kubeconfig_path }}"
+        mode: '0600'
+        backup: true
+        content: "{{ operator_kubeconfig_rendered }}"
       diff: false
       no_log: true
       when:
