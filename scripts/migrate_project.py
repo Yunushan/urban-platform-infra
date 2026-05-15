@@ -181,6 +181,14 @@ def run_command(command: list[str], *, env: dict[str, str] | None = None, stdin:
     subprocess.run(command, input=stdin, text=True, env=env, cwd=str(cwd) if cwd else None, check=True)
 
 
+def run_cleanup_command(command: list[str]) -> None:
+    display = " ".join(command)
+    print(f"+ {display}")
+    result = subprocess.run(command)
+    if result.returncode != 0:
+        print(f"Cleanup command failed with exit code {result.returncode}; continuing.")
+
+
 def write_file(path: Path, content: str, executable: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -239,29 +247,47 @@ def pullable_image(image: import_project.ImageRef) -> bool:
     return "/" in image.repository or "." in first_segment or ":" in first_segment
 
 
-def ensure_source_image(record: import_project.ServiceRecord) -> bool:
+def ensure_source_image(record: import_project.ServiceRecord) -> tuple[bool, bool]:
     if record.image is None:
-        return False
+        return False, False
     source = record.image.display
     if docker_image_exists(source):
-        return True
+        return True, False
     if pullable_image(record.image):
         print(f"Source image {source} is not local; pulling it before import.")
         pull = subprocess.run(["docker", "pull", source])
-        return pull.returncode == 0
+        return pull.returncode == 0, pull.returncode == 0
     print(f"Source image {source} is not local and does not look pullable; skipping {record.name}.")
-    return False
+    return False, False
 
 
-def preload_archives_to_nodes(args: argparse.Namespace, archive_dir: Path) -> None:
+def cleanup_operator_docker_tags(images: list[str]) -> None:
+    for image in sorted(set(images)):
+        if docker_image_exists(image):
+            run_cleanup_command(["docker", "image", "rm", image])
+
+
+def cleanup_operator_archives(archive_dir: Path) -> None:
+    removed = 0
+    for archive in sorted(archive_dir.glob("*.tar")):
+        try:
+            archive.unlink()
+            removed += 1
+        except OSError as exc:
+            print(f"Could not remove local image archive {archive}: {exc}")
+    if removed:
+        print(f"Removed {removed} local preload archive(s) from {archive_dir}.")
+
+
+def preload_archives_to_nodes(args: argparse.Namespace, archive_dir: Path) -> bool:
     nodes = [node.strip() for node in args.rke2_nodes.split(",") if node.strip()]
     archives = sorted(archive_dir.glob("*.tar"))
     if not archives:
         print(f"No image archives were written to {archive_dir}.")
-        return
+        return False
     if not nodes:
         print(f"Image archives written to {archive_dir}. Set MIGRATION_RKE2_NODES to copy them to RKE2 nodes automatically.")
-        return
+        return False
     ssh_target_prefix = f"{args.ssh_user}@"
     ssh_options: list[str] = []
     if args.ssh_key:
@@ -285,6 +311,7 @@ def preload_archives_to_nodes(args: argparse.Namespace, archive_dir: Path) -> No
         run_command(["ssh", *ssh_options, target, f"sudo sh -lc 'for archive in {archive_checks}; do test -s \"$archive\"; done'"])
         if args.rke2_import_images:
             import_preloaded_archives_to_containerd(args, ssh_options, target, remote_image_dir)
+    return True
 
 
 def import_preloaded_archives_to_containerd(args: argparse.Namespace, ssh_options: list[str], target: str, remote_image_dir: str) -> None:
@@ -532,6 +559,7 @@ def generate_bundle(
         f'MIGRATION_SSH_USER="${{MIGRATION_SSH_USER:-{args.ssh_user}}}"\n'
         f'MIGRATION_SSH_KEY="${{MIGRATION_SSH_KEY:-{args.ssh_key}}}"\n'
         f'MIGRATION_RKE2_IMPORT_IMAGES="${{MIGRATION_RKE2_IMPORT_IMAGES:-{str(args.rke2_import_images).lower()}}}"\n'
+        f'MIGRATION_CLEANUP_OPERATOR_IMAGES="${{MIGRATION_CLEANUP_OPERATOR_IMAGES:-{str(args.cleanup_operator_images).lower()}}}"\n'
         f'MIGRATION_REGISTRY="${{MIGRATION_REGISTRY:-{args.registry}}}"\n'
         f'MIGRATION_IMAGE_TAG="${{MIGRATION_IMAGE_TAG:-{args.image_tag}}}"\n'
         f'MIGRATION_DUMP_DIR="${{MIGRATION_DUMP_DIR:-{args.dump_dir}}}"\n'
@@ -541,6 +569,8 @@ def generate_bundle(
         'if [ "$MIGRATION_ALLOW_SECRET_MATERIAL" = "true" ]; then ALLOW_FLAG="--allow-secret-material"; fi\n'
         'RKE2_IMPORT_FLAG="--rke2-import-images"\n'
         'if [ "$MIGRATION_RKE2_IMPORT_IMAGES" = "false" ]; then RKE2_IMPORT_FLAG="--no-rke2-import-images"; fi\n'
+        'CLEANUP_OPERATOR_IMAGES_FLAG="--cleanup-operator-images"\n'
+        'if [ "$MIGRATION_CLEANUP_OPERATOR_IMAGES" = "false" ]; then CLEANUP_OPERATOR_IMAGES_FLAG="--no-cleanup-operator-images"; fi\n'
     )
     callback = (
         'python3 "$REPO_ROOT/scripts/migrate_project.py" '
@@ -549,7 +579,7 @@ def generate_bundle(
         '--image-mode "$MIGRATION_IMAGE_MODE" --image-output-dir "$MIGRATION_IMAGE_OUTPUT_DIR" '
         '--rke2-nodes "$MIGRATION_RKE2_NODES" --rke2-image-dir "$MIGRATION_RKE2_IMAGE_DIR" '
         '--ssh-user "$MIGRATION_SSH_USER" --ssh-key "$MIGRATION_SSH_KEY" '
-        '$RKE2_IMPORT_FLAG '
+        '$RKE2_IMPORT_FLAG $CLEANUP_OPERATOR_IMAGES_FLAG '
         '--registry "$MIGRATION_REGISTRY" --image-tag "$MIGRATION_IMAGE_TAG" '
         '--dump-dir "$MIGRATION_DUMP_DIR" --db-targets "$MIGRATION_DB_TARGETS" '
         '--execute $ALLOW_FLAG '
@@ -652,8 +682,11 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
     archive_dir = Path(args.image_output_dir).expanduser()
     if args.image_mode == "preload":
         archive_dir.mkdir(parents=True, exist_ok=True)
+        print("Preload mode stages images on the operator, then copies and verifies archives on the RKE2 nodes.")
     skipped: list[str] = []
     failed: list[str] = []
+    generated_images: list[str] = []
+    pulled_source_images: list[str] = []
     for record, service, build in candidates:
         target_image = local_import_image(args, record)
         compose_path = relative_compose_file(project_path, record.file)
@@ -667,18 +700,28 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                     dockerfile = "Dockerfile"
                 run_command(["docker", "build", "-t", target_image, "-f", dockerfile, "."], cwd=context.resolve())
             elif record.image:
-                if not ensure_source_image(record):
+                source_ready, source_pulled = ensure_source_image(record)
+                if not source_ready:
                     skipped.append(f"{record.file}::{record.name} ({record.image.display})")
                     continue
+                if source_pulled:
+                    pulled_source_images.append(record.image.display)
                 run_command(["docker", "tag", record.image.display, target_image])
+            generated_images.append(target_image)
             if args.image_mode == "registry":
                 run_command(["docker", "push", target_image])
             elif args.image_mode == "preload":
                 run_command(["docker", "save", "-o", str(archive_dir / image_archive_name(record)), target_image])
+            if args.cleanup_operator_images:
+                cleanup_operator_docker_tags([target_image])
         except subprocess.CalledProcessError as exc:
             failed.append(f"{record.file}::{record.name} ({exc.cmd})")
     if args.image_mode == "preload":
-        preload_archives_to_nodes(args, archive_dir)
+        archives_copied = preload_archives_to_nodes(args, archive_dir)
+        if args.cleanup_operator_images and archives_copied:
+            cleanup_operator_archives(archive_dir)
+    if args.cleanup_operator_images:
+        cleanup_operator_docker_tags(generated_images + pulled_source_images)
     if skipped:
         print("Skipped image candidates:")
         for item in skipped:
@@ -840,6 +883,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--ssh-key", default="")
     parser.add_argument("--rke2-import-images", dest="rke2_import_images", action="store_true", default=True)
     parser.add_argument("--no-rke2-import-images", dest="rke2_import_images", action="store_false")
+    parser.add_argument("--cleanup-operator-images", dest="cleanup_operator_images", action="store_true", default=True)
+    parser.add_argument("--no-cleanup-operator-images", dest="cleanup_operator_images", action="store_false")
     parser.add_argument("--registry", default="")
     parser.add_argument("--image-tag", default="imported-0.1.0")
     parser.add_argument("--private-dir", default=str(DEFAULT_PRIVATE_DIR))
