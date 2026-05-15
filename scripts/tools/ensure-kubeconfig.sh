@@ -44,6 +44,64 @@ kubernetes_api_ready() {
   KUBECONFIG="${OPERATOR_KUBECONFIG_PATH}" kubectl get --raw=/readyz --request-timeout=10s >/dev/null 2>&1
 }
 
+start_kubernetes_api_tunnel() {
+  local node="$1"
+  local remote_port="$2"
+  local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
+  local requested_port="${MIGRATION_KUBE_API_TUNNEL_PORT:-16443}"
+  local socket_dir="${TMPDIR:-/tmp}/urban-platform-kubeapi"
+  local socket_path
+  local port
+  local max_port
+  local ssh_options=("-o" "ExitOnForwardFailure=yes")
+
+  if [ -n "${MIGRATION_SSH_KEY:-}" ]; then
+    ssh_options+=("-i" "${MIGRATION_SSH_KEY}")
+  fi
+
+  mkdir -p "${socket_dir}"
+  chmod 0700 "${socket_dir}" 2>/dev/null || true
+
+  port="${requested_port}"
+  max_port="$((requested_port + 20))"
+  while [ "${port}" -le "${max_port}" ]; do
+    socket_path="${socket_dir}/ssh-${node//[^A-Za-z0-9_.-]/_}-${remote_port}-${port}.sock"
+    if ssh -S "${socket_path}" -O check "${ssh_options[@]}" "${ssh_user}@${node}" >/dev/null 2>&1; then
+      echo "${port}"
+      return 0
+    fi
+    rm -f "${socket_path}"
+    echo "Trying SSH tunnel 127.0.0.1:${port} -> ${node}:127.0.0.1:${remote_port}" >&2
+    if ssh "${ssh_options[@]}" -fN -M -S "${socket_path}" \
+      -L "127.0.0.1:${port}:127.0.0.1:${remote_port}" \
+      "${ssh_user}@${node}"; then
+      echo "${port}"
+      return 0
+    fi
+    rm -f "${socket_path}"
+    port="$((port + 1))"
+  done
+
+  return 1
+}
+
+stop_kubernetes_api_tunnel() {
+  local node="$1"
+  local remote_port="$2"
+  local local_port="$3"
+  local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
+  local socket_dir="${TMPDIR:-/tmp}/urban-platform-kubeapi"
+  local socket_path="${socket_dir}/ssh-${node//[^A-Za-z0-9_.-]/_}-${remote_port}-${local_port}.sock"
+  local ssh_options=()
+
+  if [ -n "${MIGRATION_SSH_KEY:-}" ]; then
+    ssh_options+=("-i" "${MIGRATION_SSH_KEY}")
+  fi
+
+  ssh -S "${socket_path}" -O exit "${ssh_options[@]}" "${ssh_user}@${node}" >/dev/null 2>&1 || true
+  rm -f "${socket_path}"
+}
+
 if [ "${ENGINE}" != "rke2" ]; then
   echo "Skipping automatic kubeconfig repair for ENGINE=${ENGINE}; using existing kubectl context."
   exit 0
@@ -145,11 +203,41 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
   done
 
   if [ -z "${selected_endpoint}" ]; then
-    echo "No Kubernetes API endpoint from MIGRATION_RKE2_NODES became ready." >&2
-    echo "Check RKE2 server health/firewall rules, or set MIGRATION_CLUSTER_VIP and MIGRATION_KUBERNETES_API_VIP_PORT to the reachable API endpoint." >&2
-    exit 1
+    if [ "${MIGRATION_KUBE_API_TUNNEL:-auto}" = "false" ]; then
+      echo "No Kubernetes API endpoint from MIGRATION_RKE2_NODES became ready." >&2
+      echo "Check RKE2 server health/firewall rules, or set MIGRATION_CLUSTER_VIP and MIGRATION_KUBERNETES_API_VIP_PORT to the reachable API endpoint." >&2
+      exit 1
+    fi
+    echo "No node API endpoint was reachable directly; trying SSH tunnel fallback." >&2
+    for tunnel_node in "${rke2_nodes[@]}"; do
+      tunnel_node="${tunnel_node//[[:space:]]/}"
+      if [ -z "${tunnel_node}" ]; then
+        continue
+      fi
+      if ! tunnel_port="$(start_kubernetes_api_tunnel "${tunnel_node}" "${kubernetes_api_port}")"; then
+        echo "Could not open an SSH tunnel through ${tunnel_node}; trying the next node." >&2
+        continue
+      fi
+      write_kubeconfig_from_node "${first_rke2_node}" "127.0.0.1" "${tunnel_port}"
+      if kubernetes_api_ready; then
+        selected_endpoint="127.0.0.1:${tunnel_port} via SSH tunnel ${tunnel_node}"
+        break
+      fi
+      echo "Kubernetes API was not ready through SSH tunnel via ${tunnel_node}; trying the next node." >&2
+      stop_kubernetes_api_tunnel "${tunnel_node}" "${kubernetes_api_port}" "${tunnel_port}"
+    done
+
+    if [ -z "${selected_endpoint}" ]; then
+      echo "Kubernetes API was not ready through direct endpoints or SSH tunnel fallback." >&2
+      echo "Check RKE2 service health and passwordless sudo for ${ansible_user_for_nodes}." >&2
+      exit 1
+    fi
   fi
-  echo "Operator kubeconfig ready: ${OPERATOR_KUBECONFIG_PATH} (endpoint https://${selected_endpoint}:${kubernetes_api_port})"
+  if [[ "${selected_endpoint}" == 127.0.0.1:* ]]; then
+    echo "Operator kubeconfig ready: ${OPERATOR_KUBECONFIG_PATH} (endpoint https://${selected_endpoint})"
+  else
+    echo "Operator kubeconfig ready: ${OPERATOR_KUBECONFIG_PATH} (endpoint https://${selected_endpoint}:${kubernetes_api_port})"
+  fi
   exit 0
 fi
 
