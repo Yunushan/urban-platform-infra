@@ -102,6 +102,48 @@ stop_kubernetes_api_tunnel() {
   rm -f "${socket_path}"
 }
 
+show_remote_rke2_diagnostics() {
+  local node="$1"
+  local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
+  local ssh_options=()
+
+  if [ -n "${MIGRATION_SSH_KEY:-}" ]; then
+    ssh_options+=("-i" "${MIGRATION_SSH_KEY}")
+  fi
+
+  echo "Remote RKE2 diagnostics for ${node}:" >&2
+  ssh "${ssh_options[@]}" "${ssh_user}@${node}" 'sh -s' <<'REMOTE_DIAGNOSTICS' >&2 || true
+set -u
+if ! sudo -n true 2>/dev/null; then
+  echo "passwordless sudo is not available for this SSH user"
+  exit 0
+fi
+
+for service in rke2-server rke2-agent; do
+  state="$(sudo systemctl is-active "${service}" 2>/dev/null || true)"
+  if [ -n "${state}" ] && [ "${state}" != "unknown" ]; then
+    echo "${service}: ${state}"
+  fi
+done
+
+if command -v ss >/dev/null 2>&1; then
+  echo "listening RKE2 API ports:"
+  sudo ss -ltnp 2>/dev/null | awk 'NR == 1 || /:6443/ || /:9345/' || true
+fi
+
+echo "local /readyz probe:"
+if command -v rke2 >/dev/null 2>&1; then
+  sudo rke2 kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get --raw=/readyz --request-timeout=10s || true
+elif [ -x /var/lib/rancher/rke2/bin/kubectl ]; then
+  sudo /var/lib/rancher/rke2/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get --raw=/readyz --request-timeout=10s || true
+elif command -v kubectl >/dev/null 2>&1; then
+  sudo kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get --raw=/readyz --request-timeout=10s || true
+else
+  echo "kubectl/rke2 kubectl is not available"
+fi
+REMOTE_DIAGNOSTICS
+}
+
 if [ "${ENGINE}" != "rke2" ]; then
   echo "Skipping automatic kubeconfig repair for ENGINE=${ENGINE}; using existing kubectl context."
   exit 0
@@ -230,6 +272,12 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
     if [ -z "${selected_endpoint}" ]; then
       echo "Kubernetes API was not ready through direct endpoints or SSH tunnel fallback." >&2
       echo "Check RKE2 service health and passwordless sudo for ${ansible_user_for_nodes}." >&2
+      for diagnostic_node in "${rke2_nodes[@]}"; do
+        diagnostic_node="${diagnostic_node//[[:space:]]/}"
+        if [ -n "${diagnostic_node}" ]; then
+          show_remote_rke2_diagnostics "${diagnostic_node}"
+        fi
+      done
       exit 1
     fi
   fi
