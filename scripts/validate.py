@@ -579,6 +579,10 @@ for project_import_token in [
     'literal secret value',
     'ReportRedactor',
     '--redact-sensitive',
+    'Migration Plan',
+    'database_target_images',
+    'pg_dump --format=custom',
+    'ingressClassName: traefik',
 ]:
     if project_import_token not in project_import_text:
         errors.append(f'Project import checker missing token: {project_import_token}')
@@ -592,6 +596,8 @@ for project_import_docs_token in [
     'IMPORT_STRICT=true',
     'IMPORT_REDACT=true',
     'reports/` directory is ignored by Git',
+    'Every report includes a migration plan section',
+    'database upgrades',
 ]:
     if project_import_docs_token not in project_import_docs_text:
         errors.append(f'Project import docs missing token: {project_import_docs_token}')

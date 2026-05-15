@@ -24,6 +24,12 @@ operator machine:
 make import-check PROJECT_PATH=/path/to/compose-project IMPORT_REDACT=true IMPORT_REPORT=reports/import-check-public.md
 ```
 
+Every report includes a migration plan section. In redacted mode, that plan
+keeps exact project paths, Compose filenames, service names, and application
+image names hidden while still showing the selected target infrastructure, such
+as Traefik ingress, the selected webserver image, and PostgreSQL-family target
+images.
+
 Use strict mode when warnings should fail the gate:
 
 ```bash
@@ -50,6 +56,8 @@ It compares the project against the selected platform profile:
 - Approved runtime images are compared with `config/image-policy.yaml`.
 - Literal secret-looking environment values, Docker socket mounts, mutable image
   tags, and host bind mounts are reported before they can leak into Git or Helm.
+- The migration plan groups remediation into secrets, database upgrades, edge
+  routing, image promotion, volume/config conversion, and the validation loop.
 
 ## Migration Flow
 

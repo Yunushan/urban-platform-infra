@@ -83,7 +83,9 @@ make import-check PROJECT_PATH=/path/to/compose-project IMPORT_REDACT=true IMPOR
 
 The read-only checker discovers Compose files, compares service images, ports,
 database versions, web gateway choices, and secret-looking environment values
-against the selected platform profile. See [`docs/project-import.md`](docs/project-import.md).
+against the selected platform profile, then adds a redaction-aware migration
+plan for secrets, database upgrades, Traefik routing, image promotion, and
+volume/config conversion. See [`docs/project-import.md`](docs/project-import.md).
 
 Local Docker profile:
 

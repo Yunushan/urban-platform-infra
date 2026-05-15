@@ -309,6 +309,27 @@ def expected_webserver_image(values: dict[str, Any], provider: str) -> str | Non
     return None
 
 
+def database_target_images(values: dict[str, Any]) -> list[str]:
+    targets: set[str] = set()
+    database_values = values.get("databases", {})
+    for instance in database_values.get("instances", {}).values():
+        image = instance.get("image", {}) if isinstance(instance, dict) else {}
+        repository = image.get("repository")
+        tag = image.get("tag")
+        if repository and tag:
+            targets.add(f"{repository}:{tag}")
+    for catalog in database_values.get("imageCatalogs", {}).values():
+        if not isinstance(catalog, dict):
+            continue
+        for item in catalog.get("images", []):
+            image = item.get("image", {}) if isinstance(item, dict) else {}
+            repository = image.get("repository")
+            tag = image.get("tag")
+            if repository and tag:
+                targets.add(f"{repository}:{tag}")
+    return sorted(targets)
+
+
 def detect_postgres_major(image: ImageRef) -> int | None:
     tag = image.tag or ""
     pg_match = re.search(r"pg(\d{1,2})", tag)
@@ -617,6 +638,121 @@ def read_compose_services(project_path: Path, compose_files: list[Path], finding
     return services
 
 
+def count_findings(findings: list[Finding], needle: str) -> int:
+    return sum(1 for finding in findings if needle in finding.message)
+
+
+def count_runtime_drift(findings: list[Finding]) -> int:
+    return sum(1 for finding in findings if "is not in the approved tag set" in finding.message)
+
+
+def unique_records(records: list[ServiceRecord]) -> list[ServiceRecord]:
+    seen: set[tuple[str, str]] = set()
+    unique: list[ServiceRecord] = []
+    for record in records:
+        key = (record.file, record.name)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(record)
+    return unique
+
+
+def compact_scope(records: list[ServiceRecord], redactor: ReportRedactor, limit: int = 10) -> str:
+    unique = unique_records(records)
+    if not unique:
+        return "none detected"
+    rendered = [
+        f"`{redactor.file(record.file)}` :: `{redactor.service(record.name)}`"
+        for record in unique[:limit]
+    ]
+    remaining = len(unique) - len(rendered)
+    if remaining > 0:
+        rendered.append(f"`+{remaining}` more")
+    return ", ".join(rendered)
+
+
+def render_migration_plan(
+    lines: list[str],
+    service_records: list[ServiceRecord],
+    findings: list[Finding],
+    redactor: ReportRedactor,
+    selected_ingress: str,
+    selected_webserver: str,
+    selected_database: str,
+    expected_web_image: str | None,
+    database_targets: list[str],
+) -> None:
+    secret_errors = count_findings(findings, "literal secret value")
+    docker_socket_errors = count_findings(findings, "/var/run/docker.sock")
+    bind_mounts = count_findings(findings, "host bind mount")
+    build_only = sum(1 for record in service_records if record.build_only)
+    no_tag = count_findings(findings, "has no explicit tag")
+    mutable_tags = count_findings(findings, "uses mutable tag")
+    runtime_drift = count_runtime_drift(findings)
+    database_records = [
+        record for record in service_records if record.kind in {"postgresql", "postgis", "timescaledb"}
+    ]
+    ingress_records = [
+        record for record in service_records
+        if has_edge_publish(record.ports) or (selected_ingress == "traefik" and record.kind in {"nginx", "traefik"})
+    ]
+
+    lines.extend(
+        [
+            "",
+            "## Migration Plan",
+            "",
+            "This plan is safe to generate in redacted mode. Use the private full report only on the operator machine when mapping aliases back to exact files and services.",
+            "",
+            "### 1. Clear Hard Blockers",
+            "",
+            f"- Literal secret findings: `{secret_errors}`. Move values into SOPS, External Secrets, Sealed Secrets, or Vault. Compose placeholders should look like `${{SECRET_NAME}}`, not real values.",
+            f"- Docker socket mounts: `{docker_socket_errors}`. Replace Docker-socket monitoring with Kubernetes-native telemetry, node exporters, Zabbix Kubernetes templates, or a least-privilege agent.",
+            "- Do not commit full import reports; keep private reports under an ignored or external private directory.",
+            "",
+            "### 2. Database Migration",
+            "",
+            f"- Selected database profile: `{selected_database}`.",
+            f"- PostgreSQL-family services detected: `{len(unique_records(database_records))}`.",
+            f"- Target database images from selected values: `{', '.join(database_targets) if database_targets else 'not detected'}`.",
+            f"- Scope sample: {compact_scope(database_records, redactor)}.",
+            "- Do not reuse old PostgreSQL major-version data directories as Kubernetes volumes. Use logical dump/restore when moving PostgreSQL 16-family data to PostgreSQL 18-family targets.",
+            "- Precheck each source with `SELECT version();` and `SELECT extname, extversion FROM pg_extension ORDER BY 1;`.",
+            "- Migration rehearsal pattern: `pg_dump --format=custom --no-owner --no-acl --file=<database>.dump <source>` then `pg_restore --clean --if-exists --no-owner --dbname=<target> <database>.dump`.",
+            "- For PostGIS and TimescaleDB, create/upgrade extensions on the target before restore, then run application smoke tests before switching traffic.",
+            "",
+            "### 3. Edge Routing And Webserver",
+            "",
+            f"- Selected ingress: `{selected_ingress}`. Selected webserver: `{selected_webserver}`.",
+            f"- Target webserver image: `{expected_web_image or 'not detected'}`.",
+            f"- Edge/web scope sample: {compact_scope(ingress_records, redactor)}.",
+            "- For nginx services binding host ports `80` or `443`, move external routing to a Kubernetes `Ingress` with `ingressClassName: traefik`.",
+            "- Preserve backend containers as `ClusterIP` Services. Convert nginx routing rules into Traefik Ingress routes, middlewares, and TLS references.",
+            "- If nginx is only serving static files, bake static content into an application image or mount a ConfigMap/PVC behind Traefik instead of running it as the edge gateway.",
+            "",
+            "### 4. Image Promotion",
+            "",
+            f"- Build-only services: `{build_only}`. Untagged image findings: `{no_tag}`. Mutable tag findings: `{mutable_tags}`. Runtime version drift findings: `{runtime_drift}`.",
+            "- Build application images with explicit release tags, push them to the private registry, then reference those tags from private Helm values.",
+            "- For production, promote images by digest after vulnerability scan and SBOM evidence are attached.",
+            "- Runtime image drift should be handled by either upgrading to the selected platform image pins or intentionally updating `config/image-policy.yaml` and Helm values together.",
+            "",
+            "### 5. Volumes And Configuration",
+            "",
+            f"- Host bind mount findings: `{bind_mounts}`.",
+            "- Config files should become ConfigMaps unless they contain secrets. Secret-like files should become Kubernetes Secret references through the selected secret manager.",
+            "- Stateful data directories should become PVC-backed workloads or operator-managed storage. Database data directories need logical migration, not a raw copy across major versions.",
+            "- Logs should go to stdout/stderr or the selected observability pipeline rather than host log directories.",
+            "",
+            "### 6. Validation Loop",
+            "",
+            "- Re-run `make import-check PROJECT_PATH=/path/to/compose-project IMPORT_REDACT=true IMPORT_REPORT=reports/import-check-public.md` after each remediation batch.",
+            "- When errors reach zero, run with `IMPORT_STRICT=true` to force warnings into the migration backlog before deployment dry runs.",
+        ]
+    )
+
+
 def render_report(
     project_path: Path,
     compose_files: list[Path],
@@ -625,6 +761,8 @@ def render_report(
     selected_ingress: str,
     selected_webserver: str,
     selected_database: str,
+    expected_web_image: str | None,
+    database_targets: list[str],
     redact_sensitive: bool = False,
 ) -> str:
     redactor = ReportRedactor(redact_sensitive)
@@ -669,6 +807,17 @@ def render_report(
             lines.append(f"| `{redactor.file(record.file)}` | `{redactor.service(record.name)}` | `{record.kind}` | `{image}` | `{ports}` |")
     else:
         lines.append("- No services inventoried.")
+    render_migration_plan(
+        lines=lines,
+        service_records=service_records,
+        findings=findings,
+        redactor=redactor,
+        selected_ingress=selected_ingress,
+        selected_webserver=selected_webserver,
+        selected_database=selected_database,
+        expected_web_image=expected_web_image,
+        database_targets=database_targets,
+    )
     if redact_sensitive:
         lines.extend(
             [
@@ -726,6 +875,7 @@ def main(argv: list[str]) -> int:
     selected_webserver = args.webserver or values.get("webserver", {}).get("provider", "nginx")
     selected_database = args.database or values.get("databases", {}).get("provider", "cloudnative-pg")
     expected_web_image = expected_webserver_image(values, selected_webserver)
+    selected_database_targets = database_target_images(values)
 
     findings: list[Finding] = []
     compose_files = find_compose_files(project_path)
@@ -760,6 +910,8 @@ def main(argv: list[str]) -> int:
         selected_ingress=str(selected_ingress),
         selected_webserver=str(selected_webserver),
         selected_database=str(selected_database),
+        expected_web_image=expected_web_image,
+        database_targets=selected_database_targets,
         redact_sensitive=args.redact_sensitive,
     )
     print(report)
