@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -254,6 +255,10 @@ def ensure_source_image(record: import_project.ServiceRecord) -> bool:
 
 def preload_archives_to_nodes(args: argparse.Namespace, archive_dir: Path) -> None:
     nodes = [node.strip() for node in args.rke2_nodes.split(",") if node.strip()]
+    archives = sorted(archive_dir.glob("*.tar"))
+    if not archives:
+        print(f"No image archives were written to {archive_dir}.")
+        return
     if not nodes:
         print(f"Image archives written to {archive_dir}. Set MIGRATION_RKE2_NODES to copy them to RKE2 nodes automatically.")
         return
@@ -262,10 +267,11 @@ def preload_archives_to_nodes(args: argparse.Namespace, archive_dir: Path) -> No
     if args.ssh_key:
         ssh_options.extend(["-i", args.ssh_key])
     remote_tmp = "/tmp/urban-platform-import-images"
+    remote_image_dir = shlex.quote(args.rke2_image_dir)
     for node in nodes:
         target = node if "@" in node else f"{ssh_target_prefix}{node}"
         run_command(["ssh", *ssh_options, target, f"mkdir -p {remote_tmp}"])
-        for archive in sorted(archive_dir.glob("*.tar")):
+        for archive in archives:
             run_command(["scp", *ssh_options, str(archive), f"{target}:{remote_tmp}/"])
         run_command(
             [
@@ -275,6 +281,30 @@ def preload_archives_to_nodes(args: argparse.Namespace, archive_dir: Path) -> No
                 f"sudo mkdir -p {args.rke2_image_dir} && sudo cp {remote_tmp}/*.tar {args.rke2_image_dir}/",
             ]
         )
+        archive_checks = " ".join(shlex.quote(f"{args.rke2_image_dir}/{archive.name}") for archive in archives)
+        run_command(["ssh", *ssh_options, target, f"sudo sh -lc 'for archive in {archive_checks}; do test -s \"$archive\"; done'"])
+        if args.rke2_import_images:
+            import_preloaded_archives_to_containerd(args, ssh_options, target, remote_image_dir)
+
+
+def import_preloaded_archives_to_containerd(args: argparse.Namespace, ssh_options: list[str], target: str, remote_image_dir: str) -> None:
+    script = (
+        "set -e; "
+        "ctr=/var/lib/rancher/rke2/bin/ctr; "
+        "socket=/run/k3s/containerd/containerd.sock; "
+        f"image_dir={remote_image_dir}; "
+        "if [ -S \"$socket\" ] && [ -x \"$ctr\" ]; then "
+        "for archive in \"$image_dir\"/*.tar; do "
+        "[ -e \"$archive\" ] || continue; "
+        "\"$ctr\" --address \"$socket\" -n k8s.io images import \"$archive\"; "
+        "done; "
+        "\"$ctr\" --address \"$socket\" -n k8s.io images ls >/dev/null; "
+        "echo \"Imported preload archives into running RKE2 containerd.\"; "
+        "else "
+        "echo \"RKE2 containerd is not running on this node; archives are present for startup import.\"; "
+        "fi"
+    )
+    run_command(["ssh", *ssh_options, target, f"sudo sh -lc {shlex.quote(script)}"])
 
 
 def database_instances(values: dict[str, Any], namespace: str) -> list[dict[str, Any]]:
@@ -498,8 +528,10 @@ def generate_bundle(
         f'MIGRATION_IMAGE_MODE="${{MIGRATION_IMAGE_MODE:-{args.image_mode}}}"\n'
         f'MIGRATION_IMAGE_OUTPUT_DIR="${{MIGRATION_IMAGE_OUTPUT_DIR:-{args.image_output_dir}}}"\n'
         f'MIGRATION_RKE2_NODES="${{MIGRATION_RKE2_NODES:-{args.rke2_nodes}}}"\n'
+        f'MIGRATION_RKE2_IMAGE_DIR="${{MIGRATION_RKE2_IMAGE_DIR:-{args.rke2_image_dir}}}"\n'
         f'MIGRATION_SSH_USER="${{MIGRATION_SSH_USER:-{args.ssh_user}}}"\n'
         f'MIGRATION_SSH_KEY="${{MIGRATION_SSH_KEY:-{args.ssh_key}}}"\n'
+        f'MIGRATION_RKE2_IMPORT_IMAGES="${{MIGRATION_RKE2_IMPORT_IMAGES:-{str(args.rke2_import_images).lower()}}}"\n'
         f'MIGRATION_REGISTRY="${{MIGRATION_REGISTRY:-{args.registry}}}"\n'
         f'MIGRATION_IMAGE_TAG="${{MIGRATION_IMAGE_TAG:-{args.image_tag}}}"\n'
         f'MIGRATION_DUMP_DIR="${{MIGRATION_DUMP_DIR:-{args.dump_dir}}}"\n'
@@ -507,13 +539,17 @@ def generate_bundle(
         f'MIGRATION_ALLOW_SECRET_MATERIAL="${{MIGRATION_ALLOW_SECRET_MATERIAL:-{str(args.allow_secret_material).lower()}}}"\n'
         'ALLOW_FLAG=""\n'
         'if [ "$MIGRATION_ALLOW_SECRET_MATERIAL" = "true" ]; then ALLOW_FLAG="--allow-secret-material"; fi\n'
+        'RKE2_IMPORT_FLAG="--rke2-import-images"\n'
+        'if [ "$MIGRATION_RKE2_IMPORT_IMAGES" = "false" ]; then RKE2_IMPORT_FLAG="--no-rke2-import-images"; fi\n'
     )
     callback = (
         'python3 "$REPO_ROOT/scripts/migrate_project.py" '
         '--project-path "$PROJECT_PATH" --values "$VALUES" --namespace "$NAMESPACE" '
         '--output "$MIGRATION_OUTPUT" --private-dir "$MIGRATION_PRIVATE_DIR" --auto-prepare '
         '--image-mode "$MIGRATION_IMAGE_MODE" --image-output-dir "$MIGRATION_IMAGE_OUTPUT_DIR" '
-        '--rke2-nodes "$MIGRATION_RKE2_NODES" --ssh-user "$MIGRATION_SSH_USER" --ssh-key "$MIGRATION_SSH_KEY" '
+        '--rke2-nodes "$MIGRATION_RKE2_NODES" --rke2-image-dir "$MIGRATION_RKE2_IMAGE_DIR" '
+        '--ssh-user "$MIGRATION_SSH_USER" --ssh-key "$MIGRATION_SSH_KEY" '
+        '$RKE2_IMPORT_FLAG '
         '--registry "$MIGRATION_REGISTRY" --image-tag "$MIGRATION_IMAGE_TAG" '
         '--dump-dir "$MIGRATION_DUMP_DIR" --db-targets "$MIGRATION_DB_TARGETS" '
         '--execute $ALLOW_FLAG '
@@ -802,6 +838,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--rke2-image-dir", default="/var/lib/rancher/rke2/agent/images")
     parser.add_argument("--ssh-user", default="root")
     parser.add_argument("--ssh-key", default="")
+    parser.add_argument("--rke2-import-images", dest="rke2_import_images", action="store_true", default=True)
+    parser.add_argument("--no-rke2-import-images", dest="rke2_import_images", action="store_false")
     parser.add_argument("--registry", default="")
     parser.add_argument("--image-tag", default="imported-0.1.0")
     parser.add_argument("--private-dir", default=str(DEFAULT_PRIVATE_DIR))

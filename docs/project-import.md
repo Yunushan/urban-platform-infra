@@ -42,16 +42,23 @@ prepares the private operator workspace. The preparation step creates
 initializes `/var/lib/urban-platform/private/db-targets.yaml`, secures the
 files with restrictive permissions, and prints the generated bundle files.
 
-Dry-run bundle generation is the default. Use `MIGRATION_STAGE` to run one
-guarded stage at a time, or set `MIGRATION_EXECUTE=true` to default the Make
-target to `all` after you provide real private inputs:
+Dry-run bundle generation is the default. For the normal operator workflow, use
+one command that prepares the private workspace, runs every guarded stage, and
+finishes with a post-migration validation report:
 
 ```bash
-make import-migrate PROJECT_PATH=/path/to/compose-project \
+make import-auto PROJECT_PATH=/path/to/compose-project \
+  IMPORT_REDACT=true \
   MIGRATION_EXECUTE=true \
   MIGRATION_ALLOW_SECRET_MATERIAL=true \
-  MIGRATION_REGISTRY=<private-registry>/<repo>
+  MIGRATION_IMAGE_MODE=preload \
+  MIGRATION_RKE2_NODES=node-01,node-02,node-03
 ```
+
+`import-auto` is a convenience wrapper around `import-migrate` with
+`MIGRATION_STAGE=all` and `MIGRATION_EXECUTE=true`. Use it after the dry-run
+report looks correct and the operator machine has access to the Compose project,
+Docker, Kubernetes, and the RKE2 nodes.
 
 Image migration has three modes:
 
@@ -60,7 +67,9 @@ Image migration has three modes:
   that needs registry credentials.
 - `MIGRATION_IMAGE_MODE=preload` builds images, saves them as tar archives, and
   can copy them to RKE2 nodes under `/var/lib/rancher/rke2/agent/images` when
-  `MIGRATION_RKE2_NODES` is set. This avoids registry login.
+  `MIGRATION_RKE2_NODES` is set. This avoids registry login. By default it also
+  verifies the tar archives on each node and imports them into the running RKE2
+  containerd socket when that socket is available.
 - `MIGRATION_IMAGE_MODE=skip` leaves application image movement out of the
   migration run. Use this when keeping the existing Compose deployment running
   temporarily behind external routing.
@@ -76,8 +85,8 @@ make import-migrate PROJECT_PATH=/path/to/compose-project \
 ```
 
 Available stages are `prepare`, `bundle`, `secrets`, `images`, `databases`,
-`manifests`, `validate`, and `all`. For the first real run, prefer one stage at
-a time:
+`manifests`, `validate`, and `all`. Stage-by-stage execution is mainly for
+troubleshooting a failed section. For example:
 
 ```bash
 make import-migrate PROJECT_PATH=/path/to/compose-project \
