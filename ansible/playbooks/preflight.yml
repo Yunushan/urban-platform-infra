@@ -24,6 +24,15 @@
           - selected_cluster_engine not in ['rke2', 'k3s'] or (groups.get('rke2_servers', []) | length) >= 1
         fail_msg: "Inventory must define cluster_nodes and at least one rke2_servers host for Kubernetes engines."
 
+    - name: Normalize RKE2 version for validation
+      ansible.builtin.set_fact:
+        rke2_version_for_validation: >-
+          {{
+            (rke2_version | default('') | string | trim)
+            | regex_replace('.*v?([0-9]+[.][0-9]+[.][0-9]+)[+-](rke2r[0-9]+).*', 'v\\1+\\2')
+          }}
+      when: selected_cluster_engine == 'rke2'
+
     - name: Build safe RKE2 production input validation summary
       ansible.builtin.set_fact:
         rke2_production_input_errors: >-
@@ -35,8 +44,8 @@
               else []
             )
             + (
-              ['rke2_version must look like v1.33.5+rke2r1']
-              if not ((rke2_version | default('')) is match('^v[0-9]+\\.[0-9]+\\.[0-9]+\\+rke2r[0-9]+$'))
+              ['rke2_version must be pinned as vMAJOR.MINOR.PATCH+rke2rN']
+              if (rke2_version_for_validation | regex_search('^v[0-9]+[.][0-9]+[.][0-9]+[+]rke2r[0-9]+$')) is none
               else []
             )
             + (

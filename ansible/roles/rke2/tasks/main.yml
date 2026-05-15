@@ -4,7 +4,7 @@
     that:
       - (rke2_token | default('') | length) >= 16
       - (rke2_token | default('') | regex_search('^CHANGE_ME')) is none
-      - (rke2_version | default('')) is match('^v[0-9]+\\.[0-9]+\\.[0-9]+\\+rke2r[0-9]+$')
+      - (rke2_version | default('') | string | trim | regex_search('^v[0-9]+[.][0-9]+[.][0-9]+[+]rke2r[0-9]+$')) is not none
       - (rke2_ingress_controller | default('traefik')) in ['traefik', 'nginx', 'ingress-nginx']
       - (rke2_traefik_source | default('bundled')) in ['bundled', 'upstream']
       - >-
