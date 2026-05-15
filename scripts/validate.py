@@ -266,24 +266,22 @@ for ci_token in [
         errors.append(f'CI missing Python/Ansible compatibility lane token: {ci_token}')
 
 legacy_requirements_text = (ROOT / 'requirements-ci.txt').read_text(encoding='utf-8')
-for legacy_requirement in [
-    'Legacy CI lane: Python 3.11 with ansible-core 2.14.x.',
-    'ansible-core==2.14.18',
-    'PyYAML==6.0.2',
-    'yamllint==1.35.1',
-]:
-    if legacy_requirement not in legacy_requirements_text:
-        errors.append(f'Legacy CI requirements must preserve Python 3.11 / Ansible 2.14 lane pin: {legacy_requirement}')
+if 'Legacy CI lane: Python 3.11 with ansible-core 2.14.x.' not in legacy_requirements_text:
+    errors.append('Legacy CI requirements must document the Python 3.11 / Ansible 2.14 lane.')
+if not re.search(r'^ansible-core==2\.14\.\d+\b', legacy_requirements_text, re.MULTILINE):
+    errors.append('Legacy CI requirements must keep ansible-core pinned to 2.14.x for Python 3.11.')
+for legacy_tool in ['PyYAML', 'yamllint']:
+    if not re.search(rf'^{legacy_tool}==[0-9][0-9A-Za-z.!+_-]*\b', legacy_requirements_text, re.MULTILINE):
+        errors.append(f'Legacy CI requirements must keep {legacy_tool} explicitly pinned.')
 
 modern_requirements_text = (ROOT / 'requirements-ci-modern.txt').read_text(encoding='utf-8')
-for modern_requirement in [
-    'Modern CI lane: Python 3.12+ with ansible-core 2.20.x.',
-    'ansible-core==2.20.5',
-    'PyYAML==6.0.3',
-    'yamllint==1.38.0',
-]:
-    if modern_requirement not in modern_requirements_text:
-        errors.append(f'Modern CI requirements missing pinned dependency: {modern_requirement}')
+if 'Modern CI lane: Python 3.12+ with ansible-core 2.20.x.' not in modern_requirements_text:
+    errors.append('Modern CI requirements must document the Python 3.12+ / Ansible 2.20 lane.')
+if not re.search(r'^ansible-core==2\.20\.\d+\b', modern_requirements_text, re.MULTILINE):
+    errors.append('Modern CI requirements must keep ansible-core pinned to 2.20.x for Python 3.12+.')
+for modern_tool in ['PyYAML', 'yamllint']:
+    if not re.search(rf'^{modern_tool}==[0-9][0-9A-Za-z.!+_-]*\b', modern_requirements_text, re.MULTILINE):
+        errors.append(f'Modern CI requirements must keep {modern_tool} explicitly pinned.')
 
 modern_ansible_requirements_text = (ROOT / 'ansible/requirements-modern.yml').read_text(encoding='utf-8')
 for modern_collection in [
@@ -555,6 +553,16 @@ for makefile_helm_token in [
     'MIGRATION_OUTPUT ?=',
     'MIGRATION_EXECUTE ?=',
     'MIGRATION_ALLOW_SECRET_MATERIAL ?=',
+    'MIGRATION_STAGE ?=',
+    'MIGRATION_AUTO_PREPARE ?=',
+    'MIGRATION_PRIVATE_DIR ?=',
+    'MIGRATION_IMAGE_MODE ?=',
+    'MIGRATION_RKE2_NODES ?=',
+    '--image-mode "$(MIGRATION_IMAGE_MODE)"',
+    '--rke2-nodes "$(MIGRATION_RKE2_NODES)"',
+    '--private-dir "$(MIGRATION_PRIVATE_DIR)"',
+    '--stage "$(MIGRATION_STAGE)"',
+    '--auto-prepare',
     '--ingress-controller $(INGRESS)',
     'import-check:',
     'import-migrate:',
@@ -615,9 +623,15 @@ for migration_automation_token in [
     'pg_restore',
     'stage_images',
     'stage_secrets',
+    'stage_prepare',
+    'write_database_target_map',
+    'preload_archives_to_nodes',
+    'MIGRATION_IMAGE_MODE',
+    'MIGRATION_REGISTRY_USERNAME',
     'MIGRATION_ALLOW_SECRET_MATERIAL',
     'run-migration.sh',
     'traefik-ingress-candidates.yaml',
+    'Migration automation bundle written to',
 ]:
     if migration_automation_token not in migration_automation_text:
         errors.append(f'Project migration automation missing token: {migration_automation_token}')
@@ -634,8 +648,13 @@ for project_import_docs_token in [
     'Every report includes a migration plan section',
     'database upgrades',
     'make import-migrate PROJECT_PATH=/path/to/compose-project',
+    'automatically prepares the private operator workspace',
+    'MIGRATION_STAGE=databases',
+    'MIGRATION_IMAGE_MODE=preload',
+    'MIGRATION_RKE2_NODES',
     'MIGRATION_EXECUTE=true',
-    'MIGRATION_DB_TARGETS',
+    'MIGRATION_REGISTRY_USERNAME',
+    'secretRef',
 ]:
     if project_import_docs_token not in project_import_docs_text:
         errors.append(f'Project import docs missing token: {project_import_docs_token}')

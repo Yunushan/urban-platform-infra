@@ -36,25 +36,82 @@ To generate an automation bundle instead of only a report:
 make import-migrate PROJECT_PATH=/path/to/compose-project IMPORT_REDACT=true
 ```
 
-This writes guarded scripts under `reports/import-migration/`. Dry-run bundle
-generation is the default. To execute automation on the trusted operator machine,
-set explicit inputs and opt in:
+This writes guarded scripts under `reports/import-migration/` and automatically
+prepares the private operator workspace. The preparation step creates
+`/var/lib/urban-platform/private`, writes a full private import report there,
+initializes `/var/lib/urban-platform/private/db-targets.yaml`, secures the
+files with restrictive permissions, and prints the generated bundle files.
+
+Dry-run bundle generation is the default. Use `MIGRATION_STAGE` to run one
+guarded stage at a time, or set `MIGRATION_EXECUTE=true` to default the Make
+target to `all` after you provide real private inputs:
 
 ```bash
 make import-migrate PROJECT_PATH=/path/to/compose-project \
   MIGRATION_EXECUTE=true \
   MIGRATION_ALLOW_SECRET_MATERIAL=true \
-  MIGRATION_REGISTRY=registry.example.com/urban-platform/imported \
-  MIGRATION_DB_TARGETS=/var/lib/urban-platform/private/db-targets.yaml
+  MIGRATION_REGISTRY=<private-registry>/<repo>
+```
+
+Image migration has three modes:
+
+- `MIGRATION_IMAGE_MODE=registry` builds and pushes application images to a
+  private registry. This is the production-friendly mode and is the only mode
+  that needs registry credentials.
+- `MIGRATION_IMAGE_MODE=preload` builds images, saves them as tar archives, and
+  can copy them to RKE2 nodes under `/var/lib/rancher/rke2/agent/images` when
+  `MIGRATION_RKE2_NODES` is set. This avoids registry login.
+- `MIGRATION_IMAGE_MODE=skip` leaves application image movement out of the
+  migration run. Use this when keeping the existing Compose deployment running
+  temporarily behind external routing.
+
+No-registry preload example:
+
+```bash
+make import-migrate PROJECT_PATH=/path/to/compose-project \
+  MIGRATION_STAGE=images \
+  MIGRATION_EXECUTE=true \
+  MIGRATION_IMAGE_MODE=preload \
+  MIGRATION_RKE2_NODES=node-01,node-02,node-03
+```
+
+Available stages are `prepare`, `bundle`, `secrets`, `images`, `databases`,
+`manifests`, `validate`, and `all`. For the first real run, prefer one stage at
+a time:
+
+```bash
+make import-migrate PROJECT_PATH=/path/to/compose-project \
+  MIGRATION_STAGE=databases \
+  MIGRATION_EXECUTE=true \
+  MIGRATION_ALLOW_SECRET_MATERIAL=true
 ```
 
 Database dump/restore is performed by the automation when execution is enabled.
-The restore step runs only for databases listed in the private DB target map.
-The map can use the original private service name or the generated stable alias:
+The restore step uses the generated private DB target map. For CloudNativePG
+targets from the selected Helm values, the map points at the generated app
+secret for each database instance, so operators do not have to paste target
+passwords into the file. The map can still use a direct DSN when needed:
 
 ```yaml
 databaseTargets:
-  service-name-or-alias: postgresql://target_user:target_password@target-service.namespace.svc:5432/target_db
+  service-name-or-alias:
+    host: target-service-rw.namespace.svc
+    port: 5432
+    database: target_db
+    secretRef:
+      name: target-service-app
+      namespace: namespace
+      usernameKey: username
+      passwordKey: password
+```
+
+To avoid manual `docker login`, export registry credentials before running the
+image stage. If they are absent, the automation uses Docker's existing
+credential store:
+
+```bash
+export MIGRATION_REGISTRY_USERNAME=<registry-user>
+export MIGRATION_REGISTRY_PASSWORD=<registry-password>
 ```
 
 Use strict mode when warnings should fail the gate:
