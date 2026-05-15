@@ -535,9 +535,11 @@ for makefile_helm_token in [
     'INGRESS ?= traefik',
     'PROJECT_PATH ?=',
     'IMPORT_REPORT ?=',
+    'IMPORT_REDACT ?=',
     '--ingress-controller $(INGRESS)',
     'import-check:',
     'scripts/import_project.py --project-path "$(PROJECT_PATH)"',
+    '--redact-sensitive',
     'OPERATOR_KUBECONFIG ?=',
     'KUBECONFIG_SCRIPT ?= scripts/tools/ensure-kubeconfig.sh',
     'operator-kubeconfig:',
@@ -575,6 +577,8 @@ for project_import_token in [
     'CloudNativePG',
     'config/image-policy.yaml',
     'literal secret value',
+    'ReportRedactor',
+    '--redact-sensitive',
 ]:
     if project_import_token not in project_import_text:
         errors.append(f'Project import checker missing token: {project_import_token}')
@@ -586,6 +590,8 @@ for project_import_docs_token in [
     'WEB=nginx',
     'DB=postgresql',
     'IMPORT_STRICT=true',
+    'IMPORT_REDACT=true',
+    'reports/` directory is ignored by Git',
 ]:
     if project_import_docs_token not in project_import_docs_text:
         errors.append(f'Project import docs missing token: {project_import_docs_token}')

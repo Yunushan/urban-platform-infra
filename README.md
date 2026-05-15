@@ -78,6 +78,7 @@ Existing Compose project compatibility check:
 
 ```bash
 make import-check PROJECT_PATH=/path/to/compose-project INGRESS=traefik WEB=nginx DB=postgresql
+make import-check PROJECT_PATH=/path/to/compose-project IMPORT_REDACT=true IMPORT_REPORT=reports/import-check-public.md
 ```
 
 The read-only checker discovers Compose files, compares service images, ports,

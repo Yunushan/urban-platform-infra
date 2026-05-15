@@ -15,6 +15,15 @@ To keep a Markdown report:
 make import-check PROJECT_PATH=/path/to/compose-project IMPORT_REPORT=reports/import-check.md
 ```
 
+The `reports/` directory is ignored by Git because full import reports can
+contain private service names, project filenames, host paths, and image names.
+Use redaction for a report that can be attached to tickets or shared outside the
+operator machine:
+
+```bash
+make import-check PROJECT_PATH=/path/to/compose-project IMPORT_REDACT=true IMPORT_REPORT=reports/import-check-public.md
+```
+
 Use strict mode when warnings should fail the gate:
 
 ```bash

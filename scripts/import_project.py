@@ -8,6 +8,7 @@ source project.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
 import sys
 from dataclasses import dataclass, field
@@ -44,11 +45,28 @@ POSTGRES_COMPATIBLE_SELECTIONS = {
     "cloudnative-pg",
     "cnpg",
 }
+PUBLIC_RUNTIME_KINDS = {
+    "apache-httpd",
+    "apache-tomcat",
+    "elasticsearch",
+    "kafka",
+    "kibana",
+    "logstash",
+    "nginx",
+    "postgis",
+    "postgresql",
+    "redis",
+    "timescaledb",
+    "traefik",
+    "zookeeper",
+}
 SECRET_KEY_RE = re.compile(
     r"(password|passwd|secret|token|api[_-]?key|private[_-]?key|client[_-]?secret|access[_-]?key)",
     re.IGNORECASE,
 )
 VARIABLE_VALUE_RE = re.compile(r"^(?:\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*)$")
+ABSOLUTE_PATH_RE = re.compile(r"(?<![\w.-])/(?:home|root|srv|opt|etc|var/lib|mnt|media|data)/[^`\s,)]*")
+RELATIVE_PATH_RE = re.compile(r"(?<![\w.-])(?:\.\./|\./)[^`\s,)]*")
 
 
 @dataclass
@@ -110,6 +128,53 @@ class ServiceRecord:
     kind: str
     ports: list[PortRef] = field(default_factory=list)
     build_only: bool = False
+
+
+class ReportRedactor:
+    def __init__(self, enabled: bool):
+        self.enabled = enabled
+        self.file_ids: dict[str, str] = {}
+        self.service_ids: dict[str, str] = {}
+
+    def _stable_id(self, prefix: str, value: str, cache: dict[str, str]) -> str:
+        if value in {"", "-"}:
+            return value
+        if value not in cache:
+            digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:8]
+            cache[value] = f"{prefix}-{len(cache) + 1:03d}-{digest}"
+        return cache[value]
+
+    def project_path(self, value: Path) -> str:
+        if not self.enabled:
+            return str(value)
+        return "/path/to/compose-project"
+
+    def file(self, value: str) -> str:
+        if not self.enabled:
+            return value
+        return self._stable_id("compose-file", value, self.file_ids)
+
+    def service(self, value: str) -> str:
+        if not self.enabled:
+            return value
+        return self._stable_id("service", value, self.service_ids)
+
+    def image(self, record: ServiceRecord) -> str:
+        if record.image is None:
+            return "build-only"
+        if not self.enabled or record.kind in PUBLIC_RUNTIME_KINDS:
+            return record.image.display
+        return "<application-image>"
+
+    def text(self, value: str) -> str:
+        if not self.enabled:
+            return value
+        value = ABSOLUTE_PATH_RE.sub("<host-path>", value)
+        value = RELATIVE_PATH_RE.sub("<relative-path>", value)
+        value = re.sub(r"Image `[^`]+` has no explicit tag", "Image `<image>` has no explicit tag", value)
+        value = re.sub(r"Image `[^`]+` uses mutable tag", "Image `<image>` uses mutable tag", value)
+        value = re.sub(r"Image reference is variable-driven: `[^`]+`", "Image reference is variable-driven: `<image-variable>`", value)
+        return value
 
 
 def load_yaml(path: Path) -> Any:
@@ -560,7 +625,9 @@ def render_report(
     selected_ingress: str,
     selected_webserver: str,
     selected_database: str,
+    redact_sensitive: bool = False,
 ) -> str:
+    redactor = ReportRedactor(redact_sensitive)
     counts = {severity: 0 for severity in ["ERROR", "WARN", "INFO"]}
     for finding in findings:
         counts[finding.severity] = counts.get(finding.severity, 0) + 1
@@ -568,26 +635,27 @@ def render_report(
     lines = [
         "# Project Import Compatibility Report",
         "",
-        f"- Project path: `{project_path}`",
+        f"- Project path: `{redactor.project_path(project_path)}`",
         f"- Selected ingress: `{selected_ingress}`",
         f"- Selected webserver: `{selected_webserver}`",
         f"- Selected database: `{selected_database}`",
         f"- Result: `{result}`",
         f"- Summary: `{counts['ERROR']}` error(s), `{counts['WARN']}` warning(s), `{counts['INFO']}` info item(s)",
+        f"- Redacted output: `{'true' if redact_sensitive else 'false'}`",
         "",
         "## Compose Files",
         "",
     ]
     if compose_files:
-        lines.extend(f"- `{path.relative_to(project_path).as_posix()}`" for path in compose_files)
+        lines.extend(f"- `{redactor.file(path.relative_to(project_path).as_posix())}`" for path in compose_files)
     else:
         lines.append("- No Compose files found.")
     lines.extend(["", "## Findings", ""])
     if findings:
         for finding in findings:
             lines.append(
-                f"- **{finding.severity}** `{finding.file}` :: `{finding.service}` - {finding.message} "
-                f"Recommendation: {finding.recommendation}"
+                f"- **{finding.severity}** `{redactor.file(finding.file)}` :: `{redactor.service(finding.service)}` - "
+                f"{redactor.text(finding.message)} Recommendation: {redactor.text(finding.recommendation)}"
             )
     else:
         lines.append("- No compatibility issues detected by the static checker.")
@@ -596,11 +664,21 @@ def render_report(
         lines.append("| Compose file | Service | Kind | Image | Ports |")
         lines.append("|---|---|---|---|---|")
         for record in service_records:
-            image = record.image.display if record.image else "build-only"
+            image = redactor.image(record)
             ports = ", ".join(port.display for port in record.ports) if record.ports else "-"
-            lines.append(f"| `{record.file}` | `{record.name}` | `{record.kind}` | `{image}` | `{ports}` |")
+            lines.append(f"| `{redactor.file(record.file)}` | `{redactor.service(record.name)}` | `{record.kind}` | `{image}` | `{ports}` |")
     else:
         lines.append("- No services inventoried.")
+    if redact_sensitive:
+        lines.extend(
+            [
+                "",
+                "## Redaction Note",
+                "",
+                "Project paths, Compose filenames, service names, and local application image names were redacted.",
+                "Run again without `--redact-sensitive` only on a trusted operator machine when you need exact remediation targets.",
+            ]
+        )
     lines.append("")
     return "\n".join(lines)
 
@@ -614,6 +692,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--webserver", choices=["nginx", "apache-httpd", "apache-tomcat", "traefik"], help="Selected platform webserver profile.")
     parser.add_argument("--database", help="Selected platform database profile, for example postgresql or cloudnative-pg.")
     parser.add_argument("--report", help="Optional Markdown report output path.")
+    parser.add_argument("--redact-sensitive", action="store_true", help="Redact project paths, Compose filenames, service names, and local application image names in the report.")
     parser.add_argument("--strict", action="store_true", help="Return non-zero when warnings are present.")
     return parser.parse_args(argv)
 
@@ -681,6 +760,7 @@ def main(argv: list[str]) -> int:
         selected_ingress=str(selected_ingress),
         selected_webserver=str(selected_webserver),
         selected_database=str(selected_database),
+        redact_sensitive=args.redact_sensitive,
     )
     print(report)
 
