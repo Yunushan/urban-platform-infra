@@ -132,14 +132,14 @@ if command -v ss >/dev/null 2>&1; then
 fi
 
 echo "local /readyz probe:"
-if command -v rke2 >/dev/null 2>&1; then
-  sudo rke2 kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get --raw=/readyz --request-timeout=10s || true
-elif [ -x /var/lib/rancher/rke2/bin/kubectl ]; then
+if [ -x /var/lib/rancher/rke2/bin/kubectl ]; then
   sudo /var/lib/rancher/rke2/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get --raw=/readyz --request-timeout=10s || true
 elif command -v kubectl >/dev/null 2>&1; then
   sudo kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get --raw=/readyz --request-timeout=10s || true
+elif command -v curl >/dev/null 2>&1; then
+  sudo curl -ksS --max-time 10 https://127.0.0.1:6443/readyz || true
 else
-  echo "kubectl/rke2 kubectl is not available"
+  echo "kubectl/curl is not available"
 fi
 REMOTE_DIAGNOSTICS
 }

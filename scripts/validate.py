@@ -462,14 +462,14 @@ for kubeconfig_script_token in [
 haproxy_template_text = (ROOT / 'ansible/roles/haproxy_keepalived/templates/haproxy.cfg.j2').read_text(
     encoding='utf-8'
 )
-for haproxy_tls_check_token in [
+for haproxy_tcp_check_token in [
     'timeout check 5s',
     'default-server inter 2s fall 3 rise 2',
-    ':6443 check check-ssl verify none',
-    ':9345 check check-ssl verify none',
+    ':6443 check',
+    ':9345 check',
 ]:
-    if haproxy_tls_check_token not in haproxy_template_text:
-        errors.append(f'HAProxy template missing TLS health-check token: {haproxy_tls_check_token}')
+    if haproxy_tcp_check_token not in haproxy_template_text:
+        errors.append(f'HAProxy template missing TCP health-check token: {haproxy_tcp_check_token}')
 
 rke2_upstream_traefik_template = (
     ROOT / 'ansible/roles/rke2/templates/traefik-helmchart.yaml.j2'

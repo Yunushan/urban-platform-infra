@@ -64,8 +64,8 @@ through a VIP that has no healthy backend yet.
 
 If HAProxy is running but reports `backend rke2_registration_servers has no
 server available`, check the RKE2 service diagnostics from the failed play
-output first. HAProxy will stay down until at least one server can complete the
-TLS health check on `9345`.
+output first. HAProxy will keep the backend down until at least one server is
+accepting TCP connections on `9345`.
 
 If the journal shows `failed to recover v3 backend from snapshot`, `failed to
 find database snapshot file`, or `snapshot file doesn't exist`, the node has a
