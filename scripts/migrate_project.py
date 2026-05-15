@@ -139,7 +139,7 @@ def kubectl_command(args: argparse.Namespace, command: list[str]) -> list[str]:
 def require_kubernetes_api(args: argparse.Namespace) -> None:
     if not args.execute:
         return
-    command = kubectl_command(args, ["version", "--request-timeout=10s"])
+    command = kubectl_command(args, ["get", "--raw=/readyz", "--request-timeout=10s"])
     result = subprocess.run(command, text=True, capture_output=True)
     if result.returncode == 0:
         ensure_kubernetes_namespace(args)
@@ -149,7 +149,7 @@ def require_kubernetes_api(args: argparse.Namespace) -> None:
     raise SystemExit(
         "Kubernetes API is not reachable"
         f"{kubeconfig_note}. import-auto cannot apply secrets, read target database secrets, or apply manifests until this is fixed.\n"
-        "The Makefile now runs `make operator-kubeconfig` before import-auto; if this still fails, verify the RKE2 API/VIP listener and cluster health.\n"
+        "The Makefile now runs `make operator-kubeconfig` before import-auto; if this still fails, verify the RKE2 API/VIP listener, firewall rules, and cluster health.\n"
         f"kubectl output:\n{details}"
     )
 

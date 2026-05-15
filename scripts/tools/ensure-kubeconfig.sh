@@ -37,6 +37,13 @@ write_kubeconfig_from_node() {
   rm -f "${tmp_kubeconfig}"
 }
 
+kubernetes_api_ready() {
+  if ! command -v kubectl >/dev/null 2>&1; then
+    return 0
+  fi
+  KUBECONFIG="${OPERATOR_KUBECONFIG_PATH}" kubectl get --raw=/readyz --request-timeout=10s >/dev/null 2>&1
+}
+
 if [ "${ENGINE}" != "rke2" ]; then
   echo "Skipping automatic kubeconfig repair for ENGINE=${ENGINE}; using existing kubectl context."
   exit 0
@@ -115,12 +122,34 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
   chmod 0600 "${FALLBACK_INVENTORY_PATH}" 2>/dev/null || true
   INVENTORY_PATH="${FALLBACK_INVENTORY_PATH}"
   echo "Generated temporary operator inventory from MIGRATION_RKE2_NODES: ${INVENTORY_PATH}"
-  echo "Operator kubeconfig endpoint will be https://${cluster_vip}:${kubernetes_api_port}"
-  write_kubeconfig_from_node "${first_rke2_node}" "${cluster_vip}" "${kubernetes_api_port}"
-  if command -v kubectl >/dev/null 2>&1; then
-    KUBECONFIG="${OPERATOR_KUBECONFIG_PATH}" kubectl version --request-timeout=10s >/dev/null
+  echo "Operator kubeconfig endpoint candidates will use port ${kubernetes_api_port}"
+  if [ -n "${explicit_cluster_vip}" ]; then
+    endpoint_candidates=("${cluster_vip}")
+  else
+    endpoint_candidates=("${rke2_nodes[@]}")
   fi
-  echo "Operator kubeconfig ready: ${OPERATOR_KUBECONFIG_PATH}"
+
+  selected_endpoint=""
+  for endpoint_candidate in "${endpoint_candidates[@]}"; do
+    endpoint_candidate="${endpoint_candidate//[[:space:]]/}"
+    if [ -z "${endpoint_candidate}" ]; then
+      continue
+    fi
+    echo "Trying Kubernetes API endpoint https://${endpoint_candidate}:${kubernetes_api_port}"
+    write_kubeconfig_from_node "${first_rke2_node}" "${endpoint_candidate}" "${kubernetes_api_port}"
+    if kubernetes_api_ready; then
+      selected_endpoint="${endpoint_candidate}"
+      break
+    fi
+    echo "Kubernetes API endpoint https://${endpoint_candidate}:${kubernetes_api_port} is not ready from this operator; trying the next endpoint." >&2
+  done
+
+  if [ -z "${selected_endpoint}" ]; then
+    echo "No Kubernetes API endpoint from MIGRATION_RKE2_NODES became ready." >&2
+    echo "Check RKE2 server health/firewall rules, or set MIGRATION_CLUSTER_VIP and MIGRATION_KUBERNETES_API_VIP_PORT to the reachable API endpoint." >&2
+    exit 1
+  fi
+  echo "Operator kubeconfig ready: ${OPERATOR_KUBECONFIG_PATH} (endpoint https://${selected_endpoint}:${kubernetes_api_port})"
   exit 0
 fi
 
@@ -140,7 +169,7 @@ ANSIBLE_CONFIG="${ANSIBLE_CONFIG_PATH}" \
   "${extra_args[@]}"
 
 if command -v kubectl >/dev/null 2>&1; then
-  KUBECONFIG="${OPERATOR_KUBECONFIG_PATH}" kubectl version --request-timeout=10s >/dev/null
+  KUBECONFIG="${OPERATOR_KUBECONFIG_PATH}" kubectl get --raw=/readyz --request-timeout=10s >/dev/null
 fi
 
 echo "Operator kubeconfig ready: ${OPERATOR_KUBECONFIG_PATH}"
