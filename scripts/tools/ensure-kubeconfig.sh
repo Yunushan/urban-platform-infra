@@ -9,12 +9,25 @@ ANSIBLE_PLAYBOOK_BIN="${ANSIBLE_PLAYBOOK:-ansible-playbook}"
 OPERATOR_KUBECONFIG_PATH="${OPERATOR_KUBECONFIG:-${KUBECONFIG:-${HOME}/.kube/config}}"
 FALLBACK_INVENTORY_PATH="${TMPDIR:-/tmp}/urban-platform-import-inventory.yml"
 
+migration_become_password() {
+  if [ -n "${MIGRATION_BECOME_PASSWORD_FILE:-}" ]; then
+    if [ ! -r "${MIGRATION_BECOME_PASSWORD_FILE}" ]; then
+      echo "MIGRATION_BECOME_PASSWORD_FILE is not readable: ${MIGRATION_BECOME_PASSWORD_FILE}" >&2
+      return 1
+    fi
+    sed -n '1p' "${MIGRATION_BECOME_PASSWORD_FILE}"
+    return 0
+  fi
+  printf '%s' "${MIGRATION_BECOME_PASSWORD:-}"
+}
+
 write_kubeconfig_from_node() {
   local node="$1"
   local endpoint_host="$2"
   local endpoint_port="$3"
   local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
-  local remote_kubeconfig_command="${MIGRATION_RKE2_KUBECONFIG_COMMAND:-sudo cat /etc/rancher/rke2/rke2.yaml}"
+  local remote_kubeconfig_command="${MIGRATION_RKE2_KUBECONFIG_COMMAND:-}"
+  local become_password
   local tmp_kubeconfig
   local ssh_options=()
 
@@ -22,13 +35,30 @@ write_kubeconfig_from_node() {
     ssh_options+=("-i" "${MIGRATION_SSH_KEY}")
   fi
 
+  become_password="$(migration_become_password)"
   tmp_kubeconfig="$(mktemp)"
   echo "Fetching RKE2 kubeconfig directly from ${ssh_user}@${node}."
-  if ! printf '%s\n' "${remote_kubeconfig_command}" | ssh "${ssh_options[@]}" "${ssh_user}@${node}" 'sh -s' > "${tmp_kubeconfig}"; then
-    rm -f "${tmp_kubeconfig}"
-    echo "Could not fetch /etc/rancher/rke2/rke2.yaml from ${ssh_user}@${node}." >&2
-    echo "Verify SSH access, MIGRATION_SSH_USER, MIGRATION_SSH_KEY, and sudo permissions on the first RKE2 node." >&2
-    return 1
+  if [ -n "${remote_kubeconfig_command}" ]; then
+    if ! printf '%s\n' "${remote_kubeconfig_command}" | ssh "${ssh_options[@]}" "${ssh_user}@${node}" 'sh -s' > "${tmp_kubeconfig}"; then
+      rm -f "${tmp_kubeconfig}"
+      echo "Could not fetch /etc/rancher/rke2/rke2.yaml from ${ssh_user}@${node}." >&2
+      echo "Verify SSH access, MIGRATION_SSH_USER, MIGRATION_SSH_KEY, and sudo permissions on the first RKE2 node." >&2
+      return 1
+    fi
+  elif [ -n "${become_password}" ]; then
+    if ! printf '%s\n' "${become_password}" | ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -S -p '' cat /etc/rancher/rke2/rke2.yaml" > "${tmp_kubeconfig}"; then
+      rm -f "${tmp_kubeconfig}"
+      echo "Could not fetch /etc/rancher/rke2/rke2.yaml from ${ssh_user}@${node} using MIGRATION_BECOME_PASSWORD_FILE." >&2
+      echo "Verify SSH access, MIGRATION_SSH_USER, MIGRATION_SSH_KEY, and the sudo password file." >&2
+      return 1
+    fi
+  else
+    if ! ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -n cat /etc/rancher/rke2/rke2.yaml" > "${tmp_kubeconfig}"; then
+      rm -f "${tmp_kubeconfig}"
+      echo "Could not fetch /etc/rancher/rke2/rke2.yaml from ${ssh_user}@${node}." >&2
+      echo "Configure passwordless sudo, use root SSH, or set MIGRATION_BECOME_PASSWORD_FILE to a root-readable local password file on the operator." >&2
+      return 1
+    fi
   fi
 
   sed -i -E "s#server: https://[^[:space:]]+#server: https://${endpoint_host}:${endpoint_port}#" "${tmp_kubeconfig}"
@@ -440,6 +470,9 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
     echo "Install openssl or python3 on the operator, or export MIGRATION_RKE2_TOKEN before running this target." >&2
     exit 1
   fi
+  export MIGRATION_RKE2_TOKEN="${rke2_token}"
+
+  become_password="$(migration_become_password)"
 
   keepalived_auth_pass="${MIGRATION_KEEPALIVED_AUTH_PASS:-${KEEPALIVED_AUTH_PASS:-}}"
   keepalived_auth_source="provided"
@@ -469,6 +502,9 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
     printf '  vars:\n'
     printf '    ansible_user: %s\n' "$(yaml_quote "${ansible_user_for_nodes}")"
     printf '    ansible_python_interpreter: /usr/bin/python3\n'
+    if [ -n "${become_password}" ]; then
+      printf '    ansible_become_password: %s\n' "$(yaml_quote "${become_password}")"
+    fi
     printf '    cluster_engine: rke2\n'
     printf '    cluster_vip: %s\n' "$(yaml_quote "${cluster_vip}")"
     printf '    cluster_domain: %s\n' "$(yaml_quote "${cluster_domain}")"
@@ -538,7 +574,10 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
       continue
     fi
     echo "Trying Kubernetes API endpoint https://${endpoint_candidate}:${kubernetes_api_port}"
-    write_kubeconfig_from_node "${first_rke2_node}" "${endpoint_candidate}" "${kubernetes_api_port}"
+    if ! write_kubeconfig_from_node "${first_rke2_node}" "${endpoint_candidate}" "${kubernetes_api_port}"; then
+      echo "Could not fetch kubeconfig before probing https://${endpoint_candidate}:${kubernetes_api_port}; this is expected on a fresh cluster." >&2
+      continue
+    fi
     if kubernetes_api_ready; then
       selected_endpoint="${endpoint_candidate}"
       break
@@ -562,7 +601,11 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
         echo "Could not open an SSH tunnel through ${tunnel_node}; trying the next node." >&2
         continue
       fi
-      write_kubeconfig_from_node "${first_rke2_node}" "127.0.0.1" "${tunnel_port}"
+      if ! write_kubeconfig_from_node "${first_rke2_node}" "127.0.0.1" "${tunnel_port}"; then
+        echo "Could not fetch kubeconfig through SSH tunnel via ${tunnel_node}; trying the next node." >&2
+        stop_kubernetes_api_tunnel "${tunnel_node}" "6443" "${tunnel_port}"
+        continue
+      fi
       if kubernetes_api_ready; then
         selected_endpoint="127.0.0.1:${tunnel_port} via SSH tunnel ${tunnel_node}"
         break

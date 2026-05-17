@@ -280,6 +280,27 @@ def run_command(command: list[str], *, env: dict[str, str] | None = None, stdin:
     subprocess.run(command, input=stdin, text=True, env=env, cwd=str(cwd) if cwd else None, check=True)
 
 
+def become_password(args: argparse.Namespace) -> str:
+    password_file = getattr(args, "become_password_file", "")
+    if password_file:
+        path = Path(password_file).expanduser()
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError as exc:
+            raise SystemExit(f"Could not read MIGRATION_BECOME_PASSWORD_FILE `{path}`: {exc}") from exc
+        return lines[0] if lines else ""
+    return os.environ.get("MIGRATION_BECOME_PASSWORD", "")
+
+
+def run_remote_sudo_shell(args: argparse.Namespace, ssh_options: list[str], target: str, script: str) -> None:
+    password = become_password(args)
+    sudo_command = "sudo -S -p '' sh -lc" if password else "sudo -n sh -lc"
+    run_command(
+        ["ssh", *ssh_options, target, f"{sudo_command} {shlex.quote(script)}"],
+        stdin=f"{password}\n" if password else None,
+    )
+
+
 def run_cleanup_command(command: list[str]) -> None:
     display = " ".join(command)
     print(f"+ {display}")
@@ -398,16 +419,14 @@ def preload_archives_to_nodes(args: argparse.Namespace, archive_dir: Path) -> bo
         run_command(["ssh", *ssh_options, target, f"mkdir -p {remote_tmp}"])
         for archive in archives:
             run_command(["scp", *ssh_options, str(archive), f"{target}:{remote_tmp}/"])
-        run_command(
-            [
-                "ssh",
-                *ssh_options,
-                target,
-                f"sudo mkdir -p {args.rke2_image_dir} && sudo cp {remote_tmp}/*.tar {args.rke2_image_dir}/",
-            ]
+        run_remote_sudo_shell(
+            args,
+            ssh_options,
+            target,
+            f"mkdir -p {shlex.quote(args.rke2_image_dir)} && cp {shlex.quote(remote_tmp)}/*.tar {shlex.quote(args.rke2_image_dir)}/",
         )
         archive_checks = " ".join(shlex.quote(f"{args.rke2_image_dir}/{archive.name}") for archive in archives)
-        run_command(["ssh", *ssh_options, target, f"sudo sh -lc 'for archive in {archive_checks}; do test -s \"$archive\"; done'"])
+        run_remote_sudo_shell(args, ssh_options, target, f"for archive in {archive_checks}; do test -s \"$archive\"; done")
         if args.rke2_import_images:
             import_preloaded_archives_to_containerd(args, ssh_options, target, remote_image_dir)
     return True
@@ -430,7 +449,7 @@ def import_preloaded_archives_to_containerd(args: argparse.Namespace, ssh_option
         "echo \"RKE2 containerd is not running on this node; archives are present for startup import.\"; "
         "fi"
     )
-    run_command(["ssh", *ssh_options, target, f"sudo sh -lc {shlex.quote(script)}"])
+    run_remote_sudo_shell(args, ssh_options, target, script)
 
 
 def database_instances(values: dict[str, Any], namespace: str) -> list[dict[str, Any]]:
@@ -739,6 +758,7 @@ def generate_bundle(
         f'MIGRATION_RKE2_IMAGE_DIR="${{MIGRATION_RKE2_IMAGE_DIR:-{args.rke2_image_dir}}}"\n'
         f'MIGRATION_SSH_USER="${{MIGRATION_SSH_USER:-{args.ssh_user}}}"\n'
         f'MIGRATION_SSH_KEY="${{MIGRATION_SSH_KEY:-{args.ssh_key}}}"\n'
+        f'MIGRATION_BECOME_PASSWORD_FILE="${{MIGRATION_BECOME_PASSWORD_FILE:-{args.become_password_file}}}"\n'
         f'MIGRATION_RKE2_IMPORT_IMAGES="${{MIGRATION_RKE2_IMPORT_IMAGES:-{str(args.rke2_import_images).lower()}}}"\n'
         f'MIGRATION_CLEANUP_OPERATOR_IMAGES="${{MIGRATION_CLEANUP_OPERATOR_IMAGES:-{str(args.cleanup_operator_images).lower()}}}"\n'
         f'MIGRATION_SKIP_DOCKER_SOCKET_SERVICES="${{MIGRATION_SKIP_DOCKER_SOCKET_SERVICES:-{str(args.skip_docker_socket_services).lower()}}}"\n'
@@ -763,6 +783,7 @@ def generate_bundle(
         '--image-mode "$MIGRATION_IMAGE_MODE" --image-output-dir "$MIGRATION_IMAGE_OUTPUT_DIR" '
         '--rke2-nodes "$MIGRATION_RKE2_NODES" --rke2-image-dir "$MIGRATION_RKE2_IMAGE_DIR" '
         '--ssh-user "$MIGRATION_SSH_USER" --ssh-key "$MIGRATION_SSH_KEY" '
+        '--become-password-file "$MIGRATION_BECOME_PASSWORD_FILE" '
         '$RKE2_IMPORT_FLAG $CLEANUP_OPERATOR_IMAGES_FLAG $DOCKER_SOCKET_FLAG '
         '--registry "$MIGRATION_REGISTRY" --image-tag "$MIGRATION_IMAGE_TAG" '
         '--dump-dir "$MIGRATION_DUMP_DIR" --db-targets "$MIGRATION_DB_TARGETS" '
@@ -1073,6 +1094,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--rke2-image-dir", default="/var/lib/rancher/rke2/agent/images")
     parser.add_argument("--ssh-user", default="root")
     parser.add_argument("--ssh-key", default="")
+    parser.add_argument("--become-password-file", default=os.environ.get("MIGRATION_BECOME_PASSWORD_FILE", ""))
     parser.add_argument("--rke2-import-images", dest="rke2_import_images", action="store_true", default=True)
     parser.add_argument("--no-rke2-import-images", dest="rke2_import_images", action="store_false")
     parser.add_argument("--cleanup-operator-images", dest="cleanup_operator_images", action="store_true", default=True)
