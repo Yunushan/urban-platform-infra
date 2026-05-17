@@ -41,6 +41,18 @@ prepares the private operator workspace. The preparation step creates
 `/var/lib/urban-platform/private`, writes a full private import report there,
 initializes `/var/lib/urban-platform/private/db-targets.yaml`, secures the
 files with restrictive permissions, and prints the generated bundle files.
+For a diagnostics-only run that does not need cluster access or apply anything,
+use:
+
+```bash
+make import-plan PROJECT_PATH=/path/to/compose-project IMPORT_REDACT=true
+```
+
+`import-plan` writes the private report and
+`/var/lib/urban-platform/private/operator-action-plan.md`. The action plan
+lists exact Compose files and services, separates items handled automatically
+from true manual blockers, and avoids requiring operators to run ad-hoc `grep`
+commands against the application tree.
 
 Dry-run bundle generation is the default. For the normal operator workflow, use
 one command that prepares the private workspace, runs every guarded stage, and
@@ -62,6 +74,15 @@ with `MIGRATION_KUBECONFIG` before applying secrets, reading database target
 secrets, or applying manifests. Use it after the dry-run report looks correct
 and the operator machine has access to the Compose project, Docker, Kubernetes,
 and the RKE2 nodes.
+
+When `MIGRATION_ALLOW_SECRET_MATERIAL=true` is set, `import-auto` treats literal
+Compose secret values as operator-approved input, imports them into Kubernetes
+Secrets, and records the action in the private action plan. Docker socket mounts
+are not carried into Kubernetes by default; services that require
+`/var/run/docker.sock` are skipped as Docker-socket integrations and should be
+replaced with Kubernetes-native monitoring or another least-privilege approach.
+Set `MIGRATION_SKIP_DOCKER_SOCKET_SERVICES=false` only for a deliberate
+diagnostic run where you want those services included in image handling.
 
 If the private production inventory is not present on the operator machine,
 `operator-kubeconfig` can generate a temporary inventory from

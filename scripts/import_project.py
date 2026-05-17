@@ -832,6 +832,60 @@ def render_report(
     return "\n".join(lines)
 
 
+def automation_adjusted_findings(
+    findings: list[Finding],
+    allow_literal_secret_import: bool = False,
+    allow_docker_socket_skip: bool = False,
+) -> list[Finding]:
+    adjusted: list[Finding] = []
+    for finding in findings:
+        if (
+            finding.severity == "ERROR"
+            and allow_literal_secret_import
+            and "literal secret value" in finding.message
+        ):
+            adjusted.append(
+                Finding(
+                    severity="WARN",
+                    file=finding.file,
+                    service=finding.service,
+                    message=(
+                        f"{finding.message} Automated import is allowed to read this value "
+                        "on the operator machine and create a Kubernetes Secret."
+                    ),
+                    recommendation=(
+                        "Keep generated private reports out of Git, rotate the value after "
+                        "migration when practical, and move future changes to SOPS, External "
+                        "Secrets, Sealed Secrets, or Vault."
+                    ),
+                )
+            )
+            continue
+        if (
+            finding.severity == "ERROR"
+            and allow_docker_socket_skip
+            and "/var/run/docker.sock" in finding.message
+        ):
+            adjusted.append(
+                Finding(
+                    severity="WARN",
+                    file=finding.file,
+                    service=finding.service,
+                    message=(
+                        f"{finding.message} Automated import will skip Docker-socket behavior "
+                        "instead of carrying it into Kubernetes."
+                    ),
+                    recommendation=(
+                        "Use Kubernetes-native telemetry, node exporters, Zabbix Kubernetes "
+                        "templates, or another least-privilege integration after import."
+                    ),
+                )
+            )
+            continue
+        adjusted.append(finding)
+    return adjusted
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Check an external Docker Compose project before importing it.")
     parser.add_argument("--project-path", required=True, help="Path to the external project, for example /path/to/compose-project.")
@@ -843,6 +897,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--report", help="Optional Markdown report output path.")
     parser.add_argument("--redact-sensitive", action="store_true", help="Redact project paths, Compose filenames, service names, and local application image names in the report.")
     parser.add_argument("--strict", action="store_true", help="Return non-zero when warnings are present.")
+    parser.add_argument(
+        "--allow-literal-secret-import",
+        action="store_true",
+        help="Downgrade literal secret findings when a trusted migration run will import them into Kubernetes Secrets.",
+    )
+    parser.add_argument(
+        "--allow-docker-socket-skip",
+        action="store_true",
+        help="Downgrade Docker socket findings when migration will skip that unsafe behavior.",
+    )
     return parser.parse_args(argv)
 
 
@@ -902,11 +966,17 @@ def main(argv: list[str]) -> int:
             expected_web_image=expected_web_image,
         )
 
+    report_findings = automation_adjusted_findings(
+        findings,
+        allow_literal_secret_import=args.allow_literal_secret_import,
+        allow_docker_socket_skip=args.allow_docker_socket_skip,
+    )
+
     report = render_report(
         project_path=project_path,
         compose_files=compose_files,
         service_records=[record for record, _service in service_pairs],
-        findings=findings,
+        findings=report_findings,
         selected_ingress=str(selected_ingress),
         selected_webserver=str(selected_webserver),
         selected_database=str(selected_database),
@@ -921,8 +991,8 @@ def main(argv: list[str]) -> int:
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(report, encoding="utf-8")
 
-    has_errors = any(finding.severity == "ERROR" for finding in findings)
-    has_warnings = any(finding.severity == "WARN" for finding in findings)
+    has_errors = any(finding.severity == "ERROR" for finding in report_findings)
+    has_warnings = any(finding.severity == "WARN" for finding in report_findings)
     if has_errors or (args.strict and has_warnings):
         return 1
     return 0

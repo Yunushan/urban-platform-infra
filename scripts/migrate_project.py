@@ -100,6 +100,19 @@ def secret_entries(service: dict[str, Any]) -> dict[str, str]:
     return entries
 
 
+def service_has_docker_socket(service: dict[str, Any]) -> bool:
+    for volume in service.get("volumes") or []:
+        if isinstance(volume, dict):
+            source = str(volume.get("source", ""))
+            target = str(volume.get("target", ""))
+            if "/var/run/docker.sock" in source or "/var/run/docker.sock" in target:
+                return True
+            continue
+        if "/var/run/docker.sock" in str(volume):
+            return True
+    return False
+
+
 def postgres_env(service: dict[str, Any]) -> dict[str, str]:
     env = {key: value for key, value in import_project.environment_entries(service.get("environment")) if value is not None}
     return {
@@ -536,6 +549,86 @@ def render_private_report(
     print(f"Private import report written: {private_report}")
 
 
+def handled_error_reason(args: argparse.Namespace, finding: import_project.Finding) -> str | None:
+    if finding.severity != "ERROR":
+        return None
+    if args.allow_secret_material and "literal secret value" in finding.message:
+        return "automated-secret-import"
+    if args.skip_docker_socket_services and "/var/run/docker.sock" in finding.message:
+        return "skipped-docker-socket-service"
+    return None
+
+
+def write_operator_action_plan(args: argparse.Namespace, findings: list[import_project.Finding]) -> None:
+    private_dir = Path(args.private_dir).expanduser()
+    action_plan = private_dir / "operator-action-plan.md"
+    error_findings = [finding for finding in findings if finding.severity == "ERROR"]
+    handled = [(finding, handled_error_reason(args, finding)) for finding in error_findings]
+    handled = [(finding, reason) for finding, reason in handled if reason]
+    unhandled = [finding for finding in error_findings if handled_error_reason(args, finding) is None]
+
+    lines = [
+        "# Import Operator Action Plan",
+        "",
+        "This file is generated automatically by `scripts/migrate_project.py` and contains exact private Compose paths and service names.",
+        "",
+        f"- Automated/accepted hard blockers: `{len(handled)}`",
+        f"- Manual hard blockers: `{len(unhandled)}`",
+        f"- Literal secret import enabled: `{str(args.allow_secret_material).lower()}`",
+        f"- Docker socket services skipped: `{str(args.skip_docker_socket_services).lower()}`",
+        "",
+        "## Automated Or Accepted",
+        "",
+    ]
+    if handled:
+        for finding, reason in handled:
+            lines.append(
+                f"- `{reason}` `{finding.file}` :: `{finding.service}` - {finding.message}"
+            )
+    else:
+        lines.append("- None.")
+
+    lines.extend(["", "## Manual Blockers", ""])
+    if unhandled:
+        for finding in unhandled:
+            lines.append(
+                f"- `{finding.file}` :: `{finding.service}` - {finding.message} Recommendation: {finding.recommendation}"
+            )
+    else:
+        lines.append("- None. The migration can continue with the selected automation flags.")
+
+    lines.extend(
+        [
+            "",
+            "## Notes",
+            "",
+            "- Literal secrets are imported into Kubernetes Secrets only when `MIGRATION_ALLOW_SECRET_MATERIAL=true` is set.",
+            "- Services that mount `/var/run/docker.sock` are not carried into Kubernetes as Docker-socket integrations.",
+            "- The source Compose files are not rewritten by this automation.",
+            "",
+        ]
+    )
+    write_file(action_plan, "\n".join(lines))
+    secure_file(action_plan)
+    print(f"Operator action plan written: {action_plan}")
+
+
+def fail_on_unhandled_errors(args: argparse.Namespace, findings: list[import_project.Finding]) -> None:
+    unhandled = [
+        finding
+        for finding in findings
+        if finding.severity == "ERROR" and handled_error_reason(args, finding) is None
+    ]
+    if not unhandled:
+        return
+    print("Import automation stopped because manual blockers remain:")
+    for finding in unhandled:
+        print(f"- {finding.file}::{finding.service} - {finding.message}")
+    print(f"Private report: {Path(args.private_dir).expanduser() / 'import-check-private.md'}")
+    print(f"Operator action plan: {Path(args.private_dir).expanduser() / 'operator-action-plan.md'}")
+    raise SystemExit(f"Import automation stopped with {len(unhandled)} manual blocker(s).")
+
+
 def print_bundle_files(output: Path) -> None:
     if not output.exists():
         return
@@ -566,6 +659,7 @@ def stage_prepare(
         findings=findings,
         values=values,
     )
+    write_operator_action_plan(args, findings)
     ensure_registry_login(args)
 
 
@@ -647,6 +741,7 @@ def generate_bundle(
         f'MIGRATION_SSH_KEY="${{MIGRATION_SSH_KEY:-{args.ssh_key}}}"\n'
         f'MIGRATION_RKE2_IMPORT_IMAGES="${{MIGRATION_RKE2_IMPORT_IMAGES:-{str(args.rke2_import_images).lower()}}}"\n'
         f'MIGRATION_CLEANUP_OPERATOR_IMAGES="${{MIGRATION_CLEANUP_OPERATOR_IMAGES:-{str(args.cleanup_operator_images).lower()}}}"\n'
+        f'MIGRATION_SKIP_DOCKER_SOCKET_SERVICES="${{MIGRATION_SKIP_DOCKER_SOCKET_SERVICES:-{str(args.skip_docker_socket_services).lower()}}}"\n'
         f'MIGRATION_REGISTRY="${{MIGRATION_REGISTRY:-{args.registry}}}"\n'
         f'MIGRATION_IMAGE_TAG="${{MIGRATION_IMAGE_TAG:-{args.image_tag}}}"\n'
         f'MIGRATION_DUMP_DIR="${{MIGRATION_DUMP_DIR:-{args.dump_dir}}}"\n'
@@ -658,6 +753,8 @@ def generate_bundle(
         'if [ "$MIGRATION_RKE2_IMPORT_IMAGES" = "false" ]; then RKE2_IMPORT_FLAG="--no-rke2-import-images"; fi\n'
         'CLEANUP_OPERATOR_IMAGES_FLAG="--cleanup-operator-images"\n'
         'if [ "$MIGRATION_CLEANUP_OPERATOR_IMAGES" = "false" ]; then CLEANUP_OPERATOR_IMAGES_FLAG="--no-cleanup-operator-images"; fi\n'
+        'DOCKER_SOCKET_FLAG="--skip-docker-socket-services"\n'
+        'if [ "$MIGRATION_SKIP_DOCKER_SOCKET_SERVICES" = "false" ]; then DOCKER_SOCKET_FLAG="--include-docker-socket-services"; fi\n'
     )
     callback = (
         'python3 "$REPO_ROOT/scripts/migrate_project.py" '
@@ -666,7 +763,7 @@ def generate_bundle(
         '--image-mode "$MIGRATION_IMAGE_MODE" --image-output-dir "$MIGRATION_IMAGE_OUTPUT_DIR" '
         '--rke2-nodes "$MIGRATION_RKE2_NODES" --rke2-image-dir "$MIGRATION_RKE2_IMAGE_DIR" '
         '--ssh-user "$MIGRATION_SSH_USER" --ssh-key "$MIGRATION_SSH_KEY" '
-        '$RKE2_IMPORT_FLAG $CLEANUP_OPERATOR_IMAGES_FLAG '
+        '$RKE2_IMPORT_FLAG $CLEANUP_OPERATOR_IMAGES_FLAG $DOCKER_SOCKET_FLAG '
         '--registry "$MIGRATION_REGISTRY" --image-tag "$MIGRATION_IMAGE_TAG" '
         '--dump-dir "$MIGRATION_DUMP_DIR" --db-targets "$MIGRATION_DB_TARGETS" '
         '--execute $ALLOW_FLAG '
@@ -750,6 +847,9 @@ def stage_secrets(args: argparse.Namespace, service_pairs: list[tuple[import_pro
 def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]]) -> None:
     candidates = []
     for record, service in service_pairs:
+        if args.skip_docker_socket_services and service_has_docker_socket(service):
+            print(f"Skipping Docker-socket service image candidate: {record.file}::{record.name}")
+            continue
         if record.kind != "application" and not record.build_only:
             continue
         image = record.image
@@ -945,6 +1045,10 @@ def stage_validate(args: argparse.Namespace) -> None:
     ]
     if args.redact_sensitive:
         command.append("--redact-sensitive")
+    if args.allow_secret_material:
+        command.append("--allow-literal-secret-import")
+    if args.skip_docker_socket_services:
+        command.append("--allow-docker-socket-skip")
     if args.execute:
         run_command(command)
     else:
@@ -973,6 +1077,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--no-rke2-import-images", dest="rke2_import_images", action="store_false")
     parser.add_argument("--cleanup-operator-images", dest="cleanup_operator_images", action="store_true", default=True)
     parser.add_argument("--no-cleanup-operator-images", dest="cleanup_operator_images", action="store_false")
+    parser.add_argument("--skip-docker-socket-services", dest="skip_docker_socket_services", action="store_true", default=True)
+    parser.add_argument("--include-docker-socket-services", dest="skip_docker_socket_services", action="store_false")
     parser.add_argument("--registry", default="")
     parser.add_argument("--image-tag", default="imported-0.1.0")
     parser.add_argument("--private-dir", default=str(DEFAULT_PRIVATE_DIR))
@@ -993,6 +1099,8 @@ def main(argv: list[str]) -> int:
         stage_prepare(args, project_path, compose_files, service_pairs, findings, values)
     if args.stage == "prepare":
         stage_prepare(args, project_path, compose_files, service_pairs, findings, values)
+    if args.execute and args.stage in {"secrets", "images", "databases", "manifests", "validate", "all"}:
+        fail_on_unhandled_errors(args, findings)
     if args.stage in {"bundle", "all"}:
         generate_bundle(args, project_path, service_pairs, findings, values)
         print_bundle_files(Path(args.output).expanduser())
