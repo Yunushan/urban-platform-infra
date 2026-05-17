@@ -380,14 +380,19 @@ def ensure_registry_login(args: argparse.Namespace) -> None:
     run_command(container_command(args, "login", registry_host(args.registry), "--username", username, "--password-stdin"), stdin=password)
 
 
+def image_artifact_name(record: import_project.ServiceRecord) -> str:
+    file_digest = hashlib.sha256(record.file.encode("utf-8")).hexdigest()[:8]
+    return k8s_name(f"{record.name}-{file_digest}")
+
+
 def image_archive_name(record: import_project.ServiceRecord) -> str:
-    return f"{k8s_name(record.name)}.tar"
+    return f"{image_artifact_name(record)}.tar"
 
 
 def local_import_image(args: argparse.Namespace, record: import_project.ServiceRecord) -> str:
     if args.registry:
-        return f"{args.registry.rstrip('/')}/{k8s_name(record.name)}:{args.image_tag}"
-    return f"urban-platform-import/{k8s_name(record.name)}:{args.image_tag}"
+        return f"{args.registry.rstrip('/')}/{image_artifact_name(record)}:{args.image_tag}"
+    return f"urban-platform-import/{image_artifact_name(record)}:{args.image_tag}"
 
 
 def container_image_exists(args: argparse.Namespace, image: str) -> bool:
@@ -460,6 +465,26 @@ def cleanup_operator_archives(archive_dir: Path) -> None:
             print(f"Could not remove local image archive {archive}: {exc}")
     if removed:
         print(f"Removed {removed} local preload archive(s) from {archive_dir}.")
+
+
+def resolve_build_source(compose_path: Path, build: Any) -> tuple[Path, str, str | None]:
+    if isinstance(build, dict):
+        context_value = str(build.get("context", "."))
+        dockerfile = str(build.get("dockerfile", "Dockerfile"))
+    else:
+        context_value = str(build)
+        dockerfile = "Dockerfile"
+
+    context = (compose_path.parent / context_value).resolve()
+    fallback_note = None
+    if not context.exists() and context_value not in {"", "."}:
+        fallback_context = compose_path.parent.resolve()
+        fallback_dockerfile = (fallback_context / dockerfile).resolve()
+        if fallback_context.exists() and fallback_dockerfile.exists():
+            fallback_note = f"Build context {context} does not exist; falling back to Compose file directory {fallback_context}."
+            context = fallback_context
+
+    return context, dockerfile, fallback_note
 
 
 def preload_archives_to_nodes(args: argparse.Namespace, archive_dir: Path) -> bool:
@@ -970,13 +995,17 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
         compose_path = relative_compose_file(project_path, record.file)
         try:
             if build:
-                if isinstance(build, dict):
-                    context = compose_path.parent / str(build.get("context", "."))
-                    dockerfile = str(build.get("dockerfile", "Dockerfile"))
-                else:
-                    context = compose_path.parent / str(build)
-                    dockerfile = "Dockerfile"
-                run_command(container_command(args, "build", "-t", target_image, "-f", dockerfile, "."), cwd=context.resolve())
+                context, dockerfile, fallback_note = resolve_build_source(compose_path, build)
+                if fallback_note:
+                    print(fallback_note)
+                if not context.exists() or not context.is_dir():
+                    skipped.append(f"{record.file}::{record.name} (build context does not exist: {context})")
+                    continue
+                dockerfile_path = (context / dockerfile).resolve()
+                if not dockerfile_path.exists() or not dockerfile_path.is_file():
+                    skipped.append(f"{record.file}::{record.name} (Dockerfile does not exist: {dockerfile_path})")
+                    continue
+                run_command(container_command(args, "build", "-t", target_image, "-f", dockerfile, "."), cwd=context)
             elif record.image:
                 source_ready, source_cleanup_images = ensure_source_image(args, record)
                 if not source_ready:
@@ -988,7 +1017,10 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
             if args.image_mode == "registry":
                 run_command(container_command(args, "push", target_image))
             elif args.image_mode == "preload":
-                run_command(container_command(args, "save", "-o", str(archive_dir / image_archive_name(record)), target_image))
+                archive_path = archive_dir / image_archive_name(record)
+                if archive_path.exists():
+                    archive_path.unlink()
+                run_command(container_command(args, "save", "-o", str(archive_path), target_image))
             if args.cleanup_operator_images:
                 cleanup_operator_container_tags(args, [target_image])
         except subprocess.CalledProcessError as exc:
