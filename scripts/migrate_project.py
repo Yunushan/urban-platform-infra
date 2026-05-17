@@ -403,8 +403,9 @@ def explicit_pull_reference(image: import_project.ImageRef) -> str:
         return image.display
     repository = image.repository
     if "/" not in repository:
-        repository = f"library/{repository}"
-    repository = f"docker.io/{repository}"
+        repository = f"docker.io/library/{repository}"
+    else:
+        repository = f"docker.io/{repository}"
     if image.digest:
         return f"{repository}@{image.digest}"
     if image.tag:
