@@ -304,6 +304,34 @@ def run_remote_sudo_shell(args: argparse.Namespace, ssh_options: list[str], targ
     )
 
 
+def run_remote_sudo_upload(args: argparse.Namespace, ssh_options: list[str], target: str, local_path: Path, remote_path: str) -> None:
+    password = become_password(args)
+    password_required = False
+    if password:
+        passwordless = subprocess.run(["ssh", *ssh_options, target, "sudo -n true"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        password_required = passwordless.returncode != 0
+    sudo_command = "sudo -k -S -p '' sh -lc" if password_required else "sudo -n sh -lc"
+    remote_path_quoted = shlex.quote(remote_path)
+    script = f"cat > {remote_path_quoted}; chmod 0644 {remote_path_quoted}; test -s {remote_path_quoted}"
+    command = ["ssh", *ssh_options, target, f"{sudo_command} {shlex.quote(script)}"]
+    display = " ".join(command)
+    print(f"+ {display} < {local_path}")
+    process = subprocess.Popen(command, stdin=subprocess.PIPE)
+    assert process.stdin is not None
+    try:
+        if password_required:
+            process.stdin.write(f"{password}\n".encode("utf-8"))
+        with local_path.open("rb") as handle:
+            shutil.copyfileobj(handle, process.stdin)
+    except BrokenPipeError:
+        pass
+    finally:
+        process.stdin.close()
+    returncode = process.wait()
+    if returncode != 0:
+        raise subprocess.CalledProcessError(returncode, command)
+
+
 def run_cleanup_command(command: list[str]) -> None:
     display = " ".join(command)
     print(f"+ {display}")
@@ -515,37 +543,23 @@ def preload_archives_to_nodes(args: argparse.Namespace, archives: list[Path], st
         ssh_options.extend(["-i", args.ssh_key])
     remote_image_dir_raw = args.rke2_image_dir.rstrip("/")
     remote_image_dir = shlex.quote(remote_image_dir_raw)
-    remote_stage_dir_raw = f"{remote_image_dir_raw}/.urban-platform-import-tmp"
-    remote_stage_dir = shlex.quote(remote_stage_dir_raw)
     stale_names = sorted(stale_archive_names | {archive.name for archive in archives})
     stale_name_args = " ".join(shlex.quote(name) for name in stale_names)
     for node in nodes:
         target = node if "@" in node else f"{ssh_target_prefix}{node}"
-        remote_user = target.split("@", 1)[0] if "@" in target else args.ssh_user
         run_remote_sudo_shell(
             args,
             ssh_options,
             target,
-            f"mkdir -p {remote_image_dir} {remote_stage_dir}; "
-            f"rm -f {remote_stage_dir}/*.tar; "
-            f"chown {shlex.quote(remote_user)} {remote_stage_dir}; "
-            f"chmod 700 {remote_stage_dir}; "
-            f"for name in {stale_name_args}; do rm -f {remote_image_dir}/\"$name\" {remote_stage_dir}/\"$name\"; done",
+            f"mkdir -p {remote_image_dir}; "
+            f"rm -rf {remote_image_dir}/.urban-platform-import-tmp; "
+            f"for name in {stale_name_args}; do rm -f {remote_image_dir}/\"$name\"; done",
         )
         for archive in archives:
-            remote_stage_archive = f"{remote_stage_dir_raw}/{archive.name}"
-            run_command(["scp", *ssh_options, str(archive), f"{target}:{remote_stage_archive}"])
-            run_remote_sudo_shell(
-                args,
-                ssh_options,
-                target,
-                f"mv -f {shlex.quote(remote_stage_archive)} {remote_image_dir}/{shlex.quote(archive.name)}; "
-                f"chmod 0644 {remote_image_dir}/{shlex.quote(archive.name)}; "
-                f"test -s {remote_image_dir}/{shlex.quote(archive.name)}",
-            )
+            remote_archive = f"{remote_image_dir_raw}/{archive.name}"
+            run_remote_sudo_upload(args, ssh_options, target, archive, remote_archive)
             if args.rke2_import_images:
                 import_preloaded_archives_to_containerd(args, ssh_options, target, remote_image_dir, [archive.name])
-        run_remote_sudo_shell(args, ssh_options, target, f"rm -rf {remote_stage_dir}")
     return True
 
 

@@ -120,9 +120,9 @@ Image migration has three modes:
   `MIGRATION_PRUNE_OPERATOR_CACHE=false` only when you intentionally want to keep
   dangling Podman/Docker build cache on the operator for debugging. Only archives
   generated in the current run are copied to nodes; stale local archives from
-  earlier failed runs are not sent again. Node-side preload transfer uses a
-  one-archive staging directory under the RKE2 image directory instead of `/tmp`;
-  each archive is imported and removed before the next archive is copied.
+  earlier failed runs are not sent again. Node-side preload transfer streams one
+  archive at a time through sudo into the RKE2 image directory; each archive is
+  imported and removed before the next archive is copied.
 - `MIGRATION_IMAGE_MODE=skip` leaves application image movement out of the
   migration run. Use this when keeping the existing Compose deployment running
   temporarily behind external routing.
