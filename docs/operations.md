@@ -54,6 +54,10 @@ explicitly. If the API is reachable but `/readyz` reports embedded-etcd
 readiness failures, `deploy-auto` also enables the guarded RKE2 repair pass.
 If the VIP kubeconfig times out after `import-auto`, the kubeconfig helper reuses
 the temporary migration inventory and falls back to an SSH tunnel to the RKE2 API.
+When the SSH user needs sudo for RKE2 token or kubeconfig discovery,
+`deploy-auto` prompts once on the terminal and reuses that password only for the
+current run. Set `MIGRATION_BECOME_PASSWORD_PROMPT=false` for non-interactive
+runs that must fail instead of prompting.
 If `/tmp/urban-platform-import-inventory.yml` is not present, pass
 `MIGRATION_RKE2_NODES=node-1,node-2,node-3` once so the helper can rebuild that
 inventory.

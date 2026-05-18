@@ -95,9 +95,12 @@ SSH from the first RKE2 node, discovers the existing RKE2 token, installed RKE2
 version, and cluster domain when available, and generates a private token only
 for fresh installs where RKE2 is not already installed. It honors
 `MIGRATION_SSH_USER` and `MIGRATION_SSH_KEY`. The SSH user should normally have
-passwordless sudo; if it does not, put the sudo password in a local private file
-with mode `0600` and set `MIGRATION_BECOME_PASSWORD_FILE` instead of placing the
-password on the `make` command line. Use `MIGRATION_RKE2_VERSION` or
+passwordless sudo; if it does not, the helper prompts once on an interactive
+terminal and reuses that password only for the current run. For non-interactive
+runs, put the sudo password in a local private file with mode `0600` and set
+`MIGRATION_BECOME_PASSWORD_FILE`; use
+`MIGRATION_BECOME_PASSWORD_PROMPT=false` to fail instead of prompting. Use
+`MIGRATION_RKE2_VERSION` or
 `MIGRATION_CLUSTER_DOMAIN` only when installing onto fresh nodes where those
 values cannot be discovered yet. For `import-auto`, if the Kubernetes API is
 listening but not ready, the same temporary inventory is used to reconcile the

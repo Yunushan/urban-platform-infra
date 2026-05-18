@@ -11,6 +11,12 @@ FALLBACK_INVENTORY_PATH="${TMPDIR:-/tmp}/urban-platform-import-inventory.yml"
 
 migration_become_password() {
   if [ -n "${MIGRATION_BECOME_PASSWORD_FILE:-}" ]; then
+    case "${MIGRATION_BECOME_PASSWORD_FILE}" in
+      /path/to/*|path/to/*)
+        echo "MIGRATION_BECOME_PASSWORD_FILE is still a placeholder: ${MIGRATION_BECOME_PASSWORD_FILE}" >&2
+        return 1
+        ;;
+    esac
     if [ ! -r "${MIGRATION_BECOME_PASSWORD_FILE}" ]; then
       echo "MIGRATION_BECOME_PASSWORD_FILE is not readable: ${MIGRATION_BECOME_PASSWORD_FILE}" >&2
       return 1
@@ -19,6 +25,47 @@ migration_become_password() {
     return 0
   fi
   printf '%s' "${MIGRATION_BECOME_PASSWORD:-}"
+}
+
+become_password_prompt_enabled() {
+  case "${MIGRATION_BECOME_PASSWORD_PROMPT:-auto}" in
+    false|False|FALSE|0|no|No|NO|never|Never|NEVER)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+become_password_prompt_available() {
+  become_password_prompt_enabled && [ -r /dev/tty ] && [ -w /dev/tty ]
+}
+
+validate_become_password_input() {
+  if [ -z "${MIGRATION_BECOME_PASSWORD_FILE:-}" ]; then
+    return 0
+  fi
+
+  case "${MIGRATION_BECOME_PASSWORD_FILE}" in
+    /path/to/*|path/to/*)
+      echo "Ignoring placeholder MIGRATION_BECOME_PASSWORD_FILE=${MIGRATION_BECOME_PASSWORD_FILE}; deploy-auto will prompt if sudo needs a password." >&2
+      unset MIGRATION_BECOME_PASSWORD_FILE
+      return 0
+      ;;
+  esac
+
+  if [ -r "${MIGRATION_BECOME_PASSWORD_FILE}" ]; then
+    return 0
+  fi
+
+  if become_password_prompt_available; then
+    echo "MIGRATION_BECOME_PASSWORD_FILE is not readable: ${MIGRATION_BECOME_PASSWORD_FILE}; deploy-auto will prompt if sudo needs a password." >&2
+    unset MIGRATION_BECOME_PASSWORD_FILE
+    return 0
+  fi
+
+  echo "MIGRATION_BECOME_PASSWORD_FILE is not readable: ${MIGRATION_BECOME_PASSWORD_FILE}" >&2
+  echo "Create the file with mode 0600, enable passwordless sudo, or run from an interactive terminal." >&2
+  exit 1
 }
 
 write_kubeconfig_from_node() {
@@ -173,6 +220,81 @@ recover_become_password_from_fallback_inventory() {
     export MIGRATION_BECOME_PASSWORD="${recovered_password}"
     echo "Recovered MIGRATION_BECOME_PASSWORD from ${FALLBACK_INVENTORY_PATH}."
   fi
+}
+
+passwordless_sudo_available_on_reachable_nodes() {
+  local node
+  local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
+  local ssh_options=()
+  local reachable_node=false
+
+  mapfile -t ssh_options < <(ssh_options_for_node)
+
+  for node in "$@"; do
+    node="${node//[[:space:]]/}"
+    if [ -z "${node}" ]; then
+      continue
+    fi
+    if ssh "${ssh_options[@]}" "${ssh_user}@${node}" "true" >/dev/null 2>&1; then
+      reachable_node=true
+      if ! ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -n true" >/dev/null 2>&1; then
+        return 1
+      fi
+    fi
+  done
+  [ "${reachable_node}" = "true" ]
+}
+
+sudo_password_works_on_any_node() {
+  local password="$1"
+  local node
+  local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
+  local ssh_options=()
+
+  shift
+  mapfile -t ssh_options < <(ssh_options_for_node)
+
+  for node in "$@"; do
+    node="${node//[[:space:]]/}"
+    if [ -z "${node}" ]; then
+      continue
+    fi
+    if printf '%s\n' "${password}" | ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -S -p '' true" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+prompt_for_become_password_if_needed() {
+  local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
+  local prompted_password
+
+  if [ -n "${MIGRATION_BECOME_PASSWORD:-}" ] || [ -n "${MIGRATION_BECOME_PASSWORD_FILE:-}" ]; then
+    return 0
+  fi
+  if passwordless_sudo_available_on_reachable_nodes "$@"; then
+    return 0
+  fi
+  if ! become_password_prompt_available; then
+    echo "sudo requires a password for ${ssh_user}, but no interactive terminal is available for prompting." >&2
+    echo "Enable passwordless sudo or set MIGRATION_BECOME_PASSWORD_FILE to a readable private password file." >&2
+    exit 1
+  fi
+
+  printf 'sudo password for %s: ' "${ssh_user}" > /dev/tty
+  IFS= read -r -s prompted_password < /dev/tty
+  printf '\n' > /dev/tty
+  if [ -z "${prompted_password}" ]; then
+    echo "No sudo password entered; cannot continue automatic RKE2 recovery." >&2
+    exit 1
+  fi
+  if ! sudo_password_works_on_any_node "${prompted_password}" "$@"; then
+    echo "The sudo password entered for ${ssh_user} did not work on any RKE2 node." >&2
+    exit 1
+  fi
+  export MIGRATION_BECOME_PASSWORD="${prompted_password}"
+  echo "Using prompted sudo password for this deploy-auto run."
 }
 
 ssh_options_for_node() {
@@ -567,6 +689,8 @@ if [ "${OPERATOR_KUBECONFIG_FORCE_REPAIR:-false}" != "true" ] && [ -s "${OPERATO
   exit 0
 fi
 
+validate_become_password_input
+
 if [ ! -f "${INVENTORY_PATH}" ] && [ -z "${MIGRATION_RKE2_NODES:-}" ] && [ -f "${FALLBACK_INVENTORY_PATH}" ]; then
   discovered_rke2_nodes="$(
     sed -nE "s/^[[:space:]]*ansible_host:[[:space:]]*['\"]?([^'\"]+)['\"]?[[:space:]]*$/\1/p" "${FALLBACK_INVENTORY_PATH}" \
@@ -599,6 +723,7 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
     echo "MIGRATION_RKE2_NODES did not contain any usable node address." >&2
     exit 1
   fi
+  prompt_for_become_password_if_needed "${rke2_nodes[@]}"
   echo "Existing operator kubeconfig is not ready; probing RKE2 nodes from MIGRATION_RKE2_NODES for a reachable API endpoint."
 
   explicit_cluster_vip="${MIGRATION_CLUSTER_VIP:-${CLUSTER_VIP:-}}"
