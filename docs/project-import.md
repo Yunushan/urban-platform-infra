@@ -132,6 +132,11 @@ Image migration has three modes:
 - `MIGRATION_IMAGE_MODE=skip` leaves application image movement out of the
   migration run. Use this when keeping the existing Compose deployment running
   temporarily behind external routing.
+- The database stage uses local `pg_dump` and `pg_restore` when they are
+  installed. If they are missing, it falls back to the selected container tool
+  with `MIGRATION_POSTGRES_CLIENT_IMAGE` (`docker.io/library/postgres:18.3` by
+  default) and `--network host`, so the operator does not need PostgreSQL client
+  packages installed manually.
 
 Image migration uses `MIGRATION_CONTAINER_TOOL=auto` by default. The automation
 prefers `docker` when it is installed, otherwise it uses `podman`. Set

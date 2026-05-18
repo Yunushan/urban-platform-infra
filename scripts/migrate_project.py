@@ -277,6 +277,34 @@ def target_dsn_from_mapping(target: Any, namespace: str, kubeconfig: str = "") -
     return f"postgresql://{quote(str(username), safe='')}:{quote(str(password), safe='')}@{host}:{port}/{quote(str(database), safe='')}"
 
 
+def local_postgres_client_tools_available() -> bool:
+    return shutil.which("pg_dump") is not None and shutil.which("pg_restore") is not None
+
+
+def postgres_client_container_command(
+    args: argparse.Namespace,
+    dump_dir: Path,
+    env_names: list[str],
+    tool: str,
+    tool_args: list[str],
+) -> list[str]:
+    mount_target = "/urban-platform-db-dumps"
+    volume_spec = f"{dump_dir.resolve()}:{mount_target}:Z"
+    command = container_command(
+        args,
+        "run",
+        "--rm",
+        "--network",
+        "host",
+        "-v",
+        volume_spec,
+    )
+    for env_name in env_names:
+        command.extend(["--env", env_name])
+    command.extend([args.postgres_client_image, tool, *tool_args])
+    return command
+
+
 def run_command(command: list[str], *, env: dict[str, str] | None = None, stdin: str | None = None, cwd: Path | None = None) -> None:
     display = " ".join(command)
     print(f"+ {display}")
@@ -449,6 +477,13 @@ def containerd_import_image_refs(target_image: str) -> list[str]:
 
 def container_image_exists(args: argparse.Namespace, image: str) -> bool:
     return subprocess.run(container_command(args, "image", "inspect", image), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+
+def ensure_container_image(args: argparse.Namespace, image: str, purpose: str) -> None:
+    if container_image_exists(args, image):
+        return
+    print(f"{purpose} image {image} is not local; pulling it.")
+    run_command(container_command(args, "pull", image))
 
 
 def explicit_pull_reference(image: import_project.ImageRef) -> str:
@@ -973,6 +1008,7 @@ def generate_bundle(
         f'MIGRATION_SSH_KEY="${{MIGRATION_SSH_KEY:-{args.ssh_key}}}"\n'
         f'MIGRATION_BECOME_PASSWORD_FILE="${{MIGRATION_BECOME_PASSWORD_FILE:-{args.become_password_file}}}"\n'
         f'MIGRATION_CONTAINER_TOOL="${{MIGRATION_CONTAINER_TOOL:-{args.container_tool}}}"\n'
+        f'MIGRATION_POSTGRES_CLIENT_IMAGE="${{MIGRATION_POSTGRES_CLIENT_IMAGE:-{args.postgres_client_image}}}"\n'
         f'MIGRATION_RKE2_IMPORT_IMAGES="${{MIGRATION_RKE2_IMPORT_IMAGES:-{str(args.rke2_import_images).lower()}}}"\n'
         f'MIGRATION_CLEANUP_OPERATOR_IMAGES="${{MIGRATION_CLEANUP_OPERATOR_IMAGES:-{str(args.cleanup_operator_images).lower()}}}"\n'
         f'MIGRATION_PRUNE_OPERATOR_CACHE="${{MIGRATION_PRUNE_OPERATOR_CACHE:-{str(args.prune_operator_cache).lower()}}}"\n'
@@ -1003,6 +1039,7 @@ def generate_bundle(
         '--ssh-user "$MIGRATION_SSH_USER" --ssh-key "$MIGRATION_SSH_KEY" '
         '--become-password-file "$MIGRATION_BECOME_PASSWORD_FILE" '
         '--container-tool "$MIGRATION_CONTAINER_TOOL" '
+        '--postgres-client-image "$MIGRATION_POSTGRES_CLIENT_IMAGE" '
         '$RKE2_IMPORT_FLAG $CLEANUP_OPERATOR_IMAGES_FLAG $PRUNE_OPERATOR_CACHE_FLAG $DOCKER_SOCKET_FLAG '
         '--registry "$MIGRATION_REGISTRY" --image-tag "$MIGRATION_IMAGE_TAG" '
         '--dump-dir "$MIGRATION_DUMP_DIR" --db-targets "$MIGRATION_DB_TARGETS" '
@@ -1220,6 +1257,12 @@ def stage_databases(args: argparse.Namespace, service_pairs: list[tuple[import_p
     if not args.allow_secret_material:
         raise SystemExit("Refusing database dump/restore without --allow-secret-material.")
     dump_dir.mkdir(parents=True, exist_ok=True)
+    use_local_pg_tools = local_postgres_client_tools_available()
+    if use_local_pg_tools:
+        print("Using local pg_dump/pg_restore for PostgreSQL-family migration.")
+    else:
+        print(f"Local pg_dump/pg_restore not found; using containerized PostgreSQL client image {args.postgres_client_image}.")
+        ensure_container_image(args, args.postgres_client_image, "PostgreSQL client")
     for record, service in candidates:
         port = published_port(record)
         env = postgres_env(service)
@@ -1230,40 +1273,53 @@ def stage_databases(args: argparse.Namespace, service_pairs: list[tuple[import_p
         dump_file = dump_dir / f"{alias}.dump"
         run_env = os.environ.copy()
         run_env["PGPASSWORD"] = env["password"]
-        run_command(
-            [
-                "pg_dump",
-                "--format=custom",
-                "--no-owner",
-                "--no-acl",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                port,
-                "--username",
-                env["user"],
-                "--dbname",
-                env["database"],
-                "--file",
-                str(dump_file),
-            ],
-            env=run_env,
-        )
+        dump_args = [
+            "--format=custom",
+            "--no-owner",
+            "--no-acl",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            port,
+            "--username",
+            env["user"],
+            "--dbname",
+            env["database"],
+            "--file",
+            str(dump_file),
+        ]
+        if use_local_pg_tools:
+            run_command(["pg_dump", *dump_args], env=run_env)
+        else:
+            container_dump_args = [
+                *dump_args[:-1],
+                f"/urban-platform-db-dumps/{dump_file.name}",
+            ]
+            run_command(
+                postgres_client_container_command(args, dump_dir, ["PGPASSWORD"], "pg_dump", container_dump_args),
+                env=run_env,
+            )
         target_dsn = target_dsn_from_mapping(targets.get(record.name) or targets.get(alias), args.namespace, args.kubeconfig)
         if target_dsn:
-            restore_env = os.environ.copy()
-            run_command(
-                [
-                    "pg_restore",
-                    "--clean",
-                    "--if-exists",
-                    "--no-owner",
-                    "--dbname",
-                    target_dsn,
-                    str(dump_file),
-                ],
-                env=restore_env,
-            )
+            restore_args = [
+                "--clean",
+                "--if-exists",
+                "--no-owner",
+                "--dbname",
+                target_dsn,
+                str(dump_file),
+            ]
+            if use_local_pg_tools:
+                run_command(["pg_restore", *restore_args], env=os.environ.copy())
+            else:
+                container_restore_args = [
+                    *restore_args[:-1],
+                    f"/urban-platform-db-dumps/{dump_file.name}",
+                ]
+                run_command(
+                    postgres_client_container_command(args, dump_dir, [], "pg_restore", container_restore_args),
+                    env=os.environ.copy(),
+                )
         else:
             print(f"Dumped {alias}; no usable target mapping found in {db_targets_path}, so restore was skipped.")
 
@@ -1479,6 +1535,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--ssh-key", default="")
     parser.add_argument("--become-password-file", default=os.environ.get("MIGRATION_BECOME_PASSWORD_FILE", ""))
     parser.add_argument("--container-tool", default=os.environ.get("MIGRATION_CONTAINER_TOOL", "auto"))
+    parser.add_argument("--postgres-client-image", default=os.environ.get("MIGRATION_POSTGRES_CLIENT_IMAGE", "docker.io/library/postgres:18.3"))
     parser.add_argument("--rke2-import-images", dest="rke2_import_images", action="store_true", default=True)
     parser.add_argument("--no-rke2-import-images", dest="rke2_import_images", action="store_false")
     parser.add_argument("--cleanup-operator-images", dest="cleanup_operator_images", action="store_true", default=True)
