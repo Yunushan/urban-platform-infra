@@ -798,6 +798,8 @@ for helmfile_installer_token in [
 local_path_installer_text = (ROOT / 'scripts/tools/install-local-path-storage.sh').read_text(encoding='utf-8')
 for local_path_installer_token in [
     'LOCAL_PATH_PROVISIONER_VERSION',
+    'KUBECTL_RETRIES',
+    'kubectl_retry',
     'rancher/local-path-provisioner',
     'local-path-storage',
     'storageclass.kubernetes.io/is-default-class',
