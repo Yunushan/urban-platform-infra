@@ -8,6 +8,7 @@ cleanup_stale_resources="${RECOVER_STALE_RESOURCES:-${DEPLOY_RECOVER_STALE_RESOU
 delete_pending_pvcs="${RECOVER_PENDING_PVCS:-${DEPLOY_RECOVER_PENDING_PVCS:-true}}"
 delete_all_pvcs="${RECOVER_DELETE_PVCS:-${DEPLOY_RECOVER_DELETE_PVCS:-false}}"
 recover_statefulsets="${RECOVER_STATEFULSETS:-${DEPLOY_RECOVER_STATEFULSETS:-false}}"
+recover_cnpg_initdb="${RECOVER_CNPG_INITDB:-${DEPLOY_RECOVER_CNPG_INITDB:-false}}"
 timeout="${HELM_RECOVER_TIMEOUT:-${HELM_TIMEOUT:-10m}}"
 request_timeout="${KUBECTL_REQUEST_TIMEOUT:-120s}"
 selector="${HELM_RECOVER_SELECTOR:-app.kubernetes.io/part-of=urban-platform-infra}"
@@ -121,11 +122,93 @@ delete_recoverable_statefulsets() {
   kube -n "${namespace}" delete statefulset "${statefulsets[@]}" --ignore-not-found --timeout="${timeout}" || true
 }
 
+ensure_kubernetes_api_egress_policy() {
+  if [ "${recover_cnpg_initdb}" != "true" ]; then
+    return 0
+  fi
+  if ! kube api-resources --namespaced=true -o name 2>/dev/null | grep -qx "networkpolicies.networking.k8s.io"; then
+    return 0
+  fi
+
+  echo "Ensuring Kubernetes API egress NetworkPolicy before CNPG initdb recovery."
+  kube -n "${namespace}" apply -f - <<'YAML'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: urban-platform-kubernetes-api-egress
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+YAML
+}
+
+recover_failed_cnpg_initdb() {
+  local clusters=()
+  local recoverable=()
+  local cluster
+  local failed_pods
+
+  if [ "${recover_cnpg_initdb}" != "true" ]; then
+    return 0
+  fi
+  if ! kube api-resources --namespaced=true -o name 2>/dev/null | grep -qx "clusters.postgresql.cnpg.io"; then
+    return 0
+  fi
+
+  mapfile -t clusters < <(
+    kube -n "${namespace}" get clusters.postgresql.cnpg.io -o json 2>/dev/null | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+for item in data.get("items", []):
+    status = item.get("status") or {}
+    phase = status.get("phase") or ""
+    ready = status.get("readyInstances") or 0
+    if phase in {"Setting up primary", "Cluster is unrecoverable and needs manual intervention"} and int(ready) == 0:
+        print(item["metadata"]["name"])
+' || true
+  )
+
+  for cluster in "${clusters[@]}"; do
+    failed_pods="$(
+      kube -n "${namespace}" get pods -l "cnpg.io/cluster=${cluster},cnpg.io/jobRole=initdb" --no-headers 2>/dev/null \
+        | awk '$3 == "Error" || $3 == "Failed" {count++} END {print count + 0}'
+    )"
+    if [ "${failed_pods}" -gt 0 ]; then
+      recoverable+=("${cluster}")
+    fi
+  done
+
+  if [ "${#recoverable[@]}" -eq 0 ]; then
+    echo "No failed CNPG initdb bootstraps found in namespace ${namespace}."
+    return 0
+  fi
+
+  echo "Resetting failed CNPG initdb bootstraps before Helm upgrade: ${recoverable[*]}"
+  kube -n "${namespace}" delete clusters.postgresql.cnpg.io "${recoverable[@]}" --ignore-not-found --timeout="${timeout}" || true
+  for cluster in "${recoverable[@]}"; do
+    kube -n "${namespace}" delete job "${cluster}-1-initdb" --ignore-not-found --timeout="${timeout}" || true
+    kube -n "${namespace}" delete pod -l "cnpg.io/cluster=${cluster},cnpg.io/jobRole=initdb" --ignore-not-found --timeout="${timeout}" || true
+    kube -n "${namespace}" delete pvc "${cluster}-1" --ignore-not-found --timeout="${timeout}" || true
+  done
+}
+
 status="$(release_status)"
 manifest_file=""
 
 if [ "${status}" = "deployed" ]; then
   echo "Helm release ${release} is deployed; checking for recoverable StatefulSets and Pending PVCs."
+  ensure_kubernetes_api_egress_policy
+  recover_failed_cnpg_initdb
   delete_recoverable_statefulsets
   delete_pvcs
   exit 0
@@ -151,6 +234,8 @@ fi
 
 kube -n "${namespace}" delete secret -l "owner=helm,name=${release}" --ignore-not-found --timeout="${timeout}" || true
 delete_stale_resources
+ensure_kubernetes_api_egress_policy
+recover_failed_cnpg_initdb
 delete_pvcs
 
 echo "Helm release recovery completed for ${release}."

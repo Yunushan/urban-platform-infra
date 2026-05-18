@@ -53,6 +53,7 @@ DEPLOY_RECOVER_STALE_RESOURCES ?= true
 DEPLOY_RECOVER_PENDING_PVCS ?= true
 DEPLOY_RECOVER_DELETE_PVCS ?= false
 DEPLOY_RECOVER_STATEFULSETS ?= false
+DEPLOY_RECOVER_CNPG_INITDB ?= false
 DEPLOY_LAB_STORAGE ?= false
 DEPLOY_LAB_REPLICA_OVERRIDE ?= 1
 DEPLOY_LAB_AUTOSCALING ?= false
@@ -253,7 +254,7 @@ ensure-namespace: ## Create and label the target namespace before deploying the 
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl label namespace $(NAMESPACE) pod-security.kubernetes.io/enforce=baseline pod-security.kubernetes.io/audit=restricted pod-security.kubernetes.io/warn=restricted pod-security.kubernetes.io/enforce-version=latest pod-security.kubernetes.io/audit-version=latest pod-security.kubernetes.io/warn-version=latest --overwrite
 
 recover-helm-release: operator-kubeconfig ensure-namespace ## Recover a failed, uninstalling, or stale platform Helm release before redeploying.
-	KUBECONFIG=$(OPERATOR_KUBECONFIG) HELM=$(HELM) PROJECT=$(PROJECT) NAMESPACE=$(NAMESPACE) HELM_TIMEOUT=$(HELM_TIMEOUT) DEPLOY_RECOVER_FAILED_RELEASE=$(DEPLOY_RECOVER_FAILED_RELEASE) DEPLOY_RECOVER_STALE_RESOURCES=$(DEPLOY_RECOVER_STALE_RESOURCES) DEPLOY_RECOVER_PENDING_PVCS=$(DEPLOY_RECOVER_PENDING_PVCS) DEPLOY_RECOVER_DELETE_PVCS=$(DEPLOY_RECOVER_DELETE_PVCS) DEPLOY_RECOVER_STATEFULSETS=$(DEPLOY_RECOVER_STATEFULSETS) bash $(HELM_RECOVERY_SCRIPT)
+	KUBECONFIG=$(OPERATOR_KUBECONFIG) HELM=$(HELM) PROJECT=$(PROJECT) NAMESPACE=$(NAMESPACE) HELM_TIMEOUT=$(HELM_TIMEOUT) DEPLOY_RECOVER_FAILED_RELEASE=$(DEPLOY_RECOVER_FAILED_RELEASE) DEPLOY_RECOVER_STALE_RESOURCES=$(DEPLOY_RECOVER_STALE_RESOURCES) DEPLOY_RECOVER_PENDING_PVCS=$(DEPLOY_RECOVER_PENDING_PVCS) DEPLOY_RECOVER_DELETE_PVCS=$(DEPLOY_RECOVER_DELETE_PVCS) DEPLOY_RECOVER_STATEFULSETS=$(DEPLOY_RECOVER_STATEFULSETS) DEPLOY_RECOVER_CNPG_INITDB=$(DEPLOY_RECOVER_CNPG_INITDB) bash $(HELM_RECOVERY_SCRIPT)
 
 deploy-dry-run: install-helm ## Render the Helm chart without applying it.
 	$(HELM) template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f $(VALUES) -f $(TOPOLOGY_VALUES) --dry-run > rendered.yaml
@@ -291,6 +292,7 @@ deploy: install-operators ensure-namespace recover-helm-release ## Deploy/upgrad
 
 deploy-auto: DEPLOY_RECOVER_FAILED_RELEASE = true
 deploy-auto: DEPLOY_RECOVER_STATEFULSETS = true
+deploy-auto: DEPLOY_RECOVER_CNPG_INITDB = true
 deploy-auto: DEPLOY_LAB_STORAGE = true
 deploy-auto: DEPLOY_SKIP_PLACEHOLDER_WORKLOADS = true
 deploy-auto: DEPLOY_REDIS_SENTINEL = false
