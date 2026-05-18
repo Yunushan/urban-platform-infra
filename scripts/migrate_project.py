@@ -563,26 +563,38 @@ def remote_containerd_has_image(args: argparse.Namespace, ssh_options: list[str]
     return run_remote_sudo_shell_status(args, ssh_options, target, script) == 0
 
 
-def preload_archives_to_nodes(args: argparse.Namespace, archives: list[Path], stale_archive_names: set[str], image_refs: list[str] | None = None) -> bool:
+def preload_node_targets(args: argparse.Namespace) -> tuple[list[str], list[str]]:
     nodes = [node.strip() for node in args.rke2_nodes.split(",") if node.strip()]
-    archives = sorted(archives)
-    if not archives:
-        print("No image archives were written in this run.")
-        return False
-    if not nodes:
-        archive_dir = archives[0].parent
-        print(f"Image archives written to {archive_dir}. Set MIGRATION_RKE2_NODES to copy them to RKE2 nodes automatically.")
-        return False
     ssh_target_prefix = f"{args.ssh_user}@"
     ssh_options: list[str] = []
     if args.ssh_key:
         ssh_options.extend(["-i", args.ssh_key])
+    targets = [node if "@" in node else f"{ssh_target_prefix}{node}" for node in nodes]
+    return targets, ssh_options
+
+
+def all_preload_nodes_have_image(args: argparse.Namespace, image_refs: list[str]) -> bool:
+    targets, ssh_options = preload_node_targets(args)
+    if not targets:
+        return False
+    return all(remote_containerd_has_image(args, ssh_options, target, image_refs) for target in targets)
+
+
+def preload_archives_to_nodes(args: argparse.Namespace, archives: list[Path], stale_archive_names: set[str], image_refs: list[str] | None = None) -> bool:
+    targets, ssh_options = preload_node_targets(args)
+    archives = sorted(archives)
+    if not archives:
+        print("No image archives were written in this run.")
+        return False
+    if not targets:
+        archive_dir = archives[0].parent
+        print(f"Image archives written to {archive_dir}. Set MIGRATION_RKE2_NODES to copy them to RKE2 nodes automatically.")
+        return False
     remote_image_dir_raw = args.rke2_image_dir.rstrip("/")
     remote_image_dir = shlex.quote(remote_image_dir_raw)
     stale_names = sorted(stale_archive_names | {archive.name for archive in archives})
     stale_name_args = " ".join(shlex.quote(name) for name in stale_names)
-    for node in nodes:
-        target = node if "@" in node else f"{ssh_target_prefix}{node}"
+    for target in targets:
         run_remote_sudo_shell(
             args,
             ssh_options,
@@ -1091,8 +1103,14 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
     }
     for record, service, build in candidates:
         target_image = local_import_image(args, record)
+        image_refs = containerd_import_image_refs(target_image)
         compose_path = relative_compose_file(project_path, record.file)
         try:
+            if preload_streaming and all_preload_nodes_have_image(args, image_refs):
+                print(f"Image {image_refs[0]} is already present on all RKE2 nodes; skipping build, archive save, and upload.")
+                if args.cleanup_operator_images:
+                    cleanup_operator_container_tags(args, [target_image])
+                continue
             if build:
                 context, dockerfile, fallback_note = resolve_build_source(compose_path, build)
                 if fallback_note:
@@ -1117,6 +1135,13 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                 run_command(container_command(args, "push", target_image))
             elif args.image_mode == "preload":
                 archive_path = archive_dir / image_archive_name(record)
+                if preload_streaming and all_preload_nodes_have_image(args, image_refs):
+                    print(f"Image {image_refs[0]} is already present on all RKE2 nodes; skipping local archive save and upload.")
+                    if archive_path.exists():
+                        archive_path.unlink()
+                    if args.cleanup_operator_images:
+                        cleanup_operator_container_tags(args, [target_image])
+                    continue
                 if archive_path.exists():
                     archive_path.unlink()
                 run_command(container_command(args, "save", "-o", str(archive_path), target_image))
@@ -1125,7 +1150,7 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                         args,
                         [archive_path],
                         stale_archive_names if not preload_initialized else set(),
-                        containerd_import_image_refs(target_image),
+                        image_refs,
                     )
                     archives_copied = archives_copied or copied
                     preload_initialized = True

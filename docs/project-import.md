@@ -124,8 +124,9 @@ Image migration has three modes:
   from earlier failed runs are removed before the run and are not sent again.
   Node-side preload transfer streams one archive at a time through sudo into the
   RKE2 image directory; each archive is imported and removed before the next
-  archive is copied. On retries, nodes that already have the image in RKE2
-  containerd skip the archive upload.
+  archive is copied. On retries, candidates already present on every RKE2 node
+  skip build, archive save, and upload; nodes that already have a partially
+  migrated image skip that archive upload.
 - `MIGRATION_IMAGE_MODE=skip` leaves application image movement out of the
   migration run. Use this when keeping the existing Compose deployment running
   temporarily behind external routing.
