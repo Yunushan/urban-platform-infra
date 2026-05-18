@@ -195,6 +195,9 @@ if observability_values.get('stack', {}).get('name') != 'elastic-eck-prometheus-
 for observability_component in ['elasticsearch', 'kibana', 'logstash', 'grafana', 'prometheus', 'opentelemetry']:
     if observability_values.get(observability_component, {}).get('enabled') is not True:
         errors.append(f'Default observability component must be enabled: {observability_component}')
+elasticsearch_resources = observability_values.get('elasticsearch', {}).get('resources', {})
+if not elasticsearch_resources.get('requests', {}).get('cpu') or not elasticsearch_resources.get('limits', {}).get('cpu'):
+    errors.append('Default Elasticsearch ECK resources must include CPU requests and limits')
 monitoring_values = values.get('monitoring', {})
 if monitoring_values.get('prometheusRules', {}).get('enabled') is not True:
     errors.append('Monitoring values must enable PrometheusRule generation when monitoring.enabled is true')
@@ -1183,6 +1186,10 @@ for redis_template_token in [
 ]:
     if redis_template_token not in redis_template_text:
         errors.append(f'Redis template missing lab replica-aware token: {redis_template_token}')
+eck_template_text = (ROOT / 'helm/urban-platform-infra/templates/observability-eck.yaml').read_text(encoding='utf-8')
+for eck_template_token in ['podTemplate:', 'name: elasticsearch', '.Values.observability.elasticsearch.resources']:
+    if eck_template_token not in eck_template_text:
+        errors.append(f'ECK template missing Elasticsearch resources token: {eck_template_token}')
 status_script = (ROOT / 'scripts/health/status.sh').read_text(encoding='utf-8')
 for status_token in ['prometheusrules.monitoring.coreos.com', 'servicemonitors.monitoring.coreos.com', 'observability']:
     if status_token not in status_script:

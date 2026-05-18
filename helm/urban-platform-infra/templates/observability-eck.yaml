@@ -12,10 +12,19 @@ spec:
   image: {{ include "cip.image" (list . .Values.observability.elasticsearch.image) | quote }}
   nodeSets:
     {{- range .Values.observability.elasticsearch.nodeSets }}
+    {{- $resources := .resources | default $.Values.observability.elasticsearch.resources }}
     - name: {{ .name }}
       count: {{ include "cip.replicaCount" (list $ .count) }}
       config:
         node.store.allow_mmap: false
+      {{- if $resources }}
+      podTemplate:
+        spec:
+          containers:
+            - name: elasticsearch
+              resources:
+                {{- toYaml $resources | nindent 16 }}
+      {{- end }}
       volumeClaimTemplates:
         - metadata:
             name: elasticsearch-data
