@@ -35,6 +35,7 @@ REQUIRED = [
     'scripts/import_project.py',
     'scripts/migrate_project.py',
     'scripts/tools/install-helm.sh', 'scripts/tools/install-helmfile.sh',
+    'scripts/tools/helmfile-sync-retry.sh',
     'scripts/tools/install-local-path-storage.sh', 'scripts/tools/recover-helm-release.sh',
     'scripts/tools/ensure-kubeconfig.sh',
     'tests/policy/basic_policy.py', 'docs/bootstrap-safety.md', 'docs/secrets-management.md',
@@ -630,6 +631,7 @@ for makefile_helm_token in [
     'OPERATOR_KUBECONFIG ?=',
     'KUBECONFIG_SCRIPT ?= scripts/tools/ensure-kubeconfig.sh',
     'operator-kubeconfig:',
+    'OPERATOR_KUBECONFIG_FORCE_REPAIR',
     'import-auto: MIGRATION_AUTO_REPAIR_CLUSTER = true',
     'OPERATOR_KUBECONFIG=$(OPERATOR_KUBECONFIG)',
     'MIGRATION_SSH_KEY="$(MIGRATION_SSH_KEY)"',
@@ -644,6 +646,9 @@ for makefile_helm_token in [
     'HELMFILE_CONFIG',
     'deploy/helmfile.yaml.gotmpl',
     'HELMFILE_INSTALL_SCRIPT',
+    'HELMFILE_SYNC_SCRIPT',
+    'scripts/tools/helmfile-sync-retry.sh',
+    'HELMFILE_SYNC_RETRIES',
     'install-local-path-storage:',
     'ensure-storageclass:',
     'INSTALL_LOCAL_PATH_STORAGE',
@@ -655,8 +660,7 @@ for makefile_helm_token in [
     'DEPLOY_LAB_STORAGE',
     'DEPLOY_LAB_REPLICA_OVERRIDE',
     'wait-operator-crds:',
-    '$(HELMFILE) -f $(HELMFILE_CONFIG) sync',
-    'KUBECONFIG=$(OPERATOR_KUBECONFIG) $(HELMFILE)',
+    'bash $(HELMFILE_SYNC_SCRIPT)',
     'KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl wait',
     'crd/clusters.postgresql.cnpg.io',
     'crd/imagecatalogs.postgresql.cnpg.io',
@@ -794,6 +798,17 @@ for helmfile_installer_token in [
 ]:
     if helmfile_installer_token not in helmfile_installer_text:
         errors.append(f'Helmfile installer script missing token: {helmfile_installer_token}')
+
+helmfile_sync_retry_text = (ROOT / 'scripts/tools/helmfile-sync-retry.sh').read_text(encoding='utf-8')
+for helmfile_sync_retry_token in [
+    'HELMFILE_SYNC_RETRIES',
+    'HELMFILE_SYNC_RETRY_DELAY',
+    'OPERATOR_KUBECONFIG_FORCE_REPAIR=true',
+    'Refreshing operator kubeconfig before Helmfile retry',
+    '"${helmfile_bin}" -f "${helmfile_config}" sync',
+]:
+    if helmfile_sync_retry_token not in helmfile_sync_retry_text:
+        errors.append(f'Helmfile retry script missing token: {helmfile_sync_retry_token}')
 
 local_path_installer_text = (ROOT / 'scripts/tools/install-local-path-storage.sh').read_text(encoding='utf-8')
 for local_path_installer_token in [

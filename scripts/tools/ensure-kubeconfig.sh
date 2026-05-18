@@ -409,7 +409,7 @@ if [ "${ENGINE}" != "rke2" ]; then
   exit 0
 fi
 
-if [ -s "${OPERATOR_KUBECONFIG_PATH}" ] && command -v kubectl >/dev/null 2>&1 && kubernetes_api_ready; then
+if [ "${OPERATOR_KUBECONFIG_FORCE_REPAIR:-false}" != "true" ] && [ -s "${OPERATOR_KUBECONFIG_PATH}" ] && command -v kubectl >/dev/null 2>&1 && kubernetes_api_ready; then
   echo "Existing operator kubeconfig is ready: ${OPERATOR_KUBECONFIG_PATH}"
   exit 0
 fi

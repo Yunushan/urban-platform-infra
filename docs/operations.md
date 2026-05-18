@@ -56,6 +56,9 @@ the temporary migration inventory and falls back to an SSH tunnel to the RKE2 AP
 If `/tmp/urban-platform-import-inventory.yml` is not present, pass
 `MIGRATION_RKE2_NODES=node-1,node-2,node-3` once so the helper can rebuild that
 inventory.
+Operator Helmfile sync is retried automatically when the Kubernetes API returns
+transient VIP TLS handshake timeouts; each retry refreshes the operator
+kubeconfig first.
 
 The operator step uses `helmfile sync`, so the Helm diff plugin is not required
 on the operator machine.
