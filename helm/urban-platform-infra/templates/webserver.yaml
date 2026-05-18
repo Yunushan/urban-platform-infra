@@ -2,6 +2,7 @@
 {{- $provider := index .Values.webserver.providers $providerName -}}
 {{- $ingressHost := include "cip.ingressHost" . -}}
 {{- $ingressTlsSecretName := include "cip.ingressTlsSecretName" . -}}
+{{- $webserverIngressEnabled := ne (toString .Values.webserver.ingress.enabled) "false" -}}
 {{- if $provider }}
 ---
 apiVersion: apps/v1
@@ -94,7 +95,7 @@ spec:
       port: {{ $p.servicePort }}
       targetPort: {{ $p.containerPort }}
     {{- end }}
-{{- if and .Values.ingress.enabled (.Values.webserver.ingress.enabled | default true) }}
+{{- if and .Values.ingress.enabled $webserverIngressEnabled }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -128,7 +129,7 @@ spec:
                 port:
                   number: {{ .Values.webserver.ingress.servicePort | default 80 }}
 {{- end }}
-{{- if and .Values.ingress.enabled (.Values.webserver.ingress.enabled | default true) (eq (.Values.ingress.className | default "traefik") "traefik") (or (.Values.ingress.sslRedirect | default true) (.Values.ingress.forceSslRedirect | default true)) }}
+{{- if and .Values.ingress.enabled $webserverIngressEnabled (eq (.Values.ingress.className | default "traefik") "traefik") (or (.Values.ingress.sslRedirect | default true) (.Values.ingress.forceSslRedirect | default true)) }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress

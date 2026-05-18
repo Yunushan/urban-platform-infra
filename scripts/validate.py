@@ -583,6 +583,8 @@ for ingress_template_token in [
 for webserver_ingress_token in [
     'kind: Ingress',
     'name: webserver',
+    '$webserverIngressEnabled',
+    'ne (toString .Values.webserver.ingress.enabled) "false"',
     'path: {{ .Values.webserver.ingress.path | default "/" | quote }}',
     'number: {{ .Values.webserver.ingress.servicePort | default 80 }}',
     'include "cip.ingressAnnotations"',
