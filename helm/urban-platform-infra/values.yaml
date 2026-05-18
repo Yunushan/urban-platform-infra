@@ -263,6 +263,11 @@ databases:
   enabled: true
   provider: cloudnative-pg
   defaultInstances: 3
+  storageOverride:
+    size: ''
+    className: ''
+  monitoring:
+    enableDeprecatedPodMonitor: false
   backup:
     enabled: false
     retentionPolicy: 30d

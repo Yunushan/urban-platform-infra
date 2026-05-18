@@ -23,6 +23,12 @@ requiring an inventory just to install operator CRDs.
 The default operator pins are intentionally current for this stack:
 CloudNativePG 1.29+ is required for PostgreSQL 18 defaults, and ECK 3.4+ is
 required for Kubernetes 1.34 and Elastic Stack 9.x.
+The chart does not render CloudNativePG's deprecated
+`spec.monitoring.enablePodMonitor` field by default. Create PodMonitor resources
+explicitly when database scraping is required.
+For lab clusters or small disks, override all CloudNativePG PVCs with
+`databases.storageOverride.size` and, when the cluster does not have a default
+StorageClass, `databases.storageOverride.className`.
 
 The operator step uses `helmfile sync`, so the Helm diff plugin is not required
 on the operator machine.

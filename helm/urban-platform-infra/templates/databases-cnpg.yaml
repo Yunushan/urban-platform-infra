@@ -1,6 +1,9 @@
 {{- if and .Values.databases.enabled (eq .Values.databases.provider "cloudnative-pg") }}
 {{- range $name, $db := .Values.databases.instances }}
 {{- if $db.enabled }}
+{{- $storageOverride := $.Values.databases.storageOverride | default dict }}
+{{- $storageSize := $storageOverride.size | default $db.storage.size | default "20Gi" }}
+{{- $storageClass := $storageOverride.className | default $db.storage.className }}
 ---
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
@@ -28,12 +31,14 @@ spec:
       database: {{ $db.database | quote }}
       owner: {{ $db.owner | quote }}
   storage:
-    size: {{ $db.storage.size | default "20Gi" }}
-    {{- if $db.storage.className }}
-    storageClass: {{ $db.storage.className | quote }}
+    size: {{ $storageSize }}
+    {{- if $storageClass }}
+    storageClass: {{ $storageClass | quote }}
     {{- end }}
+  {{- if $.Values.databases.monitoring.enableDeprecatedPodMonitor }}
   monitoring:
     enablePodMonitor: true
+  {{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

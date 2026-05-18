@@ -1036,6 +1036,17 @@ for alert_name in [
 for required_monitoring_token in ['PrometheusRule', 'runbook_url', 'release:']:
     if required_monitoring_token not in monitoring_rules_text:
         errors.append(f'Monitoring rules missing required token: {required_monitoring_token}')
+
+database_template_text = (ROOT / 'helm/urban-platform-infra/templates/databases-cnpg.yaml').read_text(
+    encoding='utf-8'
+)
+for database_token in [
+    'storageOverride',
+    'enableDeprecatedPodMonitor',
+    'storageClass:',
+]:
+    if database_token not in database_template_text:
+        errors.append(f'Database template missing required token: {database_token}')
 monitoring_services_text = (ROOT / 'helm/urban-platform-infra/templates/monitoring-servicemonitors.yaml').read_text(encoding='utf-8')
 if 'ServiceMonitor' not in monitoring_services_text or 'namespaceSelector' not in monitoring_services_text:
     errors.append('Monitoring ServiceMonitor template must define namespace-scoped generic targets')
