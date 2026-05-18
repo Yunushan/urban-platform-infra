@@ -9,7 +9,7 @@ policy:
   defaultApplicationTag: 0.1.0
   approvedRuntimeImages:
     - repository: nginxinc/nginx-unprivileged
-      tag: '1.30.0'
+      tag: '1.31.0'
       owner: webserver
     - repository: httpd
       tag: '2.4'
@@ -18,7 +18,7 @@ policy:
       tag: '10.1'
       owner: webserver
     - repository: traefik
-      tag: v3.1
+      tag: v3.7.1
       owner: webserver
     - repository: confluentinc/cp-kafka
       tag: 7.9.6
@@ -42,10 +42,10 @@ policy:
       tag: 2.26.4-pg18
       owner: database
     - repository: docker.elastic.co/elasticsearch/elasticsearch
-      tag: 9.4.0
+      tag: 9.4.1
       owner: observability
     - repository: docker.elastic.co/kibana/kibana
-      tag: 9.4.0
+      tag: 9.4.1
       owner: observability
     - repository: docker.elastic.co/logstash/logstash
       tag: 9.4.0

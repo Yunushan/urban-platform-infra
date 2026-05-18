@@ -778,7 +778,7 @@ for project_import_token in [
     'find_compose_files',
     'docker-compose',
     '--project-path',
-    'nginxinc/nginx-unprivileged:1.30.0',
+    'nginxinc/nginx-unprivileged:1.31.0',
     'CloudNativePG',
     'config/image-policy.yaml',
     'literal secret value',
@@ -1148,15 +1148,16 @@ runtime_image_surface_text = '\n'.join(
     ]
 )
 for current_runtime_image in [
-    'nginxinc/nginx-unprivileged:1.30.0',
+    'nginxinc/nginx-unprivileged:1.31.0',
+    'traefik:v3.7.1',
     'confluentinc/cp-kafka:7.9.6',
     'confluentinc/cp-zookeeper:7.9.6',
     'redis:8.6.2',
     'postgres:18.3',
     'postgis/postgis:18-3.6',
     'timescale/timescaledb:2.26.4-pg18',
-    'docker.elastic.co/elasticsearch/elasticsearch:9.4.0',
-    'docker.elastic.co/kibana/kibana:9.4.0',
+    'docker.elastic.co/elasticsearch/elasticsearch:9.4.1',
+    'docker.elastic.co/kibana/kibana:9.4.1',
     'docker.elastic.co/logstash/logstash:9.4.0',
     'zabbix/zabbix-agent2:ubuntu-7.4.10',
 ]:

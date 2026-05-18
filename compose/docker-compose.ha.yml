@@ -427,7 +427,7 @@ services:
     ports:
     - 5018:5018
   nginx:
-    image: nginxinc/nginx-unprivileged:1.30.0
+    image: nginxinc/nginx-unprivileged:1.31.0
     restart: unless-stopped
     ports:
     - 80:8080
@@ -481,7 +481,7 @@ services:
     networks:
     - urban-platform
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:9.4.0
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.4.1
     restart: unless-stopped
     ports:
     - 9200:9200
@@ -494,7 +494,7 @@ services:
     networks:
     - urban-platform
   kibana:
-    image: docker.elastic.co/kibana/kibana:9.4.0
+    image: docker.elastic.co/kibana/kibana:9.4.1
     restart: unless-stopped
     ports:
     - 5601:5601

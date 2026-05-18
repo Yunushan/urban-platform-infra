@@ -277,7 +277,7 @@ images:
   ports:
   - 5018
 - name: webserver-nginx
-  image: nginxinc/nginx-unprivileged:1.30.0
+  image: nginxinc/nginx-unprivileged:1.31.0
   category: webserver
   type: web
   ports:
@@ -323,7 +323,7 @@ images:
   - 26379
   replicas: 3
 - name: elasticsearch
-  image: docker.elastic.co/elasticsearch/elasticsearch:9.4.0
+  image: docker.elastic.co/elasticsearch/elasticsearch:9.4.1
   category: observability
   type: stateful
   ports:
@@ -331,7 +331,7 @@ images:
   - 9300
   replicas: 3
 - name: kibana
-  image: docker.elastic.co/kibana/kibana:9.4.0
+  image: docker.elastic.co/kibana/kibana:9.4.1
   category: observability
   type: application
   ports:

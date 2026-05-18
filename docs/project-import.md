@@ -234,7 +234,7 @@ It compares the project against the selected platform profile:
 - `INGRESS=traefik` warns when a Compose service publishes host ports `80` or
   `443`, or when the project includes a second Traefik edge controller.
 - `WEB=nginx` expects the platform gateway image
-  `nginxinc/nginx-unprivileged:1.30.0` and flags rootful or version-drifted
+  `nginxinc/nginx-unprivileged:1.31.0` and flags rootful or version-drifted
   nginx images.
 - `DB=postgresql` expects the PostgreSQL/CloudNativePG migration path. It flags
   PostgreSQL majors older or newer than the platform default `18`, and fails

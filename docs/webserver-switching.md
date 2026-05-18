@@ -1,6 +1,6 @@
 # Webserver Switching
 
-Default webserver is `nginxinc/nginx-unprivileged:1.30.0`. Default ingress controller is RKE2-bundled Traefik.
+Default webserver is `nginxinc/nginx-unprivileged:1.31.0`. Default ingress controller is RKE2-bundled Traefik.
 
 ```bash
 python3 scripts/configure.py --ingress-controller traefik --webserver nginx
@@ -15,5 +15,6 @@ Profiles are in `config/webservers.yaml` and `helm/urban-platform-infra/values.y
 
 For RKE2, keep `rke2_traefik_source: bundled` in inventory to use the Traefik
 version tested with the pinned `rke2_version`. To pin an upstream Traefik chart
-instead, set `rke2_traefik_source: upstream` and provide
-`rke2_traefik_chart_version`.
+instead, set `rke2_traefik_source: upstream`,
+`rke2_traefik_chart_version: "40.2.0"`, and
+`rke2_traefik_image_tag: "v3.7.1"`.

@@ -35,7 +35,7 @@ profiles:
   elasticsearch:
     enabled: true
     purpose: search/log analytics
-    version: 9.4.0
+    version: 9.4.1
   opensearch:
     enabled: false
     purpose: search/log analytics

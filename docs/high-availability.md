@@ -21,10 +21,10 @@ RKE2-bundled Traefik owns web traffic directly on each node by default:
 
 Keep `rke2_traefik_source: bundled` for the production default. In that mode,
 the pinned `rke2_version` controls the bundled Traefik chart and image version.
-If an end user needs a specific upstream Traefik chart, set
-`rke2_traefik_source: upstream` and pin `rke2_traefik_chart_version`; the role
-then disables the bundled RKE2 ingress controller and installs that chart through
-the RKE2 Helm controller.
+If an end user needs Traefik `v3.7.1`, set
+`rke2_traefik_source: upstream`, `rke2_traefik_chart_version: "40.2.0"`, and
+`rke2_traefik_image_tag: "v3.7.1"`; the role then disables the bundled RKE2
+ingress controller and installs that chart through the RKE2 Helm controller.
 
 Set `rke2_ingress_controller: nginx` in inventory and `ingress.className=nginx`
 in Helm values if a deployment must stay on ingress-nginx.

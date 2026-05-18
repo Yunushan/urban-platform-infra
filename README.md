@@ -120,12 +120,12 @@ By default the Kubernetes profile deploys:
 | Control-plane access | HAProxy + Keepalived | VIP failover on `7443` for the API and `9346` for RKE2 registration |
 | Edge ingress | RKE2-bundled Traefik | Default ingress class `traefik`; RKE2 owns the bundled Traefik version, with an optional upstream chart pin mode, and nginx/ingress-nginx remains switchable |
 | Time sync | Chrony | Installed on every node |
-| Web gateway | `nginxinc/nginx-unprivileged:1.30.0` | 3 replicas, root ingress, HTTPS redirect, swappable with Apache HTTPD, Tomcat, or Traefik |
+| Web gateway | `nginxinc/nginx-unprivileged:1.31.0` | 3 replicas, root ingress, HTTPS redirect, swappable with Apache HTTPD, Tomcat, or Traefik |
 | Application services | Sanitized `example-app-*` images | 3 replicas, PDB, HPA, anti-affinity/topology spread |
 | Kafka | `confluentinc/cp-kafka:7.9.6` + `confluentinc/cp-zookeeper:7.9.6` | 3 brokers, 3 ZooKeeper pods, Kafka UI |
 | Redis | `redis:8.6.2` | 3 Redis pods + Sentinel scaffolding |
 | PostgreSQL/PostGIS/TimescaleDB | `postgres:18.3`, `postgis/postgis:18-3.6`, `timescale/timescaledb:2.26.4-pg18` | CloudNativePG custom resources with 3 instances per database |
-| Observability | Elastic ECK `9.4.0` + Prometheus/Grafana + OpenTelemetry | ECK custom resources, kube-prometheus-stack, OpenTelemetry Collector, Logstash replicas |
+| Observability | Elastic ECK `9.4.1` + Prometheus/Grafana + OpenTelemetry | ECK custom resources, kube-prometheus-stack, OpenTelemetry Collector, Logstash replicas |
 | Optional observability | Grafana Loki, OpenSearch, Graylog, ClickHouse | Switchable by Helmfile values/profile |
 | Agent monitoring | `zabbix/zabbix-agent2:ubuntu-7.4.10` | 3 replicas |
 
@@ -165,7 +165,7 @@ Supported cluster profiles are defined in [`config/cluster-profiles.yaml`](confi
 - `docker` Docker Compose/Swarm fallback
 - `raw` non-container service-install scaffolding
 
-Supported ingress controllers are `traefik` and `nginx`; Traefik is the default RKE2 edge controller. By default `rke2_traefik_source: bundled` lets the pinned `rke2_version` choose the tested Traefik chart/image. If a deployment needs a specific upstream Traefik chart, set `rke2_traefik_source: upstream` and pin `rke2_traefik_chart_version` in the private inventory. Supported web server profiles are defined in [`config/webservers.yaml`](config/webservers.yaml): `nginx`, `apache-httpd`, `apache-tomcat`, and `traefik`.
+Supported ingress controllers are `traefik` and `nginx`; Traefik is the default RKE2 edge controller. By default `rke2_traefik_source: bundled` lets the pinned `rke2_version` choose the tested Traefik chart/image. If a deployment needs Traefik `v3.7.1`, set `rke2_traefik_source: upstream`, `rke2_traefik_chart_version: "40.2.0"`, and `rke2_traefik_image_tag: "v3.7.1"` in the private inventory. Supported web server profiles are defined in [`config/webservers.yaml`](config/webservers.yaml): `nginx`, `apache-httpd`, `apache-tomcat`, and `traefik`.
 
 Supported database profiles are defined in [`config/databases.catalog.yaml`](config/databases.catalog.yaml), aligned with the database family list from endoflife.date. PostgreSQL is the default because your current stack already includes PostgreSQL, PostGIS, and TimescaleDB images.
 

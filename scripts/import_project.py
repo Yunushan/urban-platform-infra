@@ -480,7 +480,7 @@ def analyze_service(
                 record.file,
                 record.name,
                 f"nginx image `{image.display}` differs from selected platform image `{expected_web_image}`.",
-                "Prefer `nginxinc/nginx-unprivileged:1.30.0` for the platform gateway, or document why this backend is separate.",
+                "Prefer `nginxinc/nginx-unprivileged:1.31.0` for the platform gateway, or document why this backend is separate.",
             )
 
     if record.kind in {"postgresql", "postgis", "timescaledb"} and image is not None:

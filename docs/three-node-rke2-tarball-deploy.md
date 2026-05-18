@@ -142,8 +142,8 @@ all:
     rke2_traefik_source: bundled
     # Optional: use a specific upstream Traefik chart instead of the RKE2-bundled chart.
     # rke2_traefik_source: upstream
-    # rke2_traefik_chart_version: "<traefik-chart-version>"
-    # rke2_traefik_image_tag: "<traefik-image-tag>"
+    # rke2_traefik_chart_version: "40.2.0"
+    # rke2_traefik_image_tag: "v3.7.1"
     keepalived_auth_pass: "<vaulted-keepalived-pass>"
     keepalived_interface: <network-interface>
     pod_cidr: 100.64.0.0/16
@@ -185,7 +185,8 @@ Encrypt production inventory or variable files with Ansible Vault or SOPS before
 
 Leave `rke2_traefik_source: bundled` for the default production path. In bundled
 mode, the pinned `rke2_version` controls the tested Traefik chart and image. Use
-`rke2_traefik_source: upstream` only when you intentionally need a specific
+`rke2_traefik_source: upstream` with `rke2_traefik_chart_version: "40.2.0"` and
+`rke2_traefik_image_tag: "v3.7.1"` only when you intentionally need a specific
 upstream Traefik chart version and the nodes can reach that chart repository or
 your internal mirror.
 

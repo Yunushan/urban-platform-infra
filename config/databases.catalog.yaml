@@ -26,7 +26,7 @@ profiles:
     status: enabled-observability
     haProvider: eck
     images:
-    - docker.elastic.co/elasticsearch/elasticsearch:9.4.0
+    - docker.elastic.co/elasticsearch/elasticsearch:9.4.1
   opensearch:
     status: optional
     haProvider: opensearch-operator|helm

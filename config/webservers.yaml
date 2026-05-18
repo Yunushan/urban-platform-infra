@@ -2,7 +2,7 @@ default: nginx
 defaultIngressClass: traefik
 providers:
   nginx:
-    image: nginxinc/nginx-unprivileged:1.30.0
+    image: nginxinc/nginx-unprivileged:1.31.0
     ports:
     - 80
     ingressClass: traefik
@@ -21,7 +21,7 @@ providers:
     ingressClass: tomcat
     status: supported
   traefik:
-    image: traefik:v3.1
+    image: traefik:v3.7.1
     ports:
     - 80
     - 443

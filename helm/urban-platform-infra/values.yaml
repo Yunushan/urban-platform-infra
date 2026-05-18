@@ -165,7 +165,7 @@ webserver:
       displayName: nginx
       image:
         repository: nginxinc/nginx-unprivileged
-        tag: '1.30.0'
+        tag: '1.31.0'
       podSecurityContext:
         runAsNonRoot: true
         fsGroupChangePolicy: OnRootMismatch
@@ -225,7 +225,7 @@ webserver:
       displayName: Traefik
       image:
         repository: traefik
-        tag: v3.1
+        tag: v3.7.1
       replicas: 3
       ports:
       - name: web
@@ -630,10 +630,10 @@ observability:
     enabled: true
     mode: eck
     name: city-elasticsearch
-    version: 9.4.0
+    version: 9.4.1
     image:
       repository: docker.elastic.co/elasticsearch/elasticsearch
-      tag: 9.4.0
+      tag: 9.4.1
     resources:
       requests:
         cpu: 250m
@@ -653,10 +653,10 @@ observability:
   kibana:
     enabled: true
     mode: eck
-    version: 9.4.0
+    version: 9.4.1
     image:
       repository: docker.elastic.co/kibana/kibana
-      tag: 9.4.0
+      tag: 9.4.1
     count: 2
     port: 5601
     service:
