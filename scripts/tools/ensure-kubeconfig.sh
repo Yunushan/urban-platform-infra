@@ -31,9 +31,7 @@ write_kubeconfig_from_node() {
   local tmp_kubeconfig
   local ssh_options=()
 
-  if [ -n "${MIGRATION_SSH_KEY:-}" ]; then
-    ssh_options+=("-i" "${MIGRATION_SSH_KEY}")
-  fi
+  mapfile -t ssh_options < <(ssh_options_for_node)
 
   become_password="$(migration_become_password)"
   tmp_kubeconfig="$(mktemp)"
@@ -112,6 +110,14 @@ generate_keepalived_auth_pass() {
 }
 
 ssh_options_for_node() {
+  printf '%s\n' "-o"
+  printf '%s\n' "BatchMode=yes"
+  printf '%s\n' "-o"
+  printf '%s\n' "ConnectTimeout=${MIGRATION_SSH_CONNECT_TIMEOUT:-10}"
+  printf '%s\n' "-o"
+  printf '%s\n' "ServerAliveInterval=${MIGRATION_SSH_SERVER_ALIVE_INTERVAL:-5}"
+  printf '%s\n' "-o"
+  printf '%s\n' "ServerAliveCountMax=${MIGRATION_SSH_SERVER_ALIVE_COUNT_MAX:-2}"
   if [ -n "${MIGRATION_SSH_KEY:-}" ]; then
     printf '%s\n' "-i"
     printf '%s\n' "${MIGRATION_SSH_KEY}"
@@ -312,10 +318,10 @@ start_kubernetes_api_tunnel() {
   local port
   local max_port
   local ssh_options=("-o" "ExitOnForwardFailure=yes")
+  local node_ssh_options=()
 
-  if [ -n "${MIGRATION_SSH_KEY:-}" ]; then
-    ssh_options+=("-i" "${MIGRATION_SSH_KEY}")
-  fi
+  mapfile -t node_ssh_options < <(ssh_options_for_node)
+  ssh_options+=("${node_ssh_options[@]}")
 
   mkdir -p "${socket_dir}"
   chmod 0700 "${socket_dir}" 2>/dev/null || true
@@ -352,9 +358,7 @@ stop_kubernetes_api_tunnel() {
   local socket_path="${socket_dir}/ssh-${node//[^A-Za-z0-9_.-]/_}-${remote_port}-${local_port}.sock"
   local ssh_options=()
 
-  if [ -n "${MIGRATION_SSH_KEY:-}" ]; then
-    ssh_options+=("-i" "${MIGRATION_SSH_KEY}")
-  fi
+  mapfile -t ssh_options < <(ssh_options_for_node)
 
   ssh -S "${socket_path}" -O exit "${ssh_options[@]}" "${ssh_user}@${node}" >/dev/null 2>&1 || true
   rm -f "${socket_path}"
@@ -365,9 +369,7 @@ show_remote_rke2_diagnostics() {
   local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
   local ssh_options=()
 
-  if [ -n "${MIGRATION_SSH_KEY:-}" ]; then
-    ssh_options+=("-i" "${MIGRATION_SSH_KEY}")
-  fi
+  mapfile -t ssh_options < <(ssh_options_for_node)
 
   echo "Remote RKE2 diagnostics for ${node}:" >&2
   ssh "${ssh_options[@]}" "${ssh_user}@${node}" 'sh -s' <<'REMOTE_DIAGNOSTICS' >&2 || true
@@ -443,6 +445,7 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
     echo "MIGRATION_RKE2_NODES did not contain any usable node address." >&2
     exit 1
   fi
+  echo "Existing operator kubeconfig is not ready; probing RKE2 nodes from MIGRATION_RKE2_NODES for a reachable API endpoint."
 
   explicit_cluster_vip="${MIGRATION_CLUSTER_VIP:-${CLUSTER_VIP:-}}"
   discovered_cluster_vip=""
