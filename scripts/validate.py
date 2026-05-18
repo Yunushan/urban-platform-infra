@@ -171,8 +171,8 @@ if ingress_values.get('className') != 'traefik':
 for redirect_key in ['sslRedirect', 'forceSslRedirect']:
     if ingress_values.get(redirect_key) is not True:
         errors.append(f'Ingress HTTPS redirect must be enabled by default: {redirect_key}')
-if values.get('webserver', {}).get('ingress', {}).get('enabled') is not True:
-    errors.append('Webserver root ingress must be enabled by default')
+if values.get('webserver', {}).get('ingress', {}).get('enabled') is not False:
+    errors.append('Webserver root ingress must be disabled by default; Kibana owns the public root route')
 if values.get('namespace', {}).get('create') is not True:
     errors.append('Namespace manifest rendering must be enabled by default for GitOps and policy checks')
 if values.get('monitoring', {}).get('enabled') is not False:
@@ -198,6 +198,15 @@ for observability_component in ['elasticsearch', 'kibana', 'logstash', 'grafana'
 elasticsearch_resources = observability_values.get('elasticsearch', {}).get('resources', {})
 if not elasticsearch_resources.get('requests', {}).get('cpu') or not elasticsearch_resources.get('limits', {}).get('cpu'):
     errors.append('Default Elasticsearch ECK resources must include CPU requests and limits')
+if elasticsearch_resources.get('requests', {}).get('memory') != elasticsearch_resources.get('limits', {}).get('memory'):
+    errors.append('Default Elasticsearch ECK memory request and limit must match for ECK resource-aware management')
+kibana_values = observability_values.get('kibana', {})
+if kibana_values.get('ingress', {}).get('enabled') is not True:
+    errors.append('Default Kibana ingress must be enabled so the public HTTPS route serves the login UI')
+if kibana_values.get('ingress', {}).get('path') != '/':
+    errors.append('Default Kibana ingress must own the public root path')
+if kibana_values.get('http', {}).get('tls', {}).get('enabled') is not False:
+    errors.append('Default Kibana backend HTTP TLS must be disabled; Traefik terminates public HTTPS')
 monitoring_values = values.get('monitoring', {})
 if monitoring_values.get('prometheusRules', {}).get('enabled') is not True:
     errors.append('Monitoring values must enable PrometheusRule generation when monitoring.enabled is true')
@@ -1193,6 +1202,18 @@ eck_template_text = (ROOT / 'helm/urban-platform-infra/templates/observability-e
 for eck_template_token in ['podTemplate:', 'name: elasticsearch', '.Values.observability.elasticsearch.resources']:
     if eck_template_token not in eck_template_text:
         errors.append(f'ECK template missing Elasticsearch resources token: {eck_template_token}')
+for kibana_ingress_token in [
+    'server.publicBaseUrl',
+    'selfSignedCertificate:',
+    'disabled: true',
+    'kind: Ingress',
+    'name: {{ $kibanaName }}',
+    'include "cip.ingressAnnotations"',
+    'include "cip.traefikHttpRedirectAnnotations"',
+    'printf "%s-kb-http" $kibanaName',
+]:
+    if kibana_ingress_token not in eck_template_text:
+        errors.append(f'ECK template missing Kibana public ingress token: {kibana_ingress_token}')
 status_script = (ROOT / 'scripts/health/status.sh').read_text(encoding='utf-8')
 for status_token in ['prometheusrules.monitoring.coreos.com', 'servicemonitors.monitoring.coreos.com', 'observability']:
     if status_token not in status_script:

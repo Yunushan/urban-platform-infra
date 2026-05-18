@@ -36,11 +36,15 @@ spec:
     {{- end }}
 {{- end }}
 {{- if and .Values.observability.kibana.enabled (eq .Values.observability.kibana.mode "eck") }}
+{{- $kibanaName := .Values.observability.kibana.name | default "city-kibana" -}}
+{{- $kibanaIngress := .Values.observability.kibana.ingress | default dict -}}
+{{- $kibanaIngressHost := $kibanaIngress.host | default (include "cip.ingressHost" .) -}}
+{{- $kibanaHttpTlsEnabled := dig "http" "tls" "enabled" false .Values.observability.kibana -}}
 ---
 apiVersion: kibana.k8s.elastic.co/v1
 kind: Kibana
 metadata:
-  name: city-kibana
+  name: {{ $kibanaName }}
   namespace: {{ include "cip.namespace" . }}
 spec:
   version: {{ .Values.observability.kibana.version | quote }}
@@ -48,11 +52,81 @@ spec:
   count: {{ include "cip.replicaCount" (list . (.Values.observability.kibana.count | default 2)) }}
   elasticsearchRef:
     name: {{ .Values.observability.elasticsearch.name }}
+  {{- if and ($kibanaIngress.enabled | default false) $kibanaIngressHost }}
+  config:
+    server.publicBaseUrl: {{ printf "https://%s" $kibanaIngressHost | quote }}
+  {{- end }}
   http:
+    {{- if not $kibanaHttpTlsEnabled }}
+    tls:
+      selfSignedCertificate:
+        disabled: true
+    {{- end }}
     service:
       spec:
         ports:
           - name: http
             port: {{ .Values.observability.kibana.port | default 5601 }}
             targetPort: 5601
+{{- if and $.Values.ingress.enabled ($kibanaIngress.enabled | default false) }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $kibanaName }}
+  namespace: {{ include "cip.namespace" . }}
+  annotations:
+    {{- include "cip.ingressAnnotations" . | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - secretName: {{ include "cip.ingressTlsSecretName" . | quote }}
+      {{- if $kibanaIngressHost }}
+      hosts: [{{ $kibanaIngressHost | quote }}]
+      {{- end }}
+  {{- end }}
+  rules:
+    {{- if $kibanaIngressHost }}
+    - host: {{ $kibanaIngressHost | quote }}
+      http:
+    {{- else }}
+    - http:
+    {{- end }}
+        paths:
+          - path: {{ $kibanaIngress.path | default "/" | quote }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ printf "%s-kb-http" $kibanaName }}
+                port:
+                  number: {{ $kibanaIngress.servicePort | default (.Values.observability.kibana.port | default 5601) }}
+{{- end }}
+{{- if and $.Values.ingress.enabled ($kibanaIngress.enabled | default false) (eq (.Values.ingress.className | default "traefik") "traefik") (or (.Values.ingress.sslRedirect | default true) (.Values.ingress.forceSslRedirect | default true)) }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ printf "%s-redirect" $kibanaName }}
+  namespace: {{ include "cip.namespace" . }}
+  annotations:
+    {{- include "cip.traefikHttpRedirectAnnotations" . | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  rules:
+    {{- if $kibanaIngressHost }}
+    - host: {{ $kibanaIngressHost | quote }}
+      http:
+    {{- else }}
+    - http:
+    {{- end }}
+        paths:
+          - path: {{ $kibanaIngress.path | default "/" | quote }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ printf "%s-kb-http" $kibanaName }}
+                port:
+                  number: {{ $kibanaIngress.servicePort | default (.Values.observability.kibana.port | default 5601) }}
+{{- end }}
 {{- end }}

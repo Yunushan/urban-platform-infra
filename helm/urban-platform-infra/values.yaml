@@ -148,7 +148,7 @@ networkPolicy:
 webserver:
   provider: nginx
   ingress:
-    enabled: true
+    enabled: false
     path: /
     servicePort: 80
   service:
@@ -643,6 +643,7 @@ observability:
       storage: 100Gi
   kibana:
     enabled: true
+    name: city-kibana
     mode: eck
     version: 9.4.0
     image:
@@ -650,6 +651,13 @@ observability:
       tag: 9.4.0
     count: 2
     port: 5601
+    http:
+      tls:
+        enabled: false
+    ingress:
+      enabled: true
+      path: /
+      servicePort: 5601
   logstash:
     enabled: true
     replicas: 2
