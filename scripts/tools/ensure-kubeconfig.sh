@@ -407,6 +407,11 @@ if [ "${ENGINE}" != "rke2" ]; then
   exit 0
 fi
 
+if [ -s "${OPERATOR_KUBECONFIG_PATH}" ] && command -v kubectl >/dev/null 2>&1 && kubernetes_api_ready; then
+  echo "Existing operator kubeconfig is ready: ${OPERATOR_KUBECONFIG_PATH}"
+  exit 0
+fi
+
 if [ ! -f "${INVENTORY_PATH}" ]; then
   if [ -z "${MIGRATION_RKE2_NODES:-}" ]; then
     echo "Missing inventory ${INVENTORY_PATH}; cannot repair operator kubeconfig." >&2

@@ -460,6 +460,8 @@ for kubeconfig_script_token in [
     'MIGRATION_KEEPALIVED_AUTH_PASS',
     'MIGRATION_KEEPALIVED_INTERFACE',
     'normalize_rke2_version',
+    'Existing operator kubeconfig is ready',
+    'command -v kubectl',
     'discover_remote_cluster_vip',
     'discover_remote_rke2_token',
     'discover_remote_rke2_version',

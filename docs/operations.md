@@ -15,7 +15,10 @@ platform chart.
 Before Helmfile, kubectl, or Helm touches the cluster, `make install-operators`
 and `make deploy` run `scripts/tools/ensure-kubeconfig.sh`. That script fetches
 the RKE2 kubeconfig from the first server, rewrites the API endpoint to the
-configured VIP port, and writes it to `${KUBECONFIG}` or `~/.kube/config`.
+configured VIP port, and writes it to `${KUBECONFIG}` or `~/.kube/config`. If
+`${KUBECONFIG}` or `~/.kube/config` already exists and its Kubernetes API
+`/readyz` endpoint responds, the script uses that kubeconfig as-is instead of
+requiring an inventory just to install operator CRDs.
 
 The default operator pins are intentionally current for this stack:
 CloudNativePG 1.29+ is required for PostgreSQL 18 defaults, and ECK 3.4+ is
