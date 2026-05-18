@@ -13,8 +13,18 @@ defaults
   timeout server 50s
   timeout check 5s
 
+{% set edge_allowed_cidrs = haproxy_keepalived_edge_allowed_cidrs | default([]) %}
+{% set edge_tcp_services = haproxy_keepalived_edge_tcp_services | default([]) %}
+{% macro source_allowlist(apply_allowlist=true) -%}
+{% if apply_allowlist and edge_allowed_cidrs | length > 0 %}
+  acl edge_allowed_src src {{ edge_allowed_cidrs | join(' ') }}
+  tcp-request connection reject unless edge_allowed_src
+{% endif %}
+{%- endmacro %}
+
 frontend kubernetes_api
   bind {{ cluster_vip }}:{{ kubernetes_api_vip_port | default(7443) }}
+{{ source_allowlist(edge_apply_allowlist_to_control_plane | default(false)) }}
   default_backend kubernetes_api_servers
 
 backend kubernetes_api_servers
@@ -27,6 +37,7 @@ backend kubernetes_api_servers
 
 frontend rke2_registration
   bind {{ cluster_vip }}:{{ rke2_registration_vip_port | default(9346) }}
+{{ source_allowlist(edge_apply_allowlist_to_control_plane | default(false)) }}
   default_backend rke2_registration_servers
 
 backend rke2_registration_servers
@@ -35,4 +46,20 @@ backend rke2_registration_servers
   default-server inter 2s fall 3 rise 2
 {% for host in groups['rke2_servers'] %}
   server {{ host }} {{ hostvars[host].node_ip | default(hostvars[host].ansible_host) }}:9345 check
+{% endfor %}
+
+{% for service in edge_tcp_services %}
+frontend edge_{{ service.name | regex_replace('[^A-Za-z0-9_]', '_') }}
+  bind {{ cluster_vip }}:{{ service.external_port }}
+{{ source_allowlist(true) }}
+  default_backend edge_{{ service.name | regex_replace('[^A-Za-z0-9_]', '_') }}_servers
+
+backend edge_{{ service.name | regex_replace('[^A-Za-z0-9_]', '_') }}_servers
+  balance roundrobin
+  option tcp-check
+  default-server inter 2s fall 3 rise 2
+{% for host in groups['rke2_servers'] %}
+  server {{ host }} {{ hostvars[host].node_ip | default(hostvars[host].ansible_host) }}:{{ service.backend_port | default(service.node_port) }} check
+{% endfor %}
+
 {% endfor %}

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-: "${REGISTRY_PREFIX:?Set REGISTRY_PREFIX, for example registry.example.com/urban-platform}"
+: "${REGISTRY_PREFIX:?Set REGISTRY_PREFIX from a private environment value, for example registry.example.invalid/platform}"
 
 while read -r image; do
   [ -z "$image" ] && continue

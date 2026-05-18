@@ -26,15 +26,31 @@
     - ansible_system == 'Linux'
     - not ansible_check_mode
 
+- name: Build HAProxy VIP port and allowlist configuration
+  ansible.builtin.set_fact:
+    haproxy_keepalived_edge_tcp_services: "{{ edge_extra_tcp_services | default([]) }}"
+    haproxy_keepalived_edge_allowed_cidrs: >-
+      {{
+        (edge_allowed_cidrs_text | default('') | trim | length > 0)
+        | ternary((edge_allowed_cidrs_text | default('')).split(), edge_allowed_cidrs | default([]))
+      }}
+    haproxy_keepalived_vip_ports: >-
+      {{
+        [
+          kubernetes_api_vip_port | default(7443),
+          rke2_registration_vip_port | default(9346)
+        ]
+        + ((edge_extra_tcp_services | default([])) | map(attribute='external_port') | list)
+      }}
+  when: ansible_system == 'Linux'
+
 - name: Open HAProxy VIP ports in firewalld
   ansible.posix.firewalld:
     port: "{{ item }}/tcp"
     permanent: true
     immediate: true
     state: enabled
-  loop:
-    - "{{ kubernetes_api_vip_port | default(7443) }}"
-    - "{{ rke2_registration_vip_port | default(9346) }}"
+  loop: "{{ haproxy_keepalived_vip_ports | unique }}"
   when:
     - ansible_system == 'Linux'
     - not ansible_check_mode
@@ -55,9 +71,7 @@
     fi
   args:
     executable: /bin/bash
-  loop:
-    - "{{ kubernetes_api_vip_port | default(7443) }}"
-    - "{{ rke2_registration_vip_port | default(9346) }}"
+  loop: "{{ haproxy_keepalived_vip_ports | unique }}"
   register: haproxy_selinux_port
   changed_when: "'changed' in haproxy_selinux_port.stdout"
   when:

@@ -67,6 +67,17 @@ DEPLOY_ROOT_SERVICE_PORT ?=
 DEPLOY_ROOT_PROBE_PORT ?=
 DEPLOY_ROOT_INGRESS_ENABLED ?= true
 DEPLOY_ROOT_INGRESS_PATH ?= /
+DEPLOY_ALLOWED_CIDRS ?=
+DEPLOY_CONFIGURE_EDGE_PORTS ?= true
+DEPLOY_ENABLE_LOKI ?= true
+DEPLOY_ENABLE_CLICKHOUSE ?= true
+DEPLOY_OBSERVABILITY_SERVICE_TYPE ?= NodePort
+DEPLOY_KIBANA_NODE_PORT ?= 30561
+DEPLOY_ELASTICSEARCH_NODE_PORT ?= 30920
+DEPLOY_GRAFANA_NODE_PORT ?= 30300
+DEPLOY_LOKI_NODE_PORT ?= 30310
+DEPLOY_CLICKHOUSE_HTTP_NODE_PORT ?= 30812
+DEPLOY_CLICKHOUSE_TCP_NODE_PORT ?= 30900
 DEPLOY_DATABASE_STORAGE_SIZE ?= 2Gi
 DEPLOY_DATABASE_STORAGE_CLASS ?= $(LOCAL_PATH_STORAGE_CLASS)
 DEPLOY_ELASTICSEARCH_STORAGE ?= 5Gi
@@ -121,7 +132,7 @@ MIGRATION_NAMESPACE ?= $(NAMESPACE)
 MIGRATION_DUMP_DIR ?= $(MIGRATION_PRIVATE_DIR)/db-dumps
 MIGRATION_DB_TARGETS ?= $(MIGRATION_PRIVATE_DIR)/db-targets.yaml
 
-.PHONY: help validate image-policy lint configure import-check import-plan import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace recover-helm-release deploy deploy-auto deploy-dry-run package-chart release-evidence status observability-status docker-up docker-down docker-status policy clean
+.PHONY: help validate image-policy lint configure import-check import-plan import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig configure-edge-ports install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace recover-helm-release deploy deploy-auto deploy-dry-run package-chart release-evidence status observability-status docker-up docker-down docker-status policy clean
 
 HELM_DEPLOY_SET_ARGS = \
 	--set namespace.create=false \
@@ -138,6 +149,13 @@ HELM_DEPLOY_SET_ARGS = \
 	$(if $(DEPLOY_ROOT_PROBE_PORT),--set workloads.$(DEPLOY_ROOT_WORKLOAD).probe.port=$(DEPLOY_ROOT_PROBE_PORT),) \
 	$(if $(DEPLOY_ROOT_INGRESS_ENABLED),--set workloads.$(DEPLOY_ROOT_WORKLOAD).ingress.enabled=$(DEPLOY_ROOT_INGRESS_ENABLED),) \
 	$(if $(DEPLOY_ROOT_INGRESS_PATH),--set workloads.$(DEPLOY_ROOT_WORKLOAD).ingress.path=$(DEPLOY_ROOT_INGRESS_PATH),) \
+	$(if $(DEPLOY_ALLOWED_CIDRS),--set ingress.sourceAllowList.enabled=true --set-string ingress.sourceAllowList.cidrsText="$(DEPLOY_ALLOWED_CIDRS)",) \
+	--set observability.loki.enabled=$(DEPLOY_ENABLE_LOKI) \
+	--set observability.clickhouse.enabled=$(DEPLOY_ENABLE_CLICKHOUSE) \
+	--set observability.elasticsearch.service.type=$(DEPLOY_OBSERVABILITY_SERVICE_TYPE) \
+	--set observability.elasticsearch.service.nodePort=$(DEPLOY_ELASTICSEARCH_NODE_PORT) \
+	--set observability.kibana.service.type=$(DEPLOY_OBSERVABILITY_SERVICE_TYPE) \
+	--set observability.kibana.service.nodePort=$(DEPLOY_KIBANA_NODE_PORT) \
 	$(if $(filter true,$(DEPLOY_LAB_STORAGE)),--set global.replicaOverride=$(DEPLOY_LAB_REPLICA_OVERRIDE) --set global.defaultReplicas=$(DEPLOY_LAB_REPLICA_OVERRIDE) --set autoscaling.enabled=$(DEPLOY_LAB_AUTOSCALING) --set global.scheduling.topologySpread=$(DEPLOY_LAB_TOPOLOGY_SPREAD) --set databases.storageOverride.size=$(DEPLOY_DATABASE_STORAGE_SIZE) --set databases.storageOverride.className=$(DEPLOY_DATABASE_STORAGE_CLASS) --set 'observability.elasticsearch.nodeSets[0].storage=$(DEPLOY_ELASTICSEARCH_STORAGE)' --set messaging.kafka.storage.size=$(DEPLOY_KAFKA_STORAGE) --set messaging.kafka.storage.className=$(DEPLOY_DATABASE_STORAGE_CLASS) --set messaging.kafka.zookeeper.storage.size=$(DEPLOY_ZOOKEEPER_STORAGE) --set messaging.kafka.zookeeper.storage.className=$(DEPLOY_DATABASE_STORAGE_CLASS) --set messaging.redis.storage.size=$(DEPLOY_REDIS_STORAGE) --set messaging.redis.storage.className=$(DEPLOY_DATABASE_STORAGE_CLASS) --set messaging.redis.sentinel.enabled=$(DEPLOY_REDIS_SENTINEL),)
 
 define require_prod_confirmation
@@ -230,6 +248,9 @@ install-cluster: ansible-collections ## Install selected cluster engine: rke2, k
 operator-kubeconfig: ansible-collections ## Repair/write the operator kubeconfig to the cluster VIP when needed.
 	@ENV=$(ENV) ENGINE=$(ENGINE) INVENTORY=$(INVENTORY) ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) ANSIBLE_PLAYBOOK=$(ANSIBLE_PLAYBOOK) OPERATOR_KUBECONFIG=$(OPERATOR_KUBECONFIG) OPERATOR_KUBECONFIG_FORCE_REPAIR="$(OPERATOR_KUBECONFIG_FORCE_REPAIR)" ANSIBLE_ARGS="$(ANSIBLE_ARGS)" MIGRATION_RKE2_NODES="$(MIGRATION_RKE2_NODES)" MIGRATION_SSH_USER="$(MIGRATION_SSH_USER)" MIGRATION_SSH_KEY="$(MIGRATION_SSH_KEY)" MIGRATION_BECOME_PASSWORD_FILE="$(MIGRATION_BECOME_PASSWORD_FILE)" MIGRATION_BECOME_PASSWORD_PROMPT="$(MIGRATION_BECOME_PASSWORD_PROMPT)" MIGRATION_CLUSTER_VIP="$(if $(MIGRATION_CLUSTER_VIP),$(MIGRATION_CLUSTER_VIP),$(DEPLOY_CLUSTER_VIP))" MIGRATION_KUBERNETES_API_VIP_PORT="$(MIGRATION_KUBERNETES_API_VIP_PORT)" MIGRATION_CLUSTER_DOMAIN="$(MIGRATION_CLUSTER_DOMAIN)" MIGRATION_RKE2_VERSION="$(MIGRATION_RKE2_VERSION)" MIGRATION_AUTO_REPAIR_CLUSTER="$(MIGRATION_AUTO_REPAIR_CLUSTER)" MIGRATION_KEEPALIVED_AUTH_PASS="$(MIGRATION_KEEPALIVED_AUTH_PASS)" MIGRATION_KEEPALIVED_INTERFACE="$(MIGRATION_KEEPALIVED_INTERFACE)" bash $(KUBECONFIG_SCRIPT)
 
+configure-edge-ports: ansible-collections ## Configure HAProxy VIP forwarding for non-80/443 observability ports.
+	ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) $(ANSIBLE_PLAYBOOK) -i $(INVENTORY) ansible/playbooks/edge-ports.yml -e cluster_engine=$(ENGINE) -e deployment_environment=$(ENV) -e edge_allowed_cidrs_text="$(DEPLOY_ALLOWED_CIDRS)" $(ANSIBLE_ARGS)
+
 install-helm: ## Install Helm on the operator machine when it is missing.
 	bash $(HELM_INSTALL_SCRIPT)
 
@@ -260,7 +281,7 @@ wait-operator-crds: ## Wait until CRDs required by the default platform chart ex
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl -n cnpg-system rollout status deployment/cloudnative-pg --timeout=$(OPERATOR_CRD_TIMEOUT)
 
 install-operators: install-helmfile operator-kubeconfig ensure-storageclass ## Install optional operators/charts needed for HA data and observability profiles.
-	KUBECONFIG=$(OPERATOR_KUBECONFIG) OPERATOR_KUBECONFIG=$(OPERATOR_KUBECONFIG) HELMFILE=$(HELMFILE) HELMFILE_CONFIG=$(HELMFILE_CONFIG) HELMFILE_SYNC_RETRIES=$(HELMFILE_SYNC_RETRIES) HELMFILE_SYNC_RETRY_DELAY=$(HELMFILE_SYNC_RETRY_DELAY) KUBECONFIG_SCRIPT=$(KUBECONFIG_SCRIPT) ENV=$(ENV) ENGINE=$(ENGINE) INVENTORY=$(INVENTORY) ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) ANSIBLE_PLAYBOOK=$(ANSIBLE_PLAYBOOK) ANSIBLE_ARGS="$(ANSIBLE_ARGS)" MIGRATION_RKE2_NODES="$(MIGRATION_RKE2_NODES)" MIGRATION_SSH_USER="$(MIGRATION_SSH_USER)" MIGRATION_SSH_KEY="$(MIGRATION_SSH_KEY)" MIGRATION_BECOME_PASSWORD_FILE="$(MIGRATION_BECOME_PASSWORD_FILE)" MIGRATION_BECOME_PASSWORD_PROMPT="$(MIGRATION_BECOME_PASSWORD_PROMPT)" MIGRATION_CLUSTER_VIP="$(if $(MIGRATION_CLUSTER_VIP),$(MIGRATION_CLUSTER_VIP),$(DEPLOY_CLUSTER_VIP))" MIGRATION_KUBERNETES_API_VIP_PORT="$(MIGRATION_KUBERNETES_API_VIP_PORT)" MIGRATION_CLUSTER_DOMAIN="$(MIGRATION_CLUSTER_DOMAIN)" MIGRATION_RKE2_VERSION="$(MIGRATION_RKE2_VERSION)" MIGRATION_KEEPALIVED_AUTH_PASS="$(MIGRATION_KEEPALIVED_AUTH_PASS)" MIGRATION_KEEPALIVED_INTERFACE="$(MIGRATION_KEEPALIVED_INTERFACE)" bash $(HELMFILE_SYNC_SCRIPT)
+	KUBECONFIG=$(OPERATOR_KUBECONFIG) OPERATOR_KUBECONFIG=$(OPERATOR_KUBECONFIG) HELMFILE=$(HELMFILE) HELMFILE_CONFIG=$(HELMFILE_CONFIG) HELMFILE_SYNC_RETRIES=$(HELMFILE_SYNC_RETRIES) HELMFILE_SYNC_RETRY_DELAY=$(HELMFILE_SYNC_RETRY_DELAY) KUBECONFIG_SCRIPT=$(KUBECONFIG_SCRIPT) ENV=$(ENV) ENGINE=$(ENGINE) INVENTORY=$(INVENTORY) ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) ANSIBLE_PLAYBOOK=$(ANSIBLE_PLAYBOOK) ANSIBLE_ARGS="$(ANSIBLE_ARGS)" MIGRATION_RKE2_NODES="$(MIGRATION_RKE2_NODES)" MIGRATION_SSH_USER="$(MIGRATION_SSH_USER)" MIGRATION_SSH_KEY="$(MIGRATION_SSH_KEY)" MIGRATION_BECOME_PASSWORD_FILE="$(MIGRATION_BECOME_PASSWORD_FILE)" MIGRATION_BECOME_PASSWORD_PROMPT="$(MIGRATION_BECOME_PASSWORD_PROMPT)" MIGRATION_CLUSTER_VIP="$(if $(MIGRATION_CLUSTER_VIP),$(MIGRATION_CLUSTER_VIP),$(DEPLOY_CLUSTER_VIP))" MIGRATION_KUBERNETES_API_VIP_PORT="$(MIGRATION_KUBERNETES_API_VIP_PORT)" MIGRATION_CLUSTER_DOMAIN="$(MIGRATION_CLUSTER_DOMAIN)" MIGRATION_RKE2_VERSION="$(MIGRATION_RKE2_VERSION)" MIGRATION_KEEPALIVED_AUTH_PASS="$(MIGRATION_KEEPALIVED_AUTH_PASS)" MIGRATION_KEEPALIVED_INTERFACE="$(MIGRATION_KEEPALIVED_INTERFACE)" INSTALL_LOKI="$(DEPLOY_ENABLE_LOKI)" INSTALL_CLICKHOUSE="$(DEPLOY_ENABLE_CLICKHOUSE)" GRAFANA_SERVICE_TYPE="$(DEPLOY_OBSERVABILITY_SERVICE_TYPE)" GRAFANA_NODE_PORT="$(DEPLOY_GRAFANA_NODE_PORT)" LOKI_SERVICE_TYPE="$(DEPLOY_OBSERVABILITY_SERVICE_TYPE)" LOKI_NODE_PORT="$(DEPLOY_LOKI_NODE_PORT)" CLICKHOUSE_SERVICE_TYPE="$(DEPLOY_OBSERVABILITY_SERVICE_TYPE)" CLICKHOUSE_HTTP_NODE_PORT="$(DEPLOY_CLICKHOUSE_HTTP_NODE_PORT)" CLICKHOUSE_TCP_NODE_PORT="$(DEPLOY_CLICKHOUSE_TCP_NODE_PORT)" bash $(HELMFILE_SYNC_SCRIPT)
 	$(MAKE) wait-operator-crds OPERATOR_CRD_TIMEOUT=$(OPERATOR_CRD_TIMEOUT) OPERATOR_KUBECONFIG=$(OPERATOR_KUBECONFIG)
 
 ensure-namespace: ## Create and label the target namespace before deploying the platform chart.
@@ -290,6 +311,9 @@ release-evidence: package-chart ## Generate rendered manifest, SPDX SBOM, and ch
 	$(PYTHON) scripts/release/generate_sbom.py --chart helm/urban-platform-infra --dist dist --rendered dist/rendered.yaml --sbom dist/urban-platform-infra.spdx.json --checksums dist/SHA256SUMS
 
 deploy: install-operators ensure-namespace recover-helm-release ## Deploy/upgrade the HA application platform.
+	@if [ "$(DEPLOY_CONFIGURE_EDGE_PORTS)" = "true" ]; then \
+		$(MAKE) configure-edge-ports ENV=$(ENV) ENGINE=$(ENGINE) INVENTORY=$(INVENTORY) ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) ANSIBLE_PLAYBOOK=$(ANSIBLE_PLAYBOOK) ANSIBLE_ARGS="$(ANSIBLE_ARGS)" DEPLOY_ALLOWED_CIDRS="$(DEPLOY_ALLOWED_CIDRS)"; \
+	fi
 	@attempt=1; \
 	while true; do \
 		echo "Running Helm upgrade/install (attempt $$attempt/$(HELM_DEPLOY_RETRIES))."; \
@@ -313,6 +337,7 @@ deploy-auto: DEPLOY_SKIP_PLACEHOLDER_WORKLOADS = true
 deploy-auto: DEPLOY_REDIS_SENTINEL = false
 deploy-auto: DEPLOY_TLS_SECRET_NAME = urban-platform-tls
 deploy-auto: DEPLOY_TLS_CREATE_SECRET = false
+deploy-auto: DEPLOY_CONFIGURE_EDGE_PORTS = true
 deploy-auto: MIGRATION_AUTO_REPAIR_CLUSTER = true
 deploy-auto: deploy ## Automatically recover common lab/import deploy failures and use compact local-path storage sizes.
 

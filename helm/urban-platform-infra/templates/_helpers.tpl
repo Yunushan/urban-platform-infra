@@ -62,6 +62,10 @@ traefik.ingress.kubernetes.io/router.entrypoints: "websecure"
 {{- if .Values.ingress.tls.enabled }}
 traefik.ingress.kubernetes.io/router.tls: "true"
 {{- end }}
+{{- $middlewares := include "cip.traefikWebsecureMiddlewares" . -}}
+{{- if $middlewares }}
+traefik.ingress.kubernetes.io/router.middlewares: {{ $middlewares | quote }}
+{{- end }}
 {{- end }}
 {{- with .Values.ingress.annotations }}
 {{- toYaml . }}
@@ -80,9 +84,54 @@ traefik.ingress.kubernetes.io/router.tls: "true"
 {{- printf "%s-redirect-https@kubernetescrd" (include "cip.namespace" .) -}}
 {{- end -}}
 
+{{- define "cip.traefikSourceAllowListMiddlewareName" -}}
+{{- "source-allow-list" -}}
+{{- end -}}
+
+{{- define "cip.traefikSourceAllowListMiddlewareRef" -}}
+{{- printf "%s-%s@kubernetescrd" (include "cip.namespace" .) (include "cip.traefikSourceAllowListMiddlewareName" .) -}}
+{{- end -}}
+
+{{- define "cip.ingressSourceAllowListCidrs" -}}
+{{- $allowList := .Values.ingress.sourceAllowList | default dict -}}
+{{- $cidrs := list -}}
+{{- range ($allowList.cidrs | default list) -}}
+{{- $cidrs = append $cidrs . -}}
+{{- end -}}
+{{- $cidrsText := $allowList.cidrsText | default "" -}}
+{{- if $cidrsText -}}
+{{- range (splitList " " $cidrsText) -}}
+{{- if . -}}
+{{- $cidrs = append $cidrs . -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- join "," $cidrs -}}
+{{- end -}}
+
+{{- define "cip.traefikAllowListEnabled" -}}
+{{- $allowList := .Values.ingress.sourceAllowList | default dict -}}
+{{- $cidrsCsv := include "cip.ingressSourceAllowListCidrs" . -}}
+{{- if and ($allowList.enabled | default false) $cidrsCsv -}}true{{- end -}}
+{{- end -}}
+
+{{- define "cip.traefikWebsecureMiddlewares" -}}
+{{- if include "cip.traefikAllowListEnabled" . -}}
+{{- include "cip.traefikSourceAllowListMiddlewareRef" . -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "cip.traefikWebMiddlewares" -}}
+{{- $middlewares := list (include "cip.traefikRedirectMiddlewareRef" .) -}}
+{{- if include "cip.traefikAllowListEnabled" . -}}
+{{- $middlewares = prepend $middlewares (include "cip.traefikSourceAllowListMiddlewareRef" .) -}}
+{{- end -}}
+{{- join "," $middlewares -}}
+{{- end -}}
+
 {{- define "cip.traefikHttpRedirectAnnotations" -}}
 traefik.ingress.kubernetes.io/router.entrypoints: "web"
-traefik.ingress.kubernetes.io/router.middlewares: {{ include "cip.traefikRedirectMiddlewareRef" . | quote }}
+traefik.ingress.kubernetes.io/router.middlewares: {{ include "cip.traefikWebMiddlewares" . | quote }}
 {{- with .Values.ingress.annotations }}
 {{- toYaml . }}
 {{- end }}

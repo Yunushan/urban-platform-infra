@@ -168,11 +168,13 @@ if ingress_values.get('tls', {}).get('enabled') is not True:
     errors.append('Ingress TLS must be enabled by default so HTTPS is available')
 if ingress_values.get('className') != 'traefik':
     errors.append('Default ingress class must be traefik')
+if ingress_values.get('sourceAllowList', {}).get('enabled') is not False:
+    errors.append('Ingress source allowlist must default to disabled so lab access is not locked out accidentally')
 for redirect_key in ['sslRedirect', 'forceSslRedirect']:
     if ingress_values.get(redirect_key) is not True:
         errors.append(f'Ingress HTTPS redirect must be enabled by default: {redirect_key}')
 if values.get('webserver', {}).get('ingress', {}).get('enabled') is not False:
-    errors.append('Webserver root ingress must be disabled by default; Kibana owns the public root route')
+    errors.append('Webserver root ingress must be disabled by default; the imported gateway owns the public root route')
 if values.get('namespace', {}).get('create') is not True:
     errors.append('Namespace manifest rendering must be enabled by default for GitOps and policy checks')
 if values.get('monitoring', {}).get('enabled') is not False:
@@ -192,7 +194,7 @@ if database_values.get('postgresUID') != 999 or database_values.get('postgresGID
 observability_values = values.get('observability', {})
 if observability_values.get('stack', {}).get('name') != 'elastic-eck-prometheus-grafana-opentelemetry':
     errors.append('Default observability stack must be Elastic ECK + Prometheus/Grafana + OpenTelemetry')
-for observability_component in ['elasticsearch', 'kibana', 'logstash', 'grafana', 'prometheus', 'opentelemetry']:
+for observability_component in ['elasticsearch', 'kibana', 'logstash', 'grafana', 'prometheus', 'opentelemetry', 'loki', 'clickhouse']:
     if observability_values.get(observability_component, {}).get('enabled') is not True:
         errors.append(f'Default observability component must be enabled: {observability_component}')
 elasticsearch_resources = observability_values.get('elasticsearch', {}).get('resources', {})
@@ -200,7 +202,11 @@ if not elasticsearch_resources.get('requests', {}).get('cpu') or not elasticsear
     errors.append('Default Elasticsearch ECK resources must include CPU requests and limits')
 if elasticsearch_resources.get('requests', {}).get('memory') != elasticsearch_resources.get('limits', {}).get('memory'):
     errors.append('Default Elasticsearch ECK memory request and limit must match for ECK resource-aware management')
+if observability_values.get('elasticsearch', {}).get('service', {}).get('nodePort') != 30920:
+    errors.append('Default Elasticsearch service must expose the expected NodePort 30920 for edge VIP forwarding')
 kibana_values = observability_values.get('kibana', {})
+if kibana_values.get('service', {}).get('nodePort') != 30561:
+    errors.append('Default Kibana service must expose the expected NodePort 30561 for edge VIP forwarding')
 if kibana_values.get('ingress', {}).get('enabled') is True:
     errors.append('Default Kibana ingress must not own the public root route')
 gateway_values = values.get('workloads', {}).get('app-27', {})
@@ -518,6 +524,8 @@ for kubeconfig_script_token in [
 ]:
     if kubeconfig_script_token not in kubeconfig_script_text:
         errors.append(f'Kubeconfig helper missing import inventory fallback token: {kubeconfig_script_token}')
+if 'Recovered MIGRATION_RKE2_NODES from ${FALLBACK_INVENTORY_PATH}: ${MIGRATION_RKE2_NODES}' in kubeconfig_script_text:
+    errors.append('Kubeconfig helper must not print recovered RKE2 node addresses')
 
 haproxy_template_text = (ROOT / 'ansible/roles/haproxy_keepalived/templates/haproxy.cfg.j2').read_text(
     encoding='utf-8'
@@ -601,6 +609,8 @@ for webserver_ingress_token in [
         errors.append(f'Webserver template missing root HTTPS ingress token: {webserver_ingress_token}')
 for traefik_redirect_token in [
     'cip.traefikRedirectMiddlewareRef',
+    'cip.traefikSourceAllowListMiddlewareRef',
+    'cip.ingressSourceAllowListCidrs',
     'cip.traefikHttpRedirectAnnotations',
     'router.entrypoints: "web"',
     'router.middlewares',
@@ -613,6 +623,8 @@ for traefik_middleware_token in [
     'kind: Middleware',
     'apiVersion: traefik.io/v1alpha1',
     'name: redirect-https',
+    'ipAllowList:',
+    'sourceRange:',
     'redirectScheme:',
     'permanent: true',
 ]:
@@ -663,6 +675,8 @@ if 'CONFIRM_PROD' not in makefile_text:
     errors.append('Makefile mutating Ansible targets must require production confirmation')
 if 'bootstrap-check' not in makefile_text or 'install-cluster-check' not in makefile_text:
     errors.append('Makefile must expose Ansible check-mode targets')
+if re.search(r'^PROJECT_PATH\s*\?=\s*/', makefile_text, re.MULTILINE):
+    errors.append('PROJECT_PATH must not have a committed machine-specific absolute default')
 for makefile_helm_token in [
     'INGRESS ?= traefik',
     'PROJECT_PATH ?=',
@@ -726,7 +740,19 @@ for makefile_helm_token in [
     'DEPLOY_LAB_STORAGE',
     'DEPLOY_LAB_REPLICA_OVERRIDE',
     'DEPLOY_SKIP_PLACEHOLDER_WORKLOADS',
+    'DEPLOY_ALLOWED_CIDRS',
+    'DEPLOY_CONFIGURE_EDGE_PORTS',
+    'DEPLOY_ENABLE_LOKI',
+    'DEPLOY_ENABLE_CLICKHOUSE',
+    'DEPLOY_KIBANA_NODE_PORT',
+    'DEPLOY_ELASTICSEARCH_NODE_PORT',
+    'DEPLOY_GRAFANA_NODE_PORT',
+    'DEPLOY_LOKI_NODE_PORT',
+    'DEPLOY_CLICKHOUSE_HTTP_NODE_PORT',
+    'DEPLOY_CLICKHOUSE_TCP_NODE_PORT',
     'deploy-auto: MIGRATION_AUTO_REPAIR_CLUSTER = true',
+    'configure-edge-ports:',
+    'ansible/playbooks/edge-ports.yml',
     'wait-operator-crds:',
     'bash $(HELMFILE_SYNC_SCRIPT)',
     'KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl wait',
@@ -781,6 +807,8 @@ for migration_automation_token in [
     'sys.executable',
     'PYTHON="${PYTHON:-python3}"',
     'kubernetes_service_exists',
+    'kubernetes_workload_manifests',
+    'imported-workloads.yaml',
     'Skipping ingress candidate',
     'No ingress candidates were applied because their backend services are not present yet.',
     'write_database_target_map',
@@ -816,6 +844,8 @@ for migration_automation_token in [
     'MIGRATION_ALLOW_SECRET_MATERIAL',
     'run-migration.sh',
     'traefik-ingress-candidates.yaml',
+    'ingress_source_allowlist_cidrs',
+    'traefik_source_allowlist_middleware_ref',
     'Migration automation bundle written to',
 ]:
     if migration_automation_token not in migration_automation_text:
@@ -903,6 +933,8 @@ for local_path_installer_token in [
 ]:
     if local_path_installer_token not in local_path_installer_text:
         errors.append(f'Local-path installer script missing token: {local_path_installer_token}')
+if 'Recovered MIGRATION_RKE2_NODES from ${fallback_inventory_path}: ${MIGRATION_RKE2_NODES}' in local_path_installer_text:
+    errors.append('Local-path installer must not print recovered RKE2 node addresses')
 
 helm_recovery_text = (ROOT / 'scripts/tools/recover-helm-release.sh').read_text(encoding='utf-8')
 for helm_recovery_token in [
@@ -1204,7 +1236,13 @@ for redis_template_token in [
     if redis_template_token not in redis_template_text:
         errors.append(f'Redis template missing lab replica-aware token: {redis_template_token}')
 eck_template_text = (ROOT / 'helm/urban-platform-infra/templates/observability-eck.yaml').read_text(encoding='utf-8')
-for eck_template_token in ['podTemplate:', 'name: elasticsearch', '.Values.observability.elasticsearch.resources']:
+for eck_template_token in [
+    'podTemplate:',
+    'name: elasticsearch',
+    '.Values.observability.elasticsearch.resources',
+    '$elasticsearchService',
+    'nodePort: {{ . }}',
+]:
     if eck_template_token not in eck_template_text:
         errors.append(f'ECK template missing Elasticsearch resources token: {eck_template_token}')
 for kibana_ingress_token in [
@@ -1226,7 +1264,7 @@ for status_token in ['prometheusrules.monitoring.coreos.com', 'servicemonitors.m
 observability_contract = yaml.safe_load((ROOT / 'config/observability.yaml').read_text(encoding='utf-8'))
 if observability_contract.get('defaultStack') != 'elastic-eck-prometheus-grafana-opentelemetry':
     errors.append('Observability contract must declare the enterprise default stack')
-for observability_profile in ['elasticsearch', 'grafana', 'prometheus', 'opentelemetry']:
+for observability_profile in ['elasticsearch', 'grafana', 'prometheus', 'opentelemetry', 'loki', 'clickhouse']:
     if observability_contract.get('profiles', {}).get(observability_profile, {}).get('enabled') is not True:
         errors.append(f'Observability contract must enable default profile: {observability_profile}')
 helmfile_text = (ROOT / 'deploy/helmfile.yaml.gotmpl').read_text(encoding='utf-8')
@@ -1235,6 +1273,12 @@ for helmfile_token in [
     'opentelemetry-collector',
     'INSTALL_OPENTELEMETRY',
     'kube-prometheus-stack',
+    'GRAFANA_NODE_PORT',
+    'INSTALL_LOKI',
+    'LOKI_NODE_PORT',
+    'INSTALL_CLICKHOUSE',
+    'CLICKHOUSE_HTTP_NODE_PORT',
+    'CLICKHOUSE_TCP_NODE_PORT',
     'eck-operator',
     'version: 0.28.0',
     'version: 3.4.0',

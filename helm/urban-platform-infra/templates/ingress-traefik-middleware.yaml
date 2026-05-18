@@ -11,3 +11,20 @@ spec:
     scheme: https
     permanent: true
 {{- end }}
+{{- $sourceAllowListCidrs := include "cip.ingressSourceAllowListCidrs" . -}}
+{{- if and .Values.ingress.enabled (eq (.Values.ingress.className | default "traefik") "traefik") (include "cip.traefikAllowListEnabled" .) }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ include "cip.traefikSourceAllowListMiddlewareName" . }}
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+spec:
+  ipAllowList:
+    sourceRange:
+      {{- range (splitList "," $sourceAllowListCidrs) }}
+      - {{ . | quote }}
+      {{- end }}
+{{- end }}

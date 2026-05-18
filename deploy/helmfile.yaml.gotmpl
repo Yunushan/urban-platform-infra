@@ -63,6 +63,12 @@ releases:
     version: 61.7.2
     installed: {{ env "INSTALL_PROMETHEUS" | default "true" }}
     createNamespace: true
+    values:
+      - grafana:
+          service:
+            type: {{ env "GRAFANA_SERVICE_TYPE" | default "NodePort" | quote }}
+            nodePort: {{ env "GRAFANA_NODE_PORT" | default "30300" }}
+            externalTrafficPolicy: Local
 
   - name: opentelemetry-collector
     namespace: observability
@@ -94,8 +100,43 @@ releases:
     namespace: observability
     chart: grafana/loki
     version: 6.12.0
-    installed: {{ env "INSTALL_LOKI" | default "false" }}
+    installed: {{ env "INSTALL_LOKI" | default "true" }}
     createNamespace: true
+    values:
+      - deploymentMode: SingleBinary
+        loki:
+          auth_enabled: false
+          commonConfig:
+            replication_factor: 1
+          schemaConfig:
+            configs:
+              - from: "2024-01-01"
+                store: tsdb
+                object_store: filesystem
+                schema: v13
+                index:
+                  prefix: loki_index_
+                  period: 24h
+          storage:
+            type: filesystem
+        chunksCache:
+          enabled: false
+        resultsCache:
+          enabled: false
+        singleBinary:
+          replicas: 1
+        read:
+          replicas: 0
+        backend:
+          replicas: 0
+        write:
+          replicas: 0
+        gateway:
+          enabled: true
+          service:
+            type: {{ env "LOKI_SERVICE_TYPE" | default "NodePort" | quote }}
+            nodePort: {{ env "LOKI_NODE_PORT" | default "30310" }}
+            externalTrafficPolicy: Local
 
   - name: opensearch
     namespace: observability
@@ -106,5 +147,15 @@ releases:
   - name: clickhouse
     namespace: observability
     chart: bitnami/clickhouse
-    installed: {{ env "INSTALL_CLICKHOUSE" | default "false" }}
+    installed: {{ env "INSTALL_CLICKHOUSE" | default "true" }}
     createNamespace: true
+    values:
+      - service:
+          type: {{ env "CLICKHOUSE_SERVICE_TYPE" | default "NodePort" | quote }}
+          ports:
+            http: 8123
+            tcp: 9000
+          nodePorts:
+            http: {{ env "CLICKHOUSE_HTTP_NODE_PORT" | default "30812" }}
+            tcp: {{ env "CLICKHOUSE_TCP_NODE_PORT" | default "30900" }}
+          externalTrafficPolicy: Local

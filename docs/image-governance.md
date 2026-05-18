@@ -25,7 +25,7 @@ Recommended production override style:
 
 ```yaml
 global:
-  imageRegistry: registry.example.com/urban-platform
+  imageRegistry: registry.example.invalid/platform
   imagePullSecrets:
     - registry-credentials
 

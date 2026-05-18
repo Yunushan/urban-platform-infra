@@ -1,0 +1,10 @@
+---
+- name: Configure HAProxy VIP edge ports
+  hosts: load_balancers
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  force_handlers: true
+  serial: 1
+  roles:
+    - role: haproxy_keepalived

@@ -1,0 +1,23 @@
+---
+edge_allowed_cidrs: []
+edge_allowed_cidrs_text: ""
+edge_apply_allowlist_to_control_plane: false
+edge_extra_tcp_services:
+  - name: grafana
+    external_port: 3000
+    backend_port: 30300
+  - name: loki
+    external_port: 3100
+    backend_port: 30310
+  - name: kibana
+    external_port: 5601
+    backend_port: 30561
+  - name: clickhouse-http
+    external_port: 8123
+    backend_port: 30812
+  - name: clickhouse-native
+    external_port: 9000
+    backend_port: 30900
+  - name: elasticsearch
+    external_port: 9200
+    backend_port: 30920

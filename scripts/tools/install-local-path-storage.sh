@@ -73,7 +73,7 @@ recover_migration_context() {
     )"
     if [ -n "${discovered_rke2_nodes}" ]; then
       export MIGRATION_RKE2_NODES="${discovered_rke2_nodes}"
-      echo "Recovered MIGRATION_RKE2_NODES from ${fallback_inventory_path}: ${MIGRATION_RKE2_NODES}"
+      echo "Recovered MIGRATION_RKE2_NODES from ${fallback_inventory_path}."
     fi
   fi
 

@@ -44,10 +44,10 @@ manually uninstalling stuck releases or deleting Pending PVCs:
 
 ```bash
 make deploy-auto \
-  OPERATOR_KUBECONFIG=/root/.kube/config \
-  KUBECONFIG=/root/.kube/config \
-  DEPLOY_INGRESS_HOST=urban-platform.local \
-  DEPLOY_CLUSTER_VIP=192.0.2.121
+  OPERATOR_KUBECONFIG="$OPERATOR_KUBECONFIG" \
+  KUBECONFIG="$KUBECONFIG" \
+  DEPLOY_INGRESS_HOST="$DEPLOY_INGRESS_HOST" \
+  DEPLOY_CLUSTER_VIP="$DEPLOY_CLUSTER_VIP"
 ```
 
 `deploy-auto` installs local-path storage when needed, recovers a failed or

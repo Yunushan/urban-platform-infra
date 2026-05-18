@@ -1,4 +1,5 @@
 {{- if and .Values.observability.elasticsearch.enabled (eq .Values.observability.elasticsearch.mode "eck") }}
+{{- $elasticsearchService := .Values.observability.elasticsearch.service | default dict -}}
 ---
 apiVersion: elasticsearch.k8s.elastic.co/v1
 kind: Elasticsearch
@@ -34,12 +35,29 @@ spec:
               requests:
                 storage: {{ .storage | default "100Gi" }}
     {{- end }}
+  http:
+    service:
+      spec:
+        {{- with $elasticsearchService.type }}
+        type: {{ . | quote }}
+        {{- end }}
+        {{- with $elasticsearchService.externalTrafficPolicy }}
+        externalTrafficPolicy: {{ . | quote }}
+        {{- end }}
+        ports:
+          - name: https
+            port: {{ $elasticsearchService.port | default 9200 }}
+            targetPort: 9200
+            {{- with $elasticsearchService.nodePort }}
+            nodePort: {{ . }}
+            {{- end }}
 {{- end }}
 {{- if and .Values.observability.kibana.enabled (eq .Values.observability.kibana.mode "eck") }}
 {{- $kibanaName := .Values.observability.kibana.name | default "city-kibana" -}}
 {{- $kibanaIngress := .Values.observability.kibana.ingress | default dict -}}
 {{- $kibanaIngressHost := $kibanaIngress.host | default (include "cip.ingressHost" .) -}}
 {{- $kibanaHttpTlsEnabled := dig "http" "tls" "enabled" true .Values.observability.kibana -}}
+{{- $kibanaService := .Values.observability.kibana.service | default dict -}}
 ---
 apiVersion: kibana.k8s.elastic.co/v1
 kind: Kibana
@@ -64,10 +82,19 @@ spec:
     {{- end }}
     service:
       spec:
+        {{- with $kibanaService.type }}
+        type: {{ . | quote }}
+        {{- end }}
+        {{- with $kibanaService.externalTrafficPolicy }}
+        externalTrafficPolicy: {{ . | quote }}
+        {{- end }}
         ports:
           - name: http
-            port: {{ .Values.observability.kibana.port | default 5601 }}
+            port: {{ $kibanaService.port | default (.Values.observability.kibana.port | default 5601) }}
             targetPort: 5601
+            {{- with $kibanaService.nodePort }}
+            nodePort: {{ . }}
+            {{- end }}
 {{- if and $.Values.ingress.enabled ($kibanaIngress.enabled | default false) }}
 ---
 apiVersion: networking.k8s.io/v1

@@ -29,7 +29,7 @@ profiles:
     purpose: metrics/logs/traces collection
     mode: daemonset
   loki:
-    enabled: false
+    enabled: true
     purpose: logs
     defaultRetention: 30d
   elasticsearch:
@@ -43,7 +43,7 @@ profiles:
     enabled: false
     purpose: log management/SIEM-like workflows
   clickhouse:
-    enabled: false
+    enabled: true
     purpose: analytics/time-series/log warehouse
 pipelines:
   default:

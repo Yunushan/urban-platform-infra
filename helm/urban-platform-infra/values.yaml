@@ -46,6 +46,10 @@ ingress:
   className: traefik
   host: ''
   annotations: {}
+  sourceAllowList:
+    enabled: false
+    cidrs: []
+    cidrsText: ''
   sslRedirect: true
   forceSslRedirect: true
   tls:
@@ -621,7 +625,7 @@ observability:
       logs: true
       traces: true
   loki:
-    enabled: false
+    enabled: true
   elasticsearch:
     enabled: true
     mode: eck
@@ -641,6 +645,11 @@ observability:
     - name: default
       count: 3
       storage: 100Gi
+    service:
+      type: NodePort
+      port: 9200
+      nodePort: 30920
+      externalTrafficPolicy: Local
   kibana:
     enabled: true
     mode: eck
@@ -650,6 +659,11 @@ observability:
       tag: 9.4.0
     count: 2
     port: 5601
+    service:
+      type: NodePort
+      port: 5601
+      nodePort: 30561
+      externalTrafficPolicy: Local
   logstash:
     enabled: true
     replicas: 2
@@ -670,7 +684,7 @@ observability:
     enabled: false
     replicas: 3
   clickhouse:
-    enabled: false
+    enabled: true
     replicas: 3
 monitoring:
   enabled: false
