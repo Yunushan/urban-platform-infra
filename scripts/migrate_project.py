@@ -1019,6 +1019,7 @@ def generate_bundle(
         f'MIGRATION_DUMP_DIR="${{MIGRATION_DUMP_DIR:-{args.dump_dir}}}"\n'
         f'MIGRATION_DB_TARGETS="${{MIGRATION_DB_TARGETS:-{args.db_targets or ""}}}"\n'
         f'MIGRATION_ALLOW_SECRET_MATERIAL="${{MIGRATION_ALLOW_SECRET_MATERIAL:-{str(args.allow_secret_material).lower()}}}"\n'
+        'PYTHON="${PYTHON:-python3}"\n'
         'ALLOW_FLAG=""\n'
         'if [ "$MIGRATION_ALLOW_SECRET_MATERIAL" = "true" ]; then ALLOW_FLAG="--allow-secret-material"; fi\n'
         'RKE2_IMPORT_FLAG="--rke2-import-images"\n'
@@ -1033,7 +1034,7 @@ def generate_bundle(
         'if [ "$MIGRATION_SKIP_UNAVAILABLE_DATABASES" = "false" ]; then DATABASE_FAILURE_FLAG="--strict-database-migration"; fi\n'
     )
     callback = (
-        'python3 "$REPO_ROOT/scripts/migrate_project.py" '
+        '"$PYTHON" "$REPO_ROOT/scripts/migrate_project.py" '
         '--project-path "$PROJECT_PATH" --values "$VALUES" --namespace "$NAMESPACE" '
         '--output "$MIGRATION_OUTPUT" --private-dir "$MIGRATION_PRIVATE_DIR" --kubeconfig "$MIGRATION_KUBECONFIG" --auto-prepare '
         '--ingress-host "$MIGRATION_INGRESS_HOST" --tls-cert-file "$MIGRATION_TLS_CERT_FILE" --tls-key-file "$MIGRATION_TLS_KEY_FILE" '
@@ -1504,7 +1505,7 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
 
 def stage_validate(args: argparse.Namespace) -> None:
     command = [
-        "python3",
+        sys.executable,
         str(ROOT / "scripts/import_project.py"),
         "--project-path",
         args.project_path,

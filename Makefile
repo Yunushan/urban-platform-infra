@@ -193,7 +193,7 @@ deploy-dry-run: install-helm ## Render the Helm chart without applying it.
 policy: ## Run policy checks against rendered manifests.
 	mkdir -p reports
 	$(HELM) template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f $(VALUES) -f $(TOPOLOGY_VALUES) > reports/rendered.yaml
-	python3 tests/policy/basic_policy.py reports/rendered.yaml
+	$(PYTHON) tests/policy/basic_policy.py reports/rendered.yaml
 
 package-chart: install-helm ## Package the Helm chart into dist/.
 	mkdir -p dist

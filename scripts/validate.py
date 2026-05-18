@@ -693,6 +693,8 @@ for migration_automation_token in [
     'docker.io/library/postgres:18.3',
     'MIGRATION_SKIP_UNAVAILABLE_DATABASES',
     '--strict-database-migration',
+    'sys.executable',
+    'PYTHON="${PYTHON:-python3}"',
     'write_database_target_map',
     'preload_archives_to_nodes',
     'import_preloaded_archives_to_containerd',
