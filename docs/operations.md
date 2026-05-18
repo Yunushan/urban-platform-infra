@@ -29,6 +29,10 @@ explicitly when database scraping is required.
 For lab clusters or small disks, override all CloudNativePG PVCs with
 `databases.storageOverride.size` and, when the cluster does not have a default
 StorageClass, `databases.storageOverride.className`.
+`make install-operators` checks for a StorageClass before installing stateful
+workloads. When no StorageClass exists, `INSTALL_LOCAL_PATH_STORAGE=auto`
+installs Rancher local-path provisioner as a default lab StorageClass. Set
+`INSTALL_LOCAL_PATH_STORAGE=false` when production storage is managed separately.
 
 The operator step uses `helmfile sync`, so the Helm diff plugin is not required
 on the operator machine.

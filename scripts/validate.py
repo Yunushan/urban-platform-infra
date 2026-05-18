@@ -35,7 +35,7 @@ REQUIRED = [
     'scripts/import_project.py',
     'scripts/migrate_project.py',
     'scripts/tools/install-helm.sh', 'scripts/tools/install-helmfile.sh',
-    'scripts/tools/ensure-kubeconfig.sh',
+    'scripts/tools/install-local-path-storage.sh', 'scripts/tools/ensure-kubeconfig.sh',
     'tests/policy/basic_policy.py', 'docs/bootstrap-safety.md', 'docs/secrets-management.md',
     'docs/supply-chain.md', 'docs/image-governance.md', 'docs/observability-slo.md',
     'docs/deployment-topologies.md', 'docs/runbooks.md', 'docs/release-guide.md',
@@ -643,6 +643,10 @@ for makefile_helm_token in [
     'HELMFILE_CONFIG',
     'deploy/helmfile.yaml.gotmpl',
     'HELMFILE_INSTALL_SCRIPT',
+    'install-local-path-storage:',
+    'ensure-storageclass:',
+    'INSTALL_LOCAL_PATH_STORAGE',
+    'scripts/tools/install-local-path-storage.sh',
     'wait-operator-crds:',
     '$(HELMFILE) -f $(HELMFILE_CONFIG) sync',
     'KUBECONFIG=$(OPERATOR_KUBECONFIG) $(HELMFILE)',
@@ -783,6 +787,16 @@ for helmfile_installer_token in [
 ]:
     if helmfile_installer_token not in helmfile_installer_text:
         errors.append(f'Helmfile installer script missing token: {helmfile_installer_token}')
+
+local_path_installer_text = (ROOT / 'scripts/tools/install-local-path-storage.sh').read_text(encoding='utf-8')
+for local_path_installer_token in [
+    'LOCAL_PATH_PROVISIONER_VERSION',
+    'rancher/local-path-provisioner',
+    'local-path-storage',
+    'storageclass.kubernetes.io/is-default-class',
+]:
+    if local_path_installer_token not in local_path_installer_text:
+        errors.append(f'Local-path installer script missing token: {local_path_installer_token}')
 
 bootstrap_script = (ROOT / 'scripts/bootstrap.sh').read_text(encoding='utf-8')
 if 'CONFIRM_PROD' not in bootstrap_script:

@@ -30,6 +30,11 @@ HELM_INSTALL_SCRIPT ?= scripts/tools/install-helm.sh
 HELMFILE ?= helmfile
 HELMFILE_CONFIG ?= deploy/helmfile.yaml.gotmpl
 HELMFILE_INSTALL_SCRIPT ?= scripts/tools/install-helmfile.sh
+LOCAL_PATH_INSTALL_SCRIPT ?= scripts/tools/install-local-path-storage.sh
+INSTALL_LOCAL_PATH_STORAGE ?= auto
+LOCAL_PATH_PROVISIONER_VERSION ?= v0.0.35
+LOCAL_PATH_STORAGE_CLASS ?= local-path
+LOCAL_PATH_STORAGE_DEFAULT ?= true
 OPERATOR_CRD_TIMEOUT ?= 180s
 OPERATOR_KUBECONFIG ?= $(if $(KUBECONFIG),$(KUBECONFIG),$(HOME)/.kube/config)
 KUBECONFIG_SCRIPT ?= scripts/tools/ensure-kubeconfig.sh
@@ -74,7 +79,7 @@ MIGRATION_NAMESPACE ?= $(NAMESPACE)
 MIGRATION_DUMP_DIR ?= $(MIGRATION_PRIVATE_DIR)/db-dumps
 MIGRATION_DB_TARGETS ?= $(MIGRATION_PRIVATE_DIR)/db-targets.yaml
 
-.PHONY: help validate image-policy lint configure import-check import-plan import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig install-helm install-helmfile install-operators wait-operator-crds ensure-namespace deploy deploy-dry-run package-chart release-evidence status observability-status docker-up docker-down docker-status policy clean
+.PHONY: help validate image-policy lint configure import-check import-plan import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace deploy deploy-dry-run package-chart release-evidence status observability-status docker-up docker-down docker-status policy clean
 
 define require_prod_confirmation
 	@if [ "$(ENV)" = "prod" ] && [ "$(CONFIRM_PROD)" != "true" ]; then \
@@ -172,13 +177,26 @@ install-helm: ## Install Helm on the operator machine when it is missing.
 install-helmfile: install-helm ## Install Helmfile on the operator machine when it is missing.
 	bash $(HELMFILE_INSTALL_SCRIPT)
 
+install-local-path-storage: operator-kubeconfig ## Install Rancher local-path dynamic storage for lab/small clusters.
+	KUBECONFIG=$(OPERATOR_KUBECONFIG) LOCAL_PATH_PROVISIONER_VERSION=$(LOCAL_PATH_PROVISIONER_VERSION) LOCAL_PATH_STORAGE_CLASS=$(LOCAL_PATH_STORAGE_CLASS) LOCAL_PATH_STORAGE_DEFAULT=$(LOCAL_PATH_STORAGE_DEFAULT) bash $(LOCAL_PATH_INSTALL_SCRIPT)
+
+ensure-storageclass: operator-kubeconfig ## Ensure the cluster has a StorageClass before installing stateful workloads.
+	@if KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl get storageclass -o name 2>/dev/null | grep -q .; then \
+		echo "StorageClass already present."; \
+	elif [ "$(INSTALL_LOCAL_PATH_STORAGE)" = "auto" ] || [ "$(INSTALL_LOCAL_PATH_STORAGE)" = "true" ]; then \
+		KUBECONFIG=$(OPERATOR_KUBECONFIG) LOCAL_PATH_PROVISIONER_VERSION=$(LOCAL_PATH_PROVISIONER_VERSION) LOCAL_PATH_STORAGE_CLASS=$(LOCAL_PATH_STORAGE_CLASS) LOCAL_PATH_STORAGE_DEFAULT=$(LOCAL_PATH_STORAGE_DEFAULT) bash $(LOCAL_PATH_INSTALL_SCRIPT); \
+	else \
+		echo "No StorageClass exists. Install a CSI provisioner or rerun with INSTALL_LOCAL_PATH_STORAGE=true."; \
+		exit 2; \
+	fi
+
 wait-operator-crds: ## Wait until CRDs required by the default platform chart exist.
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl wait --for=condition=Established crd/clusters.postgresql.cnpg.io --timeout=$(OPERATOR_CRD_TIMEOUT)
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl wait --for=condition=Established crd/imagecatalogs.postgresql.cnpg.io --timeout=$(OPERATOR_CRD_TIMEOUT)
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl wait --for=condition=Established crd/elasticsearches.elasticsearch.k8s.elastic.co --timeout=$(OPERATOR_CRD_TIMEOUT)
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl wait --for=condition=Established crd/kibanas.kibana.k8s.elastic.co --timeout=$(OPERATOR_CRD_TIMEOUT)
 
-install-operators: install-helmfile operator-kubeconfig ## Install optional operators/charts needed for HA data and observability profiles.
+install-operators: install-helmfile operator-kubeconfig ensure-storageclass ## Install optional operators/charts needed for HA data and observability profiles.
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) $(HELMFILE) -f $(HELMFILE_CONFIG) sync
 	$(MAKE) wait-operator-crds OPERATOR_CRD_TIMEOUT=$(OPERATOR_CRD_TIMEOUT) OPERATOR_KUBECONFIG=$(OPERATOR_KUBECONFIG)
 
