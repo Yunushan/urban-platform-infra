@@ -39,7 +39,7 @@ spec:
 {{- $kibanaName := .Values.observability.kibana.name | default "city-kibana" -}}
 {{- $kibanaIngress := .Values.observability.kibana.ingress | default dict -}}
 {{- $kibanaIngressHost := $kibanaIngress.host | default (include "cip.ingressHost" .) -}}
-{{- $kibanaHttpTlsEnabled := dig "http" "tls" "enabled" false .Values.observability.kibana -}}
+{{- $kibanaHttpTlsEnabled := dig "http" "tls" "enabled" true .Values.observability.kibana -}}
 ---
 apiVersion: kibana.k8s.elastic.co/v1
 kind: Kibana

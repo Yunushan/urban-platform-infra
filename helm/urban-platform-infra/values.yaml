@@ -643,7 +643,6 @@ observability:
       storage: 100Gi
   kibana:
     enabled: true
-    name: city-kibana
     mode: eck
     version: 9.4.0
     image:
@@ -651,13 +650,6 @@ observability:
       tag: 9.4.0
     count: 2
     port: 5601
-    http:
-      tls:
-        enabled: false
-    ingress:
-      enabled: true
-      path: /
-      servicePort: 5601
   logstash:
     enabled: true
     replicas: 2
@@ -1597,7 +1589,7 @@ workloads:
       enabled: true
     ingress:
       enabled: true
-      path: /app-27
+      path: /
     probe:
       enabled: true
       type: tcp

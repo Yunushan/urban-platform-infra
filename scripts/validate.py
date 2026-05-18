@@ -201,12 +201,15 @@ if not elasticsearch_resources.get('requests', {}).get('cpu') or not elasticsear
 if elasticsearch_resources.get('requests', {}).get('memory') != elasticsearch_resources.get('limits', {}).get('memory'):
     errors.append('Default Elasticsearch ECK memory request and limit must match for ECK resource-aware management')
 kibana_values = observability_values.get('kibana', {})
-if kibana_values.get('ingress', {}).get('enabled') is not True:
-    errors.append('Default Kibana ingress must be enabled so the public HTTPS route serves the login UI')
-if kibana_values.get('ingress', {}).get('path') != '/':
-    errors.append('Default Kibana ingress must own the public root path')
-if kibana_values.get('http', {}).get('tls', {}).get('enabled') is not False:
-    errors.append('Default Kibana backend HTTP TLS must be disabled; Traefik terminates public HTTPS')
+if kibana_values.get('ingress', {}).get('enabled') is True:
+    errors.append('Default Kibana ingress must not own the public root route')
+gateway_values = values.get('workloads', {}).get('app-27', {})
+if gateway_values.get('category') != 'gateway':
+    errors.append('app-27 must remain the imported gateway workload')
+if gateway_values.get('ingress', {}).get('path') != '/':
+    errors.append('Imported gateway workload app-27 must own the public root path')
+if gateway_values.get('ports', [{}])[0].get('servicePort') != 5000:
+    errors.append('Imported gateway workload app-27 must expose service port 5000')
 monitoring_values = values.get('monitoring', {})
 if monitoring_values.get('prometheusRules', {}).get('enabled') is not True:
     errors.append('Monitoring values must enable PrometheusRule generation when monitoring.enabled is true')
