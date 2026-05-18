@@ -104,6 +104,11 @@ Kubernetes API service. Keep `networkPolicy.kubernetesApi.enabled=true`, and
 narrow `networkPolicy.kubernetesApi.cidrs` to your service CIDR and API endpoint
 CIDRs after bootstrap if you do not want the portable default.
 
+If initialized clusters report `Instance Status Extraction Error: HTTP
+communication issue`, keep `networkPolicy.cloudnativePgOperator.enabled=true`.
+That policy allows the CloudNativePG operator namespace to reach CNPG-managed
+database pods on TCP 8000 and 5432.
+
 ## API server logs 502 to a pod IP
 
 Messages such as `Sending HTTP/1.1 502 response ... dial tcp 100.64.x.y:10250`

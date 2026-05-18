@@ -84,6 +84,32 @@ spec:
         - protocol: TCP
           port: 53
 {{- end }}
+{{- if .Values.networkPolicy.cloudnativePgOperator.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: urban-platform-cnpg-operator-ingress
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/managed-by: cloudnative-pg
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.cloudnativePgOperator.namespace | quote }}
+      ports:
+        {{- range .Values.networkPolicy.cloudnativePgOperator.ports }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+{{- end }}
 {{- if .Values.networkPolicy.kubernetesApi.enabled }}
 ---
 apiVersion: networking.k8s.io/v1

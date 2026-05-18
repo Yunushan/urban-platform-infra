@@ -625,6 +625,16 @@ cnpg_catalog_template_text = (
 for cnpg_catalog_token in ['kind: ImageCatalog', '.Values.databases.imageCatalogs', 'include "cip.image"']:
     if cnpg_catalog_token not in cnpg_catalog_template_text:
         errors.append(f'CNPG ImageCatalog template missing token: {cnpg_catalog_token}')
+networkpolicy_template_text = (ROOT / 'helm/urban-platform-infra/templates/networkpolicy.yaml').read_text(
+    encoding='utf-8'
+)
+for networkpolicy_token in [
+    'urban-platform-cnpg-operator-ingress',
+    '.Values.networkPolicy.cloudnativePgOperator.namespace',
+    'app.kubernetes.io/managed-by: cloudnative-pg',
+]:
+    if networkpolicy_token not in networkpolicy_template_text:
+        errors.append(f'NetworkPolicy template missing CNPG operator ingress token: {networkpolicy_token}')
 
 makefile_text = (ROOT / 'Makefile').read_text(encoding='utf-8')
 if 'CONFIRM_PROD' not in makefile_text:

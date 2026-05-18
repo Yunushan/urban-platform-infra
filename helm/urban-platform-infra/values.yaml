@@ -115,6 +115,12 @@ networkPolicy:
     namespaces:
     - kube-system
     - ingress-nginx
+  cloudnativePgOperator:
+    enabled: true
+    namespace: cnpg-system
+    ports:
+    - 8000
+    - 5432
   dns:
     enabled: true
     namespace: kube-system
