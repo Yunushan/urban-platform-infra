@@ -131,11 +131,17 @@ ensure_kubernetes_api_egress_policy() {
   fi
 
   echo "Ensuring Kubernetes API egress NetworkPolicy before CNPG initdb recovery."
-  kube -n "${namespace}" apply -f - <<'YAML'
+  kube -n "${namespace}" apply -f - <<YAML
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: urban-platform-kubernetes-api-egress
+  labels:
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: ${release}
+  annotations:
+    meta.helm.sh/release-name: ${release}
+    meta.helm.sh/release-namespace: ${namespace}
 spec:
   podSelector: {}
   policyTypes:
