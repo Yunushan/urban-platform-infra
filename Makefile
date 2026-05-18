@@ -61,6 +61,7 @@ DEPLOY_ELASTICSEARCH_STORAGE ?= 5Gi
 DEPLOY_KAFKA_STORAGE ?= 5Gi
 DEPLOY_ZOOKEEPER_STORAGE ?= 2Gi
 DEPLOY_REDIS_STORAGE ?= 2Gi
+DEPLOY_REDIS_SENTINEL ?= true
 DEPLOY_INGRESS_HOST ?= $(MIGRATION_INGRESS_HOST)
 DEPLOY_CLUSTER_DOMAIN ?= $(if $(MIGRATION_CLUSTER_DOMAIN),$(MIGRATION_CLUSTER_DOMAIN),$(DEPLOY_INGRESS_HOST))
 DEPLOY_CLUSTER_VIP ?= $(MIGRATION_CLUSTER_VIP)
@@ -118,7 +119,7 @@ HELM_DEPLOY_SET_ARGS = \
 	$(if $(DEPLOY_TLS_SECRET_NAME),--set ingress.tls.secretName=$(DEPLOY_TLS_SECRET_NAME),) \
 	$(if $(DEPLOY_TLS_CREATE_SECRET),--set ingress.tls.createSecret=$(DEPLOY_TLS_CREATE_SECRET),) \
 	$(if $(filter true,$(DEPLOY_SKIP_PLACEHOLDER_WORKLOADS)),--set global.skipPlaceholderWorkloads=true,) \
-	$(if $(filter true,$(DEPLOY_LAB_STORAGE)),--set global.replicaOverride=$(DEPLOY_LAB_REPLICA_OVERRIDE) --set global.defaultReplicas=$(DEPLOY_LAB_REPLICA_OVERRIDE) --set autoscaling.enabled=$(DEPLOY_LAB_AUTOSCALING) --set global.scheduling.topologySpread=$(DEPLOY_LAB_TOPOLOGY_SPREAD) --set databases.storageOverride.size=$(DEPLOY_DATABASE_STORAGE_SIZE) --set databases.storageOverride.className=$(DEPLOY_DATABASE_STORAGE_CLASS) --set 'observability.elasticsearch.nodeSets[0].storage=$(DEPLOY_ELASTICSEARCH_STORAGE)' --set messaging.kafka.storage.size=$(DEPLOY_KAFKA_STORAGE) --set messaging.kafka.zookeeper.storage.size=$(DEPLOY_ZOOKEEPER_STORAGE) --set messaging.redis.storage.size=$(DEPLOY_REDIS_STORAGE),)
+	$(if $(filter true,$(DEPLOY_LAB_STORAGE)),--set global.replicaOverride=$(DEPLOY_LAB_REPLICA_OVERRIDE) --set global.defaultReplicas=$(DEPLOY_LAB_REPLICA_OVERRIDE) --set autoscaling.enabled=$(DEPLOY_LAB_AUTOSCALING) --set global.scheduling.topologySpread=$(DEPLOY_LAB_TOPOLOGY_SPREAD) --set databases.storageOverride.size=$(DEPLOY_DATABASE_STORAGE_SIZE) --set databases.storageOverride.className=$(DEPLOY_DATABASE_STORAGE_CLASS) --set 'observability.elasticsearch.nodeSets[0].storage=$(DEPLOY_ELASTICSEARCH_STORAGE)' --set messaging.kafka.storage.size=$(DEPLOY_KAFKA_STORAGE) --set messaging.kafka.storage.className=$(DEPLOY_DATABASE_STORAGE_CLASS) --set messaging.kafka.zookeeper.storage.size=$(DEPLOY_ZOOKEEPER_STORAGE) --set messaging.kafka.zookeeper.storage.className=$(DEPLOY_DATABASE_STORAGE_CLASS) --set messaging.redis.storage.size=$(DEPLOY_REDIS_STORAGE) --set messaging.redis.storage.className=$(DEPLOY_DATABASE_STORAGE_CLASS) --set messaging.redis.sentinel.enabled=$(DEPLOY_REDIS_SENTINEL),)
 
 define require_prod_confirmation
 	@if [ "$(ENV)" = "prod" ] && [ "$(CONFIRM_PROD)" != "true" ]; then \
@@ -274,6 +275,7 @@ deploy: install-operators ensure-namespace recover-helm-release ## Deploy/upgrad
 deploy-auto: DEPLOY_RECOVER_FAILED_RELEASE = true
 deploy-auto: DEPLOY_LAB_STORAGE = true
 deploy-auto: DEPLOY_SKIP_PLACEHOLDER_WORKLOADS = true
+deploy-auto: DEPLOY_REDIS_SENTINEL = false
 deploy-auto: DEPLOY_TLS_SECRET_NAME = urban-platform-tls
 deploy-auto: DEPLOY_TLS_CREATE_SECRET = false
 deploy-auto: MIGRATION_AUTO_REPAIR_CLUSTER = true

@@ -101,7 +101,8 @@ status="$(release_status)"
 manifest_file=""
 
 if [ "${status}" = "deployed" ]; then
-  echo "Helm release ${release} is deployed; recovery is not needed."
+  echo "Helm release ${release} is deployed; checking for recoverable Pending PVCs."
+  delete_pvcs
   exit 0
 fi
 

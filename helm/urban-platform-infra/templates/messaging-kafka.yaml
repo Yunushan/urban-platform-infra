@@ -20,6 +20,7 @@ metadata:
     app.kubernetes.io/name: zookeeper
 spec:
   clusterIP: None
+  publishNotReadyAddresses: true
   selector:
     app.kubernetes.io/name: zookeeper
   ports:
@@ -76,6 +77,9 @@ spec:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
+{{ if .Values.messaging.kafka.zookeeper.storage.className }}
+        storageClassName: {{ .Values.messaging.kafka.zookeeper.storage.className | quote }}
+{{ end }}
         resources:
           requests:
             storage: {{ .Values.messaging.kafka.zookeeper.storage.size | default "10Gi" }}
@@ -90,6 +94,7 @@ metadata:
     app.kubernetes.io/name: kafka
 spec:
   clusterIP: None
+  publishNotReadyAddresses: true
   selector:
     app.kubernetes.io/name: kafka
   ports:
@@ -158,6 +163,9 @@ spec:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
+{{ if .Values.messaging.kafka.storage.className }}
+        storageClassName: {{ .Values.messaging.kafka.storage.className | quote }}
+{{ end }}
         resources:
           requests:
             storage: {{ .Values.messaging.kafka.storage.size | default "50Gi" }}

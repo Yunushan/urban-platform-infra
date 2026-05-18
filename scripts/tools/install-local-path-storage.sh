@@ -52,12 +52,6 @@ ssh_options_for_node() {
   fi
 }
 
-shell_quote() {
-  printf "'"
-  printf '%s' "$1" | sed "s/'/'\\\\''/g"
-  printf "'"
-}
-
 migration_become_password() {
   if [ -n "${MIGRATION_BECOME_PASSWORD:-}" ]; then
     printf '%s' "${MIGRATION_BECOME_PASSWORD}"
@@ -119,99 +113,48 @@ discover_storage_nodes() {
   fi
 }
 
+emit_prepare_host_path_script() {
+  cat <<'REMOTE_PREPARE_LOCAL_PATH'
+set -eu
+IFS= read -r path
+mkdir -p "$path"
+chmod 0777 "$path"
+if command -v chcon >/dev/null 2>&1; then
+  chcon -Rt container_file_t "$path" || true
+fi
+if command -v semanage >/dev/null 2>&1; then
+  semanage fcontext -a -t container_file_t "${path}(/.*)?" 2>/dev/null || \
+    semanage fcontext -m -t container_file_t "${path}(/.*)?" 2>/dev/null || true
+fi
+if command -v restorecon >/dev/null 2>&1; then
+  restorecon -RF "$path" >/dev/null 2>&1 || true
+fi
+ls -ldZ "$path" 2>/dev/null || ls -ld "$path"
+REMOTE_PREPARE_LOCAL_PATH
+}
+
 prepare_host_path_on_node() {
   local node="$1"
   local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
   local become_password
-  local quoted_host_path
   local ssh_options=()
 
   mapfile -t ssh_options < <(ssh_options_for_node)
   become_password="$(migration_become_password)"
-  quoted_host_path="$(shell_quote "${host_path}")"
 
   echo "Preparing local-path host path ${host_path} on ${ssh_user}@${node}."
   if [ "${ssh_user}" = "root" ]; then
-    # quoted_host_path is intentionally expanded locally and passed as the remote script argument.
-    # shellcheck disable=SC2029
-    ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sh -s -- ${quoted_host_path}" <<'REMOTE_PREPARE_LOCAL_PATH'
-set -eu
-path="$1"
-mkdir -p "$path"
-chmod 0777 "$path"
-if command -v chcon >/dev/null 2>&1; then
-  chcon -Rt container_file_t "$path" || true
-fi
-if command -v semanage >/dev/null 2>&1; then
-  semanage fcontext -a -t container_file_t "${path}(/.*)?" 2>/dev/null || \
-    semanage fcontext -m -t container_file_t "${path}(/.*)?" 2>/dev/null || true
-fi
-if command -v restorecon >/dev/null 2>&1; then
-  restorecon -RF "$path" >/dev/null 2>&1 || true
-fi
-ls -ldZ "$path" 2>/dev/null || ls -ld "$path"
-REMOTE_PREPARE_LOCAL_PATH
+    { printf '%s\n' "${host_path}"; emit_prepare_host_path_script; } \
+      | ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sh -s"
   elif ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -n true" >/dev/null 2>&1; then
-    # quoted_host_path is intentionally expanded locally and passed as the remote script argument.
-    # shellcheck disable=SC2029
-    ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -n sh -s -- ${quoted_host_path}" <<'REMOTE_PREPARE_LOCAL_PATH'
-set -eu
-path="$1"
-mkdir -p "$path"
-chmod 0777 "$path"
-if command -v chcon >/dev/null 2>&1; then
-  chcon -Rt container_file_t "$path" || true
-fi
-if command -v semanage >/dev/null 2>&1; then
-  semanage fcontext -a -t container_file_t "${path}(/.*)?" 2>/dev/null || \
-    semanage fcontext -m -t container_file_t "${path}(/.*)?" 2>/dev/null || true
-fi
-if command -v restorecon >/dev/null 2>&1; then
-  restorecon -RF "$path" >/dev/null 2>&1 || true
-fi
-ls -ldZ "$path" 2>/dev/null || ls -ld "$path"
-REMOTE_PREPARE_LOCAL_PATH
+    { printf '%s\n' "${host_path}"; emit_prepare_host_path_script; } \
+      | ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -n sh -s"
   elif [ -n "${become_password}" ]; then
-    { printf '%s\n' "${become_password}"; cat <<'REMOTE_PREPARE_LOCAL_PATH'
-set -eu
-path="$1"
-mkdir -p "$path"
-chmod 0777 "$path"
-if command -v chcon >/dev/null 2>&1; then
-  chcon -Rt container_file_t "$path" || true
-fi
-if command -v semanage >/dev/null 2>&1; then
-  semanage fcontext -a -t container_file_t "${path}(/.*)?" 2>/dev/null || \
-    semanage fcontext -m -t container_file_t "${path}(/.*)?" 2>/dev/null || true
-fi
-if command -v restorecon >/dev/null 2>&1; then
-  restorecon -RF "$path" >/dev/null 2>&1 || true
-fi
-ls -ldZ "$path" 2>/dev/null || ls -ld "$path"
-REMOTE_PREPARE_LOCAL_PATH
-    # quoted_host_path is intentionally expanded locally and passed as the remote script argument.
-    # shellcheck disable=SC2029
-    } | ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -S -p '' sh -s -- ${quoted_host_path}"
+    { printf '%s\n' "${become_password}"; printf '%s\n' "${host_path}"; emit_prepare_host_path_script; } \
+      | ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -S -p '' sh -s"
   else
-    # quoted_host_path is intentionally expanded locally and passed as the remote script argument.
-    # shellcheck disable=SC2029
-    ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -n sh -s -- ${quoted_host_path}" <<'REMOTE_PREPARE_LOCAL_PATH'
-set -eu
-path="$1"
-mkdir -p "$path"
-chmod 0777 "$path"
-if command -v chcon >/dev/null 2>&1; then
-  chcon -Rt container_file_t "$path" || true
-fi
-if command -v semanage >/dev/null 2>&1; then
-  semanage fcontext -a -t container_file_t "${path}(/.*)?" 2>/dev/null || \
-    semanage fcontext -m -t container_file_t "${path}(/.*)?" 2>/dev/null || true
-fi
-if command -v restorecon >/dev/null 2>&1; then
-  restorecon -RF "$path" >/dev/null 2>&1 || true
-fi
-ls -ldZ "$path" 2>/dev/null || ls -ld "$path"
-REMOTE_PREPARE_LOCAL_PATH
+    { printf '%s\n' "${host_path}"; emit_prepare_host_path_script; } \
+      | ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -n sh -s"
   fi
 }
 
