@@ -339,10 +339,24 @@ kubernetes_api_ready() {
   KUBECONFIG="${OPERATOR_KUBECONFIG_PATH}" kubectl get --raw=/readyz --request-timeout=10s >/dev/null 2>&1
 }
 
+kubernetes_api_ready_verbose() {
+  local output
+
+  if ! command -v kubectl >/dev/null 2>&1; then
+    return 0
+  fi
+  if output="$(KUBECONFIG="${OPERATOR_KUBECONFIG_PATH}" kubectl get --raw=/readyz --request-timeout=10s 2>&1)"; then
+    return 0
+  fi
+  echo "Kubernetes API probe failed: ${output}" >&2
+  return 1
+}
+
 start_kubernetes_api_tunnel() {
   local node="$1"
   local remote_port="$2"
   local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
+  local remote_host="${MIGRATION_KUBE_API_TUNNEL_REMOTE_HOST:-${node}}"
   local requested_port="${MIGRATION_KUBE_API_TUNNEL_PORT:-16443}"
   local socket_dir="${TMPDIR:-/tmp}/urban-platform-kubeapi"
   local socket_path
@@ -367,10 +381,10 @@ start_kubernetes_api_tunnel() {
       return 0
     fi
     rm -f "${socket_path}"
-    echo "Trying SSH tunnel 127.0.0.1:${port} -> ${node}:127.0.0.1:${remote_port}" >&2
+    echo "Trying SSH tunnel 127.0.0.1:${port} -> ${node}:${remote_host}:${remote_port}" >&2
     ssh_error="$(mktemp)"
     if ssh "${ssh_options[@]}" -fN -M -S "${socket_path}" \
-      -L "127.0.0.1:${port}:127.0.0.1:${remote_port}" \
+      -L "127.0.0.1:${port}:${remote_host}:${remote_port}" \
       "${ssh_user}@${node}" 2>"${ssh_error}"; then
       rm -f "${ssh_error}"
       echo "${port}"
@@ -544,7 +558,7 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
         continue
       fi
       echo "Trying existing operator kubeconfig against https://${endpoint_host}:${endpoint_port}"
-      if rewrite_existing_kubeconfig_endpoint "${endpoint_host}" "${endpoint_port}" "${tls_server_name}" && kubernetes_api_ready; then
+      if rewrite_existing_kubeconfig_endpoint "${endpoint_host}" "${endpoint_port}" "${tls_server_name}" && kubernetes_api_ready_verbose; then
         echo "Operator kubeconfig ready: ${OPERATOR_KUBECONFIG_PATH} (endpoint https://${endpoint_host}:${endpoint_port})"
         existing_kubeconfig_ready=true
         break
@@ -562,7 +576,7 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
           echo "Could not open an SSH tunnel through ${tunnel_node}; trying the next node." >&2
           continue
         fi
-        if rewrite_existing_kubeconfig_endpoint "127.0.0.1" "${tunnel_port}" "${tls_server_name}" && kubernetes_api_ready; then
+        if rewrite_existing_kubeconfig_endpoint "127.0.0.1" "${tunnel_port}" "${tls_server_name}" && kubernetes_api_ready_verbose; then
           echo "Operator kubeconfig ready: ${OPERATOR_KUBECONFIG_PATH} (endpoint https://127.0.0.1:${tunnel_port} via SSH tunnel ${tunnel_node})"
           existing_kubeconfig_ready=true
           break
