@@ -480,6 +480,38 @@
             "podLabels"
           ]
         },
+        "kubernetesApi": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "cidrs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            },
+            "ports": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "enabled",
+            "cidrs",
+            "ports"
+          ]
+        },
         "externalWeb": {
           "type": "object",
           "additionalProperties": false,
@@ -519,6 +551,7 @@
         "sameNamespace",
         "ingress",
         "dns",
+        "kubernetesApi",
         "externalWeb"
       ]
     },
