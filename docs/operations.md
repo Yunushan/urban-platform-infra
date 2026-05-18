@@ -72,6 +72,9 @@ kubeconfig prefers direct RKE2 node API endpoints before falling back to the VIP
 Before every Helmfile attempt, the wrapper waits for consecutive successful
 `/readyz`, `/version`, and `/openapi/v2` probes so large charts do not start
 while the API server is still brownout-prone.
+If a previous Helm attempt leaves an operator release in a `pending-*` state, the
+wrapper waits for it to finish, rolls it back to the last deployed revision when
+needed, and removes a stale pending Helm secret only as a final recovery step.
 
 The operator step uses `helmfile sync`, so the Helm diff plugin is not required
 on the operator machine.

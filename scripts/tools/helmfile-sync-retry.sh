@@ -2,12 +2,17 @@
 set -euo pipefail
 
 helmfile_bin="${HELMFILE:-helmfile}"
+helm_bin="${HELM:-helm}"
 helmfile_config="${HELMFILE_CONFIG:-deploy/helmfile.yaml.gotmpl}"
 kubeconfig_path="${OPERATOR_KUBECONFIG:-${KUBECONFIG:-${HOME}/.kube/config}}"
 kubeconfig_script="${KUBECONFIG_SCRIPT:-scripts/tools/ensure-kubeconfig.sh}"
 kubectl_bin="${KUBECTL:-kubectl}"
 retries="${HELMFILE_SYNC_RETRIES:-4}"
 retry_delay="${HELMFILE_SYNC_RETRY_DELAY:-20}"
+pending_wait_timeout="${HELMFILE_PENDING_WAIT_TIMEOUT:-180}"
+pending_wait_delay="${HELMFILE_PENDING_WAIT_DELAY:-10}"
+pending_rollback_timeout="${HELMFILE_PENDING_ROLLBACK_TIMEOUT:-10m}"
+pending_release_specs="${HELMFILE_PENDING_RELEASES:-external-secrets:external-secrets cert-manager:cert-manager cloudnative-pg:cnpg-system eck-operator:elastic-system kube-prometheus-stack:observability opentelemetry-collector:observability loki:observability opensearch:observability clickhouse:observability}"
 api_wait_timeout="${HELMFILE_API_WAIT_TIMEOUT:-600}"
 api_wait_delay="${HELMFILE_API_WAIT_DELAY:-15}"
 api_stable_successes="${HELMFILE_API_STABLE_SUCCESSES:-2}"
@@ -18,6 +23,11 @@ migration_cluster_vip="${MIGRATION_CLUSTER_VIP:-${DEPLOY_CLUSTER_VIP:-}}"
 
 if ! command -v "${helmfile_bin}" >/dev/null 2>&1; then
   echo "helmfile is required to install operators." >&2
+  exit 1
+fi
+
+if ! command -v "${helm_bin}" >/dev/null 2>&1; then
+  echo "helm is required to recover operator release locks." >&2
   exit 1
 fi
 
@@ -82,13 +92,130 @@ wait_for_stable_api() {
   return 1
 }
 
+helm_release_status() {
+  local release="$1"
+  local namespace="$2"
+
+  KUBECONFIG="${kubeconfig_path}" "${helm_bin}" status "${release}" -n "${namespace}" 2>/dev/null \
+    | awk -F': *' '$1 == "STATUS" {print $2; exit}' || true
+}
+
+last_deployed_revision() {
+  local release="$1"
+  local namespace="$2"
+
+  KUBECONFIG="${kubeconfig_path}" "${helm_bin}" history "${release}" -n "${namespace}" -o json 2>/dev/null \
+    | python3 -c '
+import json
+import sys
+
+try:
+    rows = json.load(sys.stdin)
+except Exception:
+    rows = []
+
+revision = ""
+for row in rows:
+    if str(row.get("status", "")).lower() == "deployed":
+        revision = str(row.get("revision", ""))
+print(revision)
+' || true
+}
+
+latest_pending_release_secret() {
+  local release="$1"
+  local namespace="$2"
+
+  KUBECONFIG="${kubeconfig_path}" "${kubectl_bin}" -n "${namespace}" get secret \
+    -l "owner=helm,name=${release}" \
+    --sort-by=.metadata.creationTimestamp \
+    -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.metadata.labels.status}{"\n"}{end}' 2>/dev/null \
+    | awk '$2 ~ /^pending-/ {name=$1} END {print name}' || true
+}
+
+recover_pending_release() {
+  local release="$1"
+  local namespace="$2"
+  local status
+  local deadline
+  local revision
+  local pending_secret
+
+  status="$(helm_release_status "${release}" "${namespace}")"
+  # Recover stale Helm locks that later surface as "another operation is in progress".
+  case "${status}" in
+    pending-*)
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  echo "Helm release ${release} in namespace ${namespace} is ${status}; waiting for the operation to finish."
+  deadline="$(($(date +%s) + pending_wait_timeout))"
+  while [ "$(date +%s)" -lt "${deadline}" ]; do
+    sleep "${pending_wait_delay}"
+    status="$(helm_release_status "${release}" "${namespace}")"
+    case "${status}" in
+      pending-*)
+        echo "Helm release ${release} is still ${status}; waiting."
+        ;;
+      *)
+        echo "Helm release ${release} left pending state (${status:-not found})."
+        return 0
+        ;;
+    esac
+  done
+
+  revision="$(last_deployed_revision "${release}" "${namespace}")"
+  if [ -n "${revision}" ]; then
+    echo "Rolling back stale pending Helm release ${release} to deployed revision ${revision}."
+    if KUBECONFIG="${kubeconfig_path}" "${helm_bin}" rollback "${release}" "${revision}" -n "${namespace}" --wait --timeout "${pending_rollback_timeout}"; then
+      return 0
+    fi
+    echo "Helm rollback for ${release} failed; attempting pending secret cleanup." >&2
+  else
+    echo "No deployed revision found for pending Helm release ${release}; attempting pending secret cleanup." >&2
+  fi
+
+  pending_secret="$(latest_pending_release_secret "${release}" "${namespace}")"
+  if [ -n "${pending_secret}" ]; then
+    echo "Deleting stale Helm pending secret ${pending_secret} for ${release}."
+    KUBECONFIG="${kubeconfig_path}" "${kubectl_bin}" -n "${namespace}" delete secret "${pending_secret}" --ignore-not-found
+    return 0
+  fi
+
+  echo "Could not recover pending Helm release ${release}; no stale pending secret found." >&2
+  return 1
+}
+
+recover_pending_releases() {
+  local spec
+  local release
+  local namespace
+
+  for spec in ${pending_release_specs}; do
+    release="${spec%%:*}"
+    namespace="${spec#*:}"
+    if [ -z "${release}" ] || [ -z "${namespace}" ] || { [ "${release}" = "${namespace}" ] && [[ "${spec}" != *:* ]]; }; then
+      continue
+    fi
+    recover_pending_release "${release}" "${namespace}" || return 1
+  done
+}
+
 attempt=1
 while true; do
   echo "Running helmfile sync (attempt ${attempt}/${retries})."
-  if wait_for_stable_api && KUBECONFIG="${kubeconfig_path}" "${helmfile_bin}" -f "${helmfile_config}" sync; then
-    exit 0
+  status=0
+  if wait_for_stable_api && recover_pending_releases; then
+    if KUBECONFIG="${kubeconfig_path}" "${helmfile_bin}" -f "${helmfile_config}" sync; then
+      exit 0
+    fi
+    status=$?
+  else
+    status=$?
   fi
-  status=$?
 
   if [ "${attempt}" -ge "${retries}" ]; then
     echo "helmfile sync failed after ${retries} attempts." >&2
