@@ -220,7 +220,7 @@ import-migrate: python-deps ## Generate or execute guarded migration automation 
 
 import-auto: MIGRATION_AUTO_REPAIR_CLUSTER = true
 import-auto: operator-kubeconfig ## Run the full import migration workflow with preparation, execution, and validation.
-	$(MAKE) import-migrate MIGRATION_STAGE=all MIGRATION_EXECUTE=true
+	$(MAKE) import-migrate PROJECT_PATH="$(PROJECT_PATH)" VALUES="$(VALUES)" INGRESS="$(INGRESS)" WEB="$(WEB)" DB="$(DB)" IMPORT_REDACT="$(IMPORT_REDACT)" IMPORT_STRICT="$(IMPORT_STRICT)" MIGRATION_STAGE=all MIGRATION_EXECUTE=true
 
 $(ANSIBLE_COLLECTIONS_STAMP): $(ANSIBLE_COLLECTION_REQUIREMENTS) $(PYTHON_DEPS_STAMP)
 	mkdir -p .ansible/collections
