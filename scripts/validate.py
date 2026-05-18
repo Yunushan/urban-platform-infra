@@ -541,6 +541,13 @@ for rke2_bundled_traefik_token in [
         errors.append(f'Bundled Traefik config missing HTTPS redirect token: {rke2_bundled_traefik_token}')
 
 workload_template_text = (ROOT / 'helm/urban-platform-infra/templates/workloads.yaml').read_text(encoding='utf-8')
+for workload_template_token in [
+    'skipPlaceholderWorkloads',
+    'regexMatch "^example-app-[0-9]+$"',
+]:
+    if workload_template_token not in workload_template_text:
+        errors.append(f'Workload template missing token: {workload_template_token}')
+
 webserver_template_text = (ROOT / 'helm/urban-platform-infra/templates/webserver.yaml').read_text(encoding='utf-8')
 helpers_template_text = (ROOT / 'helm/urban-platform-infra/templates/_helpers.tpl').read_text(encoding='utf-8')
 traefik_middleware_template_text = (
@@ -680,6 +687,7 @@ for makefile_helm_token in [
     'deploy-auto:',
     'DEPLOY_LAB_STORAGE',
     'DEPLOY_LAB_REPLICA_OVERRIDE',
+    'DEPLOY_SKIP_PLACEHOLDER_WORKLOADS',
     'deploy-auto: MIGRATION_AUTO_REPAIR_CLUSTER = true',
     'wait-operator-crds:',
     'bash $(HELMFILE_SYNC_SCRIPT)',

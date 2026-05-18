@@ -1,5 +1,7 @@
 {{- range $name, $svc := .Values.workloads }}
-{{- if $svc.enabled }}
+{{- $imageRepository := $svc.image.repository | default "" }}
+{{- $isPlaceholderWorkload := regexMatch "^example-app-[0-9]+$" $imageRepository }}
+{{- if and $svc.enabled (not (and ($.Values.global.skipPlaceholderWorkloads | default false) $isPlaceholderWorkload)) }}
 {{- $kind := default "Deployment" $svc.kind }}
 {{- $ingressHost := include "cip.ingressHost" $ }}
 {{- $ingressTlsSecretName := include "cip.ingressTlsSecretName" $ }}

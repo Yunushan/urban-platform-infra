@@ -48,6 +48,9 @@
           ],
           "minimum": 1
         },
+        "skipPlaceholderWorkloads": {
+          "type": "boolean"
+        },
         "serviceAccount": {
           "type": "object",
           "additionalProperties": false,

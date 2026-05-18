@@ -55,7 +55,9 @@ make deploy-auto \
 that release, and deletes only Pending PVCs by default. It uses one lab replica
 and compact storage sizes for PostgreSQL, Elasticsearch, Kafka, ZooKeeper, and
 Redis. Bound PVCs are preserved unless `DEPLOY_RECOVER_DELETE_PVCS=true` is set
-explicitly. If the API is reachable but `/readyz` reports embedded-etcd
+explicitly. It also skips sanitized placeholder workloads whose images are still
+`example-app-*`, avoiding wasted memory and repeated image pulls until real
+application images are imported or configured. If the API is reachable but `/readyz` reports embedded-etcd
 readiness failures, `deploy-auto` also enables the guarded RKE2 repair pass.
 If the VIP kubeconfig times out after `import-auto`, the kubeconfig helper reuses
 the temporary migration inventory and falls back to an SSH tunnel to the RKE2 API.

@@ -132,6 +132,8 @@ prepare_host_path_on_node() {
 
   echo "Preparing local-path host path ${host_path} on ${ssh_user}@${node}."
   if [ "${ssh_user}" = "root" ]; then
+    # quoted_host_path is intentionally expanded locally and passed as the remote script argument.
+    # shellcheck disable=SC2029
     ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sh -s -- ${quoted_host_path}" <<'REMOTE_PREPARE_LOCAL_PATH'
 set -eu
 path="$1"
@@ -150,6 +152,8 @@ fi
 ls -ldZ "$path" 2>/dev/null || ls -ld "$path"
 REMOTE_PREPARE_LOCAL_PATH
   elif ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -n true" >/dev/null 2>&1; then
+    # quoted_host_path is intentionally expanded locally and passed as the remote script argument.
+    # shellcheck disable=SC2029
     ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -n sh -s -- ${quoted_host_path}" <<'REMOTE_PREPARE_LOCAL_PATH'
 set -eu
 path="$1"
@@ -185,8 +189,12 @@ if command -v restorecon >/dev/null 2>&1; then
 fi
 ls -ldZ "$path" 2>/dev/null || ls -ld "$path"
 REMOTE_PREPARE_LOCAL_PATH
+    # quoted_host_path is intentionally expanded locally and passed as the remote script argument.
+    # shellcheck disable=SC2029
     } | ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -S -p '' sh -s -- ${quoted_host_path}"
   else
+    # quoted_host_path is intentionally expanded locally and passed as the remote script argument.
+    # shellcheck disable=SC2029
     ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -n sh -s -- ${quoted_host_path}" <<'REMOTE_PREPARE_LOCAL_PATH'
 set -eu
 path="$1"
