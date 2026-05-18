@@ -11,13 +11,16 @@ VALUES ?= helm/urban-platform-infra/values.yaml
 TOPOLOGY ?= three-node-ha
 TOPOLOGY_VALUES ?= helm/urban-platform-infra/topologies/$(TOPOLOGY).yaml
 INVENTORY ?= inventories/$(ENV)/hosts.yml
-ANSIBLE_PLAYBOOK ?= ansible-playbook
-ANSIBLE_GALAXY ?= ansible-galaxy
 ANSIBLE_CONFIG ?= ansible/ansible.cfg
 ANSIBLE_ARGS ?=
 ANSIBLE_DIFF ?= --diff
-PYTHON ?= python3
+VENV ?= .venv
+VENV_BIN := $(VENV)/bin
+VENV_PYTHON := $(wildcard $(VENV_BIN)/python3)
+PYTHON ?= $(if $(VENV_PYTHON),$(VENV_BIN)/python3,python3)
 PIP ?= $(PYTHON) -m pip
+ANSIBLE_PLAYBOOK ?= $(if $(VENV_PYTHON),$(VENV_BIN)/ansible-playbook,ansible-playbook)
+ANSIBLE_GALAXY ?= $(if $(VENV_PYTHON),$(VENV_BIN)/ansible-galaxy,ansible-galaxy)
 ANSIBLE_COLLECTION_REQUIREMENTS ?= ansible/requirements.yml
 ANSIBLE_COLLECTIONS_STAMP ?= .ansible/collections/.$(subst /,_,$(ANSIBLE_COLLECTION_REQUIREMENTS)).stamp
 PYTHON_DEPS_STAMP ?= .ansible/.python-deps.stamp
@@ -78,17 +81,25 @@ define require_prod_confirmation
 	fi
 endef
 
+define install_python_deps
+req="$$( $(PYTHON) -c 'import sys; print("requirements-ci-modern.txt" if sys.version_info >= (3, 12) else "requirements-ci.txt")' )"; \
+	echo "Installing Python operator dependencies from $$req"; \
+	$(PIP) install -r "$$req"; \
+	touch "$(PYTHON_DEPS_STAMP)"
+endef
+
 help:
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage: make <target> [ENV=prod ENGINE=rke2 INGRESS=traefik WEB=nginx DB=postgresql OBS=elasticsearch TOPOLOGY=three-node-ha]\n\nTargets:\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  %-22s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 $(PYTHON_DEPS_STAMP): requirements-ci.txt requirements-ci-modern.txt
 	mkdir -p .ansible
-	@req="$$( $(PYTHON) -c 'import sys; print("requirements-ci-modern.txt" if sys.version_info >= (3, 12) else "requirements-ci.txt")' )"; \
-		echo "Installing Python operator dependencies from $$req"; \
-		$(PIP) install -r "$$req"; \
-		touch "$(PYTHON_DEPS_STAMP)"
+	@$(install_python_deps)
 
 python-deps: $(PYTHON_DEPS_STAMP) ## Install Python/Ansible dependencies compatible with the current Python.
+	@if ! $(PYTHON) -c 'import ansible, yaml' >/dev/null 2>&1 || ! $(ANSIBLE_PLAYBOOK) --version >/dev/null 2>&1 || ! $(ANSIBLE_GALAXY) --version >/dev/null 2>&1; then \
+		echo "Python/Ansible dependencies are missing from $(PYTHON); reinstalling."; \
+		$(install_python_deps); \
+	fi
 
 validate: python-deps ## Validate YAML, Helm chart structure, scripts, and config catalogs.
 	python3 scripts/validate.py
@@ -131,7 +142,7 @@ $(ANSIBLE_COLLECTIONS_STAMP): $(ANSIBLE_COLLECTION_REQUIREMENTS) $(PYTHON_DEPS_S
 	ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) $(ANSIBLE_GALAXY) collection install -r $(ANSIBLE_COLLECTION_REQUIREMENTS) --force
 	touch $(ANSIBLE_COLLECTIONS_STAMP)
 
-ansible-collections: $(ANSIBLE_COLLECTIONS_STAMP) ## Install repo-pinned Ansible collections.
+ansible-collections: python-deps $(ANSIBLE_COLLECTIONS_STAMP) ## Install repo-pinned Ansible collections.
 
 preflight: ansible-collections ## Validate inventory and target readiness before bootstrap/install.
 	ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) $(ANSIBLE_PLAYBOOK) -i $(INVENTORY) ansible/playbooks/preflight.yml -e cluster_engine=$(ENGINE) -e deployment_environment=$(ENV) $(ANSIBLE_ARGS)
