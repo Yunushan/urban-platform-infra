@@ -304,6 +304,17 @@ def run_remote_sudo_shell(args: argparse.Namespace, ssh_options: list[str], targ
     )
 
 
+def run_remote_sudo_shell_status(args: argparse.Namespace, ssh_options: list[str], target: str, script: str) -> int:
+    password = become_password(args)
+    sudo_command = "sudo -S -p '' sh -lc" if password else "sudo -n sh -lc"
+    result = subprocess.run(
+        ["ssh", *ssh_options, target, f"{sudo_command} {shlex.quote(script)}"],
+        input=f"{password}\n" if password else None,
+        text=True,
+    )
+    return result.returncode
+
+
 def run_remote_sudo_upload(args: argparse.Namespace, ssh_options: list[str], target: str, local_path: Path, remote_path: str) -> None:
     password = become_password(args)
     password_required = False
@@ -427,6 +438,15 @@ def local_import_image(args: argparse.Namespace, record: import_project.ServiceR
     return f"urban-platform-import/{image_artifact_name(record)}:{args.image_tag}"
 
 
+def containerd_import_image_refs(target_image: str) -> list[str]:
+    first_segment = target_image.split("/", 1)[0]
+    has_registry = "." in first_segment or ":" in first_segment or first_segment == "localhost"
+    refs = [target_image]
+    if not has_registry:
+        refs.append(f"localhost/{target_image}")
+    return refs
+
+
 def container_image_exists(args: argparse.Namespace, image: str) -> bool:
     return subprocess.run(container_command(args, "image", "inspect", image), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
 
@@ -527,7 +547,23 @@ def resolve_build_source(compose_path: Path, build: Any) -> tuple[Path, str, str
     return context, dockerfile, fallback_note
 
 
-def preload_archives_to_nodes(args: argparse.Namespace, archives: list[Path], stale_archive_names: set[str]) -> bool:
+def remote_containerd_has_image(args: argparse.Namespace, ssh_options: list[str], target: str, image_refs: list[str]) -> bool:
+    image_ref_args = " ".join(shlex.quote(ref) for ref in image_refs)
+    script = (
+        "set -e; "
+        "ctr=/var/lib/rancher/rke2/bin/ctr; "
+        "socket=/run/k3s/containerd/containerd.sock; "
+        "[ -S \"$socket\" ] && [ -x \"$ctr\" ] || exit 1; "
+        "images=\"$($ctr --address \"$socket\" -n k8s.io images ls -q)\"; "
+        f"for ref in {image_ref_args}; do "
+        "printf '%s\\n' \"$images\" | grep -Fx -- \"$ref\" >/dev/null && exit 0; "
+        "done; "
+        "exit 1"
+    )
+    return run_remote_sudo_shell_status(args, ssh_options, target, script) == 0
+
+
+def preload_archives_to_nodes(args: argparse.Namespace, archives: list[Path], stale_archive_names: set[str], image_refs: list[str] | None = None) -> bool:
     nodes = [node.strip() for node in args.rke2_nodes.split(",") if node.strip()]
     archives = sorted(archives)
     if not archives:
@@ -556,6 +592,9 @@ def preload_archives_to_nodes(args: argparse.Namespace, archives: list[Path], st
             f"for name in {stale_name_args}; do rm -f {remote_image_dir}/\"$name\"; done",
         )
         for archive in archives:
+            if image_refs and remote_containerd_has_image(args, ssh_options, target, image_refs):
+                print(f"Image {image_refs[0]} is already present on {target}; skipping archive upload.")
+                continue
             remote_archive = f"{remote_image_dir_raw}/{archive.name}"
             run_remote_sudo_upload(args, ssh_options, target, archive, remote_archive)
             if args.rke2_import_images:
@@ -1034,12 +1073,17 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
     archive_dir = Path(args.image_output_dir).expanduser()
     if args.image_mode == "preload":
         archive_dir.mkdir(parents=True, exist_ok=True)
-        print("Preload mode stages images on the operator, then copies and verifies archives on the RKE2 nodes.")
+        print("Preload mode stages each image on the operator, then streams it to the RKE2 nodes.")
+        if args.cleanup_operator_images:
+            cleanup_operator_archives(archive_dir)
     skipped: list[str] = []
     failed: list[str] = []
     generated_images: list[str] = []
     pulled_source_images: list[str] = []
     generated_archives: list[Path] = []
+    preload_streaming = args.image_mode == "preload" and bool([node for node in args.rke2_nodes.split(",") if node.strip()])
+    preload_initialized = False
+    archives_copied = False
     stale_archive_names = {
         archive_name
         for record, _service, _build in candidates
@@ -1076,12 +1120,24 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                 if archive_path.exists():
                     archive_path.unlink()
                 run_command(container_command(args, "save", "-o", str(archive_path), target_image))
-                generated_archives.append(archive_path)
+                if preload_streaming:
+                    copied = preload_archives_to_nodes(
+                        args,
+                        [archive_path],
+                        stale_archive_names if not preload_initialized else set(),
+                        containerd_import_image_refs(target_image),
+                    )
+                    archives_copied = archives_copied or copied
+                    preload_initialized = True
+                    if copied and args.cleanup_operator_images and archive_path.exists():
+                        archive_path.unlink()
+                else:
+                    generated_archives.append(archive_path)
             if args.cleanup_operator_images:
                 cleanup_operator_container_tags(args, [target_image])
         except subprocess.CalledProcessError as exc:
             failed.append(f"{record.file}::{record.name} ({exc.cmd})")
-    if args.image_mode == "preload":
+    if args.image_mode == "preload" and not preload_streaming:
         archives_copied = preload_archives_to_nodes(args, generated_archives, stale_archive_names)
         if args.cleanup_operator_images:
             cleanup_operator_archives(archive_dir)

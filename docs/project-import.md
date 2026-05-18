@@ -109,20 +109,23 @@ Image migration has three modes:
 - `MIGRATION_IMAGE_MODE=registry` builds and pushes application images to a
   private registry. This is the production-friendly mode and is the only mode
   that needs registry credentials.
-- `MIGRATION_IMAGE_MODE=preload` builds images, saves them as tar archives, and
-  can copy them to RKE2 nodes under `/var/lib/rancher/rke2/agent/images` when
-  `MIGRATION_RKE2_NODES` is set. This avoids registry login. By default it also
-  verifies the tar archives on each node and imports them into the running RKE2
-  containerd socket when that socket is available. The operator machine is used
-  only as a staging point; generated import tags, local preload archives, and
-  dangling container build cache are cleaned up automatically unless
+- `MIGRATION_IMAGE_MODE=preload` builds images, saves each image as a tar
+  archive, and can copy it to RKE2 nodes under
+  `/var/lib/rancher/rke2/agent/images` when `MIGRATION_RKE2_NODES` is set. This
+  avoids registry login. By default it also verifies the tar archive on each
+  node and imports it into the running RKE2 containerd socket when that socket is
+  available. The operator machine is used only as a short-lived staging point;
+  generated import tags, local preload archives, and dangling container build
+  cache are cleaned up automatically unless
   `MIGRATION_CLEANUP_OPERATOR_IMAGES=false` is set. Set
   `MIGRATION_PRUNE_OPERATOR_CACHE=false` only when you intentionally want to keep
-  dangling Podman/Docker build cache on the operator for debugging. Only archives
-  generated in the current run are copied to nodes; stale local archives from
-  earlier failed runs are not sent again. Node-side preload transfer streams one
-  archive at a time through sudo into the RKE2 image directory; each archive is
-  imported and removed before the next archive is copied.
+  dangling Podman/Docker build cache on the operator for debugging or repeated
+  retry speed. Only the current archive is copied to nodes; stale local archives
+  from earlier failed runs are removed before the run and are not sent again.
+  Node-side preload transfer streams one archive at a time through sudo into the
+  RKE2 image directory; each archive is imported and removed before the next
+  archive is copied. On retries, nodes that already have the image in RKE2
+  containerd skip the archive upload.
 - `MIGRATION_IMAGE_MODE=skip` leaves application image movement out of the
   migration run. Use this when keeping the existing Compose deployment running
   temporarily behind external routing.
