@@ -100,6 +100,7 @@ MIGRATION_ALLOW_SECRET_MATERIAL ?= false
 MIGRATION_STAGE ?= $(if $(filter true,$(MIGRATION_EXECUTE)),all,bundle)
 MIGRATION_AUTO_PREPARE ?= true
 MIGRATION_PRIVATE_DIR ?= /var/lib/urban-platform/private
+MIGRATION_FALLBACK_INVENTORY ?= /tmp/urban-platform-import-inventory.yml
 MIGRATION_KUBECONFIG ?= $(OPERATOR_KUBECONFIG)
 MIGRATION_CLUSTER_VIP ?=
 MIGRATION_KUBERNETES_API_VIP_PORT ?=
@@ -249,7 +250,16 @@ operator-kubeconfig: ansible-collections ## Repair/write the operator kubeconfig
 	@ENV=$(ENV) ENGINE=$(ENGINE) INVENTORY=$(INVENTORY) ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) ANSIBLE_PLAYBOOK=$(ANSIBLE_PLAYBOOK) OPERATOR_KUBECONFIG=$(OPERATOR_KUBECONFIG) OPERATOR_KUBECONFIG_FORCE_REPAIR="$(OPERATOR_KUBECONFIG_FORCE_REPAIR)" ANSIBLE_ARGS="$(ANSIBLE_ARGS)" MIGRATION_RKE2_NODES="$(MIGRATION_RKE2_NODES)" MIGRATION_SSH_USER="$(MIGRATION_SSH_USER)" MIGRATION_SSH_KEY="$(MIGRATION_SSH_KEY)" MIGRATION_BECOME_PASSWORD_FILE="$(MIGRATION_BECOME_PASSWORD_FILE)" MIGRATION_BECOME_PASSWORD_PROMPT="$(MIGRATION_BECOME_PASSWORD_PROMPT)" MIGRATION_CLUSTER_VIP="$(if $(MIGRATION_CLUSTER_VIP),$(MIGRATION_CLUSTER_VIP),$(DEPLOY_CLUSTER_VIP))" MIGRATION_KUBERNETES_API_VIP_PORT="$(MIGRATION_KUBERNETES_API_VIP_PORT)" MIGRATION_CLUSTER_DOMAIN="$(MIGRATION_CLUSTER_DOMAIN)" MIGRATION_RKE2_VERSION="$(MIGRATION_RKE2_VERSION)" MIGRATION_AUTO_REPAIR_CLUSTER="$(MIGRATION_AUTO_REPAIR_CLUSTER)" MIGRATION_KEEPALIVED_AUTH_PASS="$(MIGRATION_KEEPALIVED_AUTH_PASS)" MIGRATION_KEEPALIVED_INTERFACE="$(MIGRATION_KEEPALIVED_INTERFACE)" bash $(KUBECONFIG_SCRIPT)
 
 configure-edge-ports: ansible-collections ## Configure HAProxy VIP forwarding for non-80/443 observability ports.
-	ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) $(ANSIBLE_PLAYBOOK) -i $(INVENTORY) ansible/playbooks/edge-ports.yml -e cluster_engine=$(ENGINE) -e deployment_environment=$(ENV) -e edge_allowed_cidrs_text="$(DEPLOY_ALLOWED_CIDRS)" $(ANSIBLE_ARGS)
+	@edge_inventory="$(INVENTORY)"; \
+	if [ ! -s "$$edge_inventory" ] && [ -s "$(MIGRATION_FALLBACK_INVENTORY)" ]; then \
+		edge_inventory="$(MIGRATION_FALLBACK_INVENTORY)"; \
+		echo "Using recovered private inventory for edge ports: $$edge_inventory"; \
+	fi; \
+	if [ ! -s "$$edge_inventory" ]; then \
+		echo "No usable inventory found for edge ports. Set INVENTORY or MIGRATION_FALLBACK_INVENTORY."; \
+		exit 2; \
+	fi; \
+	ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) $(ANSIBLE_PLAYBOOK) -i "$$edge_inventory" ansible/playbooks/edge-ports.yml -e cluster_engine=$(ENGINE) -e deployment_environment=$(ENV) -e edge_allowed_cidrs_text="$(DEPLOY_ALLOWED_CIDRS)" $(ANSIBLE_ARGS)
 
 install-helm: ## Install Helm on the operator machine when it is missing.
 	bash $(HELM_INSTALL_SCRIPT)
