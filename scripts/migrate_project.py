@@ -1361,6 +1361,52 @@ def kubernetes_secret_exists(args: argparse.Namespace, name: str) -> bool:
     return subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
 
 
+def kubernetes_service_exists(args: argparse.Namespace, name: str) -> bool:
+    command = kubectl_command(args, ["-n", args.namespace, "get", "service", name, "--request-timeout=15s"])
+    return subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+
+def ingress_backend_service_names(manifest: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+    if manifest.get("kind") != "Ingress":
+        return names
+
+    default_backend = manifest.get("spec", {}).get("defaultBackend", {})
+    default_service = default_backend.get("service", {})
+    if isinstance(default_service, dict) and default_service.get("name"):
+        names.append(str(default_service["name"]))
+
+    for rule in manifest.get("spec", {}).get("rules", []):
+        if not isinstance(rule, dict):
+            continue
+        http = rule.get("http", {})
+        if not isinstance(http, dict):
+            continue
+        for path in http.get("paths", []):
+            if not isinstance(path, dict):
+                continue
+            service = path.get("backend", {}).get("service", {})
+            if isinstance(service, dict) and service.get("name"):
+                names.append(str(service["name"]))
+    return list(dict.fromkeys(names))
+
+
+def executable_ingress_manifests(args: argparse.Namespace, manifests: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    executable: list[dict[str, Any]] = []
+    for manifest in manifests:
+        name = str(manifest.get("metadata", {}).get("name", "<unnamed>"))
+        backend_services = ingress_backend_service_names(manifest)
+        missing = [service for service in backend_services if not kubernetes_service_exists(args, service)]
+        if missing:
+            print(
+                f"Skipping ingress candidate {name}: backend service(s) not found in namespace "
+                f"{args.namespace}: {', '.join(missing)}. Deploy or create the backend Service before applying it."
+            )
+            continue
+        executable.append(manifest)
+    return executable
+
+
 def ingress_san(host: str) -> str:
     try:
         ipaddress.ip_address(host)
@@ -1500,7 +1546,14 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
     print(f"Wrote {path}")
     if args.execute and manifests:
         ensure_ingress_tls_secret(args, values, host)
-        run_command(kubectl_command(args, ["-n", args.namespace, "apply", "--validate=false", "-f", str(path)]))
+        executable_manifests = executable_ingress_manifests(args, manifests)
+        if executable_manifests:
+            run_command(
+                kubectl_command(args, ["-n", args.namespace, "apply", "--validate=false", "-f", "-"]),
+                stdin=yaml.safe_dump_all(executable_manifests, sort_keys=False),
+            )
+        else:
+            print("No ingress candidates were applied because their backend services are not present yet.")
 
 
 def stage_validate(args: argparse.Namespace) -> None:

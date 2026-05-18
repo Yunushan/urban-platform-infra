@@ -695,6 +695,9 @@ for migration_automation_token in [
     '--strict-database-migration',
     'sys.executable',
     'PYTHON="${PYTHON:-python3}"',
+    'kubernetes_service_exists',
+    'Skipping ingress candidate',
+    'No ingress candidates were applied because their backend services are not present yet.',
     'write_database_target_map',
     'preload_archives_to_nodes',
     'import_preloaded_archives_to_containerd',
@@ -755,6 +758,7 @@ for project_import_docs_token in [
     'MIGRATION_EXECUTE=true',
     'MIGRATION_REGISTRY_USERNAME',
     'secretRef',
+    'generated Ingress candidates are applied only if',
 ]:
     if project_import_docs_token not in project_import_docs_text:
         errors.append(f'Project import docs missing token: {project_import_docs_token}')

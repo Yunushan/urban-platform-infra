@@ -158,6 +158,11 @@ without the chart rendering a plain Kubernetes Secret. Set
 For `import-auto`, set `MIGRATION_TLS_CERT_FILE` and `MIGRATION_TLS_KEY_FILE`
 to create the ingress TLS secret from your certificate files; otherwise the
 import stage creates a self-signed fallback secret for `MIGRATION_INGRESS_HOST`.
+When execution is enabled, generated Ingress candidates are applied only if
+their backend Kubernetes Service already exists in the target namespace. If the
+Compose edge service has not been converted to a chart workload yet, the
+candidate is still written to `reports/import-migration/manifests/` but is not
+applied as a broken route.
 
 No-registry preload example:
 
