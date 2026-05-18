@@ -15,7 +15,7 @@ selector="${HELM_RECOVER_SELECTOR:-app.kubernetes.io/part-of=urban-platform-infr
 helm_bin="${HELM:-helm}"
 kubectl_bin="${KUBECTL:-kubectl}"
 
-if [ "${enabled}" != "true" ]; then
+if [ "${enabled}" != "true" ] && [ "${recover_cnpg_initdb}" != "true" ]; then
   echo "Helm recovery disabled for ${release}; set DEPLOY_RECOVER_FAILED_RELEASE=true to enable it."
   exit 0
 fi
@@ -206,11 +206,22 @@ status="$(release_status)"
 manifest_file=""
 
 if [ "${status}" = "deployed" ]; then
-  echo "Helm release ${release} is deployed; checking for recoverable StatefulSets and Pending PVCs."
+  if [ "${enabled}" = "true" ]; then
+    echo "Helm release ${release} is deployed; checking for recoverable StatefulSets and Pending PVCs."
+  else
+    echo "Helm release ${release} is deployed; checking for failed CNPG initdb bootstraps."
+  fi
   ensure_kubernetes_api_egress_policy
   recover_failed_cnpg_initdb
-  delete_recoverable_statefulsets
-  delete_pvcs
+  if [ "${enabled}" = "true" ]; then
+    delete_recoverable_statefulsets
+    delete_pvcs
+  fi
+  exit 0
+fi
+
+if [ "${enabled}" != "true" ]; then
+  echo "Helm recovery disabled for ${release}; set DEPLOY_RECOVER_FAILED_RELEASE=true to enable full release recovery."
   exit 0
 fi
 
