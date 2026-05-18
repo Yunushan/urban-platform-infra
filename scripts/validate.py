@@ -849,6 +849,11 @@ for local_path_installer_token in [
     'rancher/local-path-provisioner',
     'local-path-storage',
     'storageclass.kubernetes.io/is-default-class',
+    'LOCAL_PATH_STORAGE_PATH',
+    'LOCAL_PATH_PREPARE_HOST_PATHS',
+    'container_file_t',
+    'Recovered MIGRATION_RKE2_NODES',
+    'rollout restart deployment/local-path-provisioner',
 ]:
     if local_path_installer_token not in local_path_installer_text:
         errors.append(f'Local-path installer script missing token: {local_path_installer_token}')

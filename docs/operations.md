@@ -33,6 +33,11 @@ StorageClass, `databases.storageOverride.className`.
 workloads. When no StorageClass exists, `INSTALL_LOCAL_PATH_STORAGE=auto`
 installs Rancher local-path provisioner as a default lab StorageClass. Set
 `INSTALL_LOCAL_PATH_STORAGE=false` when production storage is managed separately.
+When the `local-path` StorageClass already exists, `deploy-auto` still
+reconciles the provisioner and prepares `LOCAL_PATH_STORAGE_PATH`
+(`/opt/local-path-provisioner` by default) on the RKE2 nodes over SSH. This
+sets writable permissions and a container-compatible SELinux label so helper
+pods do not fail with `mkdir: Permission denied`.
 
 For an import/lab deployment, use the automatic recovery path instead of
 manually uninstalling stuck releases or deleting Pending PVCs:
