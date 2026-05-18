@@ -631,7 +631,18 @@
       }
     },
     "databases": {
-      "type": "object"
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "postgresUID": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "postgresGID": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
     },
     "observability": {
       "type": "object"

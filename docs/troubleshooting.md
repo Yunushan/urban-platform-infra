@@ -152,6 +152,12 @@ repository that installs CloudNativePG 1.29+ and ECK 3.4+. The default
 TimescaleDB resource also requires the chart's CNPG `ImageCatalog` template so
 the operator sees `timescale/timescaledb:2.26.4-pg18` as PostgreSQL 18.
 
+If CNPG `initdb` pods fail with `could not look up effective user ID 26`, the
+cluster is trying to run an image whose `postgres` user is not UID 26. The chart
+defaults `databases.postgresUID` and `databases.postgresGID` to `999`, matching
+the Docker Hub Postgres-family images used by the default PostgreSQL, PostGIS,
+and TimescaleDB clusters.
+
 ## PrometheusRule or ServiceMonitor resources not recognized
 
 Install kube-prometheus-stack before enabling `monitoring.enabled=true`:

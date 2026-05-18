@@ -4,6 +4,8 @@
 {{- $storageOverride := $.Values.databases.storageOverride | default dict }}
 {{- $storageSize := $storageOverride.size | default $db.storage.size | default "20Gi" }}
 {{- $storageClass := $storageOverride.className | default $db.storage.className }}
+{{- $postgresUID := $db.postgresUID | default $.Values.databases.postgresUID }}
+{{- $postgresGID := $db.postgresGID | default $.Values.databases.postgresGID }}
 ---
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
@@ -16,6 +18,12 @@ metadata:
     urban-platform.io/database-engine: {{ $db.engine | quote }}
 spec:
   instances: {{ include "cip.replicaCount" (list $ ($db.instances | default $.Values.databases.defaultInstances)) }}
+  {{- if $postgresUID }}
+  postgresUID: {{ $postgresUID }}
+  {{- end }}
+  {{- if $postgresGID }}
+  postgresGID: {{ $postgresGID }}
+  {{- end }}
   {{- if $db.imageCatalogRef }}
   imageCatalogRef:
     apiGroup: {{ $db.imageCatalogRef.apiGroup | default "postgresql.cnpg.io" | quote }}

@@ -184,6 +184,9 @@ if timescaledb_catalog_ref.get('kind') != 'ImageCatalog' or timescaledb_catalog_
 timescaledb_catalog = values.get('databases', {}).get('imageCatalogs', {}).get('timescaledb', {})
 if timescaledb_catalog.get('enabled') is not True:
     errors.append('TimescaleDB CNPG ImageCatalog must be enabled by default')
+database_values = values.get('databases', {})
+if database_values.get('postgresUID') != 999 or database_values.get('postgresGID') != 999:
+    errors.append('CNPG database defaults must run Docker Hub Postgres-family images as UID/GID 999')
 observability_values = values.get('observability', {})
 if observability_values.get('stack', {}).get('name') != 'elastic-eck-prometheus-grafana-opentelemetry':
     errors.append('Default observability stack must be Elastic ECK + Prometheus/Grafana + OpenTelemetry')
@@ -613,6 +616,9 @@ cnpg_cluster_template_text = (ROOT / 'helm/urban-platform-infra/templates/databa
 for cnpg_cluster_token in ['imageCatalogRef:', 'imageName:', '$db.imageCatalogRef.major']:
     if cnpg_cluster_token not in cnpg_cluster_template_text:
         errors.append(f'CNPG cluster template missing ImageCatalog support token: {cnpg_cluster_token}')
+for cnpg_cluster_token in ['postgresUID:', 'postgresGID:', '$db.postgresUID', '$db.postgresGID']:
+    if cnpg_cluster_token not in cnpg_cluster_template_text:
+        errors.append(f'CNPG cluster template missing Postgres image UID/GID token: {cnpg_cluster_token}')
 cnpg_catalog_template_text = (
     ROOT / 'helm/urban-platform-infra/templates/databases-cnpg-imagecatalogs.yaml'
 ).read_text(encoding='utf-8')
@@ -1138,6 +1144,8 @@ for database_token in [
     'storageOverride',
     'enableDeprecatedPodMonitor',
     'storageClass:',
+    'postgresUID:',
+    'postgresGID:',
 ]:
     if database_token not in database_template_text:
         errors.append(f'Database template missing required token: {database_token}')

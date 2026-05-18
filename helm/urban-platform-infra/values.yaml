@@ -271,6 +271,8 @@ databases:
   enabled: true
   provider: cloudnative-pg
   defaultInstances: 3
+  postgresUID: 999
+  postgresGID: 999
   storageOverride:
     size: ''
     className: ''
