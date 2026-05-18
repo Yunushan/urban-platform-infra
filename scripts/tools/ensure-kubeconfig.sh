@@ -503,15 +503,15 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
     endpoint_specs=()
     cp "${OPERATOR_KUBECONFIG_PATH}" "${original_kubeconfig}"
 
-    if [ -n "${explicit_cluster_vip}" ] || [ -n "${discovered_cluster_vip}" ]; then
-      endpoint_specs+=("${cluster_vip}:${kubernetes_api_port}")
-    fi
     for node in "${rke2_nodes[@]}"; do
       node="${node//[[:space:]]/}"
       if [ -n "${node}" ]; then
         endpoint_specs+=("${node}:6443")
       fi
     done
+    if [ -n "${explicit_cluster_vip}" ] || [ -n "${discovered_cluster_vip}" ]; then
+      endpoint_specs+=("${cluster_vip}:${kubernetes_api_port}")
+    fi
 
     for endpoint_spec in "${endpoint_specs[@]}"; do
       endpoint_host="${endpoint_spec%:*}"
