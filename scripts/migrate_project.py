@@ -155,6 +155,24 @@ def kubectl_command(args: argparse.Namespace, command: list[str]) -> list[str]:
     return [*base, *command]
 
 
+def kubectl_apply_stdin_command(args: argparse.Namespace, *, namespace: str | None = None) -> list[str]:
+    command: list[str] = []
+    if namespace:
+        command.extend(["-n", namespace])
+    command.extend(
+        [
+            "apply",
+            "--server-side",
+            "--field-manager=urban-platform-import",
+            "--force-conflicts",
+            "--validate=false",
+            "-f",
+            "-",
+        ]
+    )
+    return kubectl_command(args, command)
+
+
 def require_kubernetes_api(args: argparse.Namespace) -> None:
     if not args.execute:
         return
@@ -1421,7 +1439,10 @@ def stage_secrets(args: argparse.Namespace, service_pairs: list[tuple[import_pro
             "type": "Opaque",
             "stringData": entries,
         }
-        run_command(kubectl_command(args, ["-n", args.namespace, "apply", "--validate=false", "-f", "-"]), stdin=yaml.safe_dump(manifest, sort_keys=False))
+        run_command(
+            kubectl_apply_stdin_command(args, namespace=args.namespace),
+            stdin=yaml.safe_dump(manifest, sort_keys=False),
+        )
 
 
 def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]]) -> None:
@@ -1749,7 +1770,7 @@ def apply_tls_secret_from_files(args: argparse.Namespace, name: str, cert_file: 
         ],
     )
     result = subprocess.run(create_command, text=True, capture_output=True, check=True)
-    run_command(kubectl_command(args, ["-n", args.namespace, "apply", "--validate=false", "-f", "-"]), stdin=result.stdout)
+    run_command(kubectl_apply_stdin_command(args, namespace=args.namespace), stdin=result.stdout)
 
 
 def ensure_ingress_tls_secret(args: argparse.Namespace, values: dict[str, Any], host: str) -> None:
@@ -1867,7 +1888,7 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
     print(f"Wrote {ingress_path}")
     if args.execute and workload_manifests:
         run_command(
-            kubectl_command(args, ["-n", args.namespace, "apply", "--validate=false", "-f", "-"]),
+            kubectl_apply_stdin_command(args, namespace=args.namespace),
             stdin=yaml.safe_dump_all(workload_manifests, sort_keys=False),
         )
     if args.execute and ingress_manifests:
@@ -1875,7 +1896,7 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
         executable_manifests = executable_ingress_manifests(args, ingress_manifests)
         if executable_manifests:
             run_command(
-                kubectl_command(args, ["-n", args.namespace, "apply", "--validate=false", "-f", "-"]),
+                kubectl_apply_stdin_command(args, namespace=args.namespace),
                 stdin=yaml.safe_dump_all(executable_manifests, sort_keys=False),
             )
         else:
