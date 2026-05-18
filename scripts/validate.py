@@ -462,6 +462,8 @@ for kubeconfig_script_token in [
     'MIGRATION_KEEPALIVED_AUTH_PASS',
     'MIGRATION_KEEPALIVED_INTERFACE',
     'rewrite_existing_kubeconfig_endpoint',
+    'tls-server-name',
+    'MIGRATION_KUBE_API_TLS_SERVER_NAME',
     'Trying existing operator kubeconfig against',
     'Existing kubeconfig was not ready through direct endpoints; trying SSH tunnel fallback',
     'normalize_rke2_version',

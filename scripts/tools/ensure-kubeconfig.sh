@@ -73,6 +73,7 @@ write_kubeconfig_from_node() {
 rewrite_existing_kubeconfig_endpoint() {
   local endpoint_host="$1"
   local endpoint_port="$2"
+  local tls_server_name="${3:-}"
   local tmp_kubeconfig
 
   if [ ! -s "${OPERATOR_KUBECONFIG_PATH}" ]; then
@@ -80,8 +81,21 @@ rewrite_existing_kubeconfig_endpoint() {
   fi
 
   tmp_kubeconfig="$(mktemp)"
-  cp "${OPERATOR_KUBECONFIG_PATH}" "${tmp_kubeconfig}"
-  sed -i -E "s#server: https://[^[:space:]]+#server: https://${endpoint_host}:${endpoint_port}#" "${tmp_kubeconfig}"
+  awk -v endpoint="${endpoint_host}:${endpoint_port}" -v tls_server_name="${tls_server_name}" '
+    /^[[:space:]]*tls-server-name:/ {
+      next
+    }
+    /^[[:space:]]*server:[[:space:]]*https:\/\// {
+      indent = $0
+      sub(/server:.*/, "", indent)
+      print indent "server: https://" endpoint
+      if (tls_server_name != "") {
+        print indent "tls-server-name: " tls_server_name
+      }
+      next
+    }
+    { print }
+  ' "${OPERATOR_KUBECONFIG_PATH}" > "${tmp_kubeconfig}"
   install -d -m 0700 "$(dirname "${OPERATOR_KUBECONFIG_PATH}")"
   install -m 0600 "${tmp_kubeconfig}" "${OPERATOR_KUBECONFIG_PATH}"
   rm -f "${tmp_kubeconfig}"
@@ -336,6 +350,7 @@ start_kubernetes_api_tunnel() {
   local max_port
   local ssh_options=("-o" "ExitOnForwardFailure=yes")
   local node_ssh_options=()
+  local ssh_error
 
   mapfile -t node_ssh_options < <(ssh_options_for_node)
   ssh_options+=("${node_ssh_options[@]}")
@@ -353,13 +368,21 @@ start_kubernetes_api_tunnel() {
     fi
     rm -f "${socket_path}"
     echo "Trying SSH tunnel 127.0.0.1:${port} -> ${node}:127.0.0.1:${remote_port}" >&2
+    ssh_error="$(mktemp)"
     if ssh "${ssh_options[@]}" -fN -M -S "${socket_path}" \
       -L "127.0.0.1:${port}:127.0.0.1:${remote_port}" \
-      "${ssh_user}@${node}"; then
+      "${ssh_user}@${node}" 2>"${ssh_error}"; then
+      rm -f "${ssh_error}"
       echo "${port}"
       return 0
     fi
+    cat "${ssh_error}" >&2 || true
     rm -f "${socket_path}"
+    if ! grep -Eiq 'address already in use|bind.*failed|cannot listen|port .* already' "${ssh_error}"; then
+      rm -f "${ssh_error}"
+      return 1
+    fi
+    rm -f "${ssh_error}"
     port="$((port + 1))"
   done
 
@@ -501,6 +524,7 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
     original_kubeconfig="$(mktemp)"
     existing_kubeconfig_ready=false
     endpoint_specs=()
+    tls_server_name="${MIGRATION_KUBE_API_TLS_SERVER_NAME:-${cluster_vip}}"
     cp "${OPERATOR_KUBECONFIG_PATH}" "${original_kubeconfig}"
 
     for node in "${rke2_nodes[@]}"; do
@@ -520,7 +544,7 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
         continue
       fi
       echo "Trying existing operator kubeconfig against https://${endpoint_host}:${endpoint_port}"
-      if rewrite_existing_kubeconfig_endpoint "${endpoint_host}" "${endpoint_port}" && kubernetes_api_ready; then
+      if rewrite_existing_kubeconfig_endpoint "${endpoint_host}" "${endpoint_port}" "${tls_server_name}" && kubernetes_api_ready; then
         echo "Operator kubeconfig ready: ${OPERATOR_KUBECONFIG_PATH} (endpoint https://${endpoint_host}:${endpoint_port})"
         existing_kubeconfig_ready=true
         break
@@ -538,7 +562,7 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
           echo "Could not open an SSH tunnel through ${tunnel_node}; trying the next node." >&2
           continue
         fi
-        if rewrite_existing_kubeconfig_endpoint "127.0.0.1" "${tunnel_port}" && kubernetes_api_ready; then
+        if rewrite_existing_kubeconfig_endpoint "127.0.0.1" "${tunnel_port}" "${tls_server_name}" && kubernetes_api_ready; then
           echo "Operator kubeconfig ready: ${OPERATOR_KUBECONFIG_PATH} (endpoint https://127.0.0.1:${tunnel_port} via SSH tunnel ${tunnel_node})"
           existing_kubeconfig_ready=true
           break
