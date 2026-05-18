@@ -149,6 +149,24 @@ if command -v restorecon >/dev/null 2>&1; then
 fi
 ls -ldZ "$path" 2>/dev/null || ls -ld "$path"
 REMOTE_PREPARE_LOCAL_PATH
+  elif ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -n true" >/dev/null 2>&1; then
+    ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -n sh -s -- ${quoted_host_path}" <<'REMOTE_PREPARE_LOCAL_PATH'
+set -eu
+path="$1"
+mkdir -p "$path"
+chmod 0777 "$path"
+if command -v chcon >/dev/null 2>&1; then
+  chcon -Rt container_file_t "$path" || true
+fi
+if command -v semanage >/dev/null 2>&1; then
+  semanage fcontext -a -t container_file_t "${path}(/.*)?" 2>/dev/null || \
+    semanage fcontext -m -t container_file_t "${path}(/.*)?" 2>/dev/null || true
+fi
+if command -v restorecon >/dev/null 2>&1; then
+  restorecon -RF "$path" >/dev/null 2>&1 || true
+fi
+ls -ldZ "$path" 2>/dev/null || ls -ld "$path"
+REMOTE_PREPARE_LOCAL_PATH
   elif [ -n "${become_password}" ]; then
     { printf '%s\n' "${become_password}"; cat <<'REMOTE_PREPARE_LOCAL_PATH'
 set -eu
