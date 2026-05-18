@@ -221,6 +221,16 @@ elif [ -x /usr/local/bin/rke2 ]; then
   /usr/local/bin/rke2 --version
 elif [ -x /usr/bin/rke2 ]; then
   /usr/bin/rke2 --version
+elif [ -x /var/lib/rancher/rke2/bin/rke2 ]; then
+  /var/lib/rancher/rke2/bin/rke2 --version
+elif sudo -n true 2>/dev/null; then
+  if sudo test -x /usr/local/bin/rke2; then
+    sudo /usr/local/bin/rke2 --version
+  elif sudo test -x /usr/bin/rke2; then
+    sudo /usr/bin/rke2 --version
+  elif sudo test -x /var/lib/rancher/rke2/bin/rke2; then
+    sudo /var/lib/rancher/rke2/bin/rke2 --version
+  fi
 fi
 REMOTE_DISCOVER_VERSION
 }
@@ -279,6 +289,79 @@ if [ -s /etc/keepalived/keepalived.conf ]; then
 fi
 ip route show default 2>/dev/null | awk '{print $5; exit}'
 REMOTE_DISCOVER_KEEPALIVED_INTERFACE
+}
+
+discover_remote_value_from_nodes() {
+  local description="$1"
+  local discoverer="$2"
+  local node
+  local value
+
+  shift 2
+  for node in "$@"; do
+    node="${node//[[:space:]]/}"
+    if [ -z "${node}" ]; then
+      continue
+    fi
+    value="$("${discoverer}" "${node}" | sed -n '/[^[:space:]]/ {p; q;}')"
+    if [ -n "${value}" ]; then
+      echo "Discovered ${description} from ${node}." >&2
+      printf '%s\n' "${value}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+discover_remote_rke2_version_from_nodes() {
+  local node
+  local raw_version
+  local normalized_version
+
+  for node in "$@"; do
+    node="${node//[[:space:]]/}"
+    if [ -z "${node}" ]; then
+      continue
+    fi
+    raw_version="$(discover_remote_rke2_version "${node}")"
+    normalized_version="$(normalize_rke2_version "${raw_version}")"
+    if [ -n "${normalized_version}" ]; then
+      echo "Discovered RKE2 version from ${node}." >&2
+      printf '%s\n' "${normalized_version}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+write_kubeconfig_from_available_node() {
+  local endpoint_host="$1"
+  local endpoint_port="$2"
+  local node
+  local status
+  local saw_missing_kubeconfig=false
+  local saw_fetch_error=false
+
+  for node in "${rke2_nodes[@]}"; do
+    node="${node//[[:space:]]/}"
+    if [ -z "${node}" ]; then
+      continue
+    fi
+    if write_kubeconfig_from_node "${node}" "${endpoint_host}" "${endpoint_port}"; then
+      return 0
+    fi
+    status=$?
+    if [ "${status}" -eq 2 ]; then
+      saw_missing_kubeconfig=true
+    else
+      saw_fetch_error=true
+    fi
+  done
+
+  if [ "${saw_fetch_error}" != "true" ] && [ "${saw_missing_kubeconfig}" = "true" ]; then
+    return 2
+  fi
+  return 1
 }
 
 prepare_remote_ansible_tmp_dirs() {
@@ -603,20 +686,20 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
   ansible_user_for_nodes="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
   cluster_domain="${MIGRATION_CLUSTER_DOMAIN:-${CLUSTER_DOMAIN:-}}"
   if [ -z "${cluster_domain}" ]; then
-    cluster_domain="$(discover_remote_cluster_domain "${first_rke2_node}")"
+    cluster_domain="$(discover_remote_value_from_nodes "cluster domain" discover_remote_cluster_domain "${rke2_nodes[@]}" || true)"
   fi
   cluster_domain="${cluster_domain:-cluster.local}"
 
   rke2_version="${MIGRATION_RKE2_VERSION:-${RKE2_VERSION:-}}"
   rke2_version_source="provided"
   if [ -z "${rke2_version}" ]; then
-    rke2_version="$(discover_remote_rke2_version "${first_rke2_node}")"
+    rke2_version="$(discover_remote_rke2_version_from_nodes "${rke2_nodes[@]}" || true)"
     rke2_version_source="discovered"
   fi
   rke2_version="$(normalize_rke2_version "${rke2_version}")"
   if [ -z "${rke2_version}" ]; then
-    echo "Could not discover a pinned RKE2 version from ${first_rke2_node}." >&2
-    echo "The node did not return a version like v1.33.5+rke2r1, and this automation will not choose an unpinned latest version." >&2
+    echo "Could not discover a pinned RKE2 version from any MIGRATION_RKE2_NODES host." >&2
+    echo "No node returned a version like v1.33.5+rke2r1, and this automation will not choose an unpinned latest version." >&2
     echo "Set MIGRATION_RKE2_VERSION=vX.Y.Z+rke2rN once for a fresh cluster install." >&2
     exit 1
   fi
@@ -624,7 +707,7 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
   rke2_token="${MIGRATION_RKE2_TOKEN:-${RKE2_TOKEN:-}}"
   rke2_token_source="provided"
   if [ -z "${rke2_token}" ]; then
-    rke2_token="$(discover_remote_rke2_token "${first_rke2_node}")"
+    rke2_token="$(discover_remote_value_from_nodes "RKE2 token" discover_remote_rke2_token "${rke2_nodes[@]}" || true)"
     rke2_token_source="discovered"
   fi
   if [ -z "${rke2_token}" ]; then
@@ -650,7 +733,7 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
   keepalived_interface="${MIGRATION_KEEPALIVED_INTERFACE:-${KEEPALIVED_INTERFACE:-}}"
   if [ "${use_load_balancers}" = "true" ]; then
     if [ -z "${keepalived_auth_pass}" ]; then
-      keepalived_auth_pass="$(discover_remote_keepalived_auth_pass "${first_rke2_node}")"
+      keepalived_auth_pass="$(discover_remote_value_from_nodes "Keepalived auth" discover_remote_keepalived_auth_pass "${rke2_nodes[@]}" || true)"
       keepalived_auth_source="discovered"
     fi
     if [ -z "${keepalived_auth_pass}" ]; then
@@ -663,7 +746,7 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
       exit 1
     fi
     if [ -z "${keepalived_interface}" ]; then
-      keepalived_interface="$(discover_remote_keepalived_interface "${first_rke2_node}")"
+      keepalived_interface="$(discover_remote_value_from_nodes "Keepalived interface" discover_remote_keepalived_interface "${rke2_nodes[@]}" || true)"
     fi
     keepalived_interface="${keepalived_interface:-eth0}"
   fi
@@ -748,7 +831,7 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
       continue
     fi
     echo "Trying Kubernetes API endpoint https://${endpoint_candidate}:${kubernetes_api_port}"
-    if write_kubeconfig_from_node "${first_rke2_node}" "${endpoint_candidate}" "${kubernetes_api_port}"; then
+    if write_kubeconfig_from_available_node "${endpoint_candidate}" "${kubernetes_api_port}"; then
       if kubernetes_api_ready; then
         selected_endpoint="${endpoint_candidate}"
         break
@@ -786,7 +869,7 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
           echo "Could not open an SSH tunnel through ${tunnel_node}; trying the next node." >&2
           continue
         fi
-        if write_kubeconfig_from_node "${first_rke2_node}" "127.0.0.1" "${tunnel_port}"; then
+        if write_kubeconfig_from_available_node "127.0.0.1" "${tunnel_port}"; then
           if kubernetes_api_ready; then
             selected_endpoint="127.0.0.1:${tunnel_port} via SSH tunnel ${tunnel_node}"
             break

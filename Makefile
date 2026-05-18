@@ -267,6 +267,7 @@ deploy-auto: DEPLOY_RECOVER_FAILED_RELEASE = true
 deploy-auto: DEPLOY_LAB_STORAGE = true
 deploy-auto: DEPLOY_TLS_SECRET_NAME = urban-platform-tls
 deploy-auto: DEPLOY_TLS_CREATE_SECRET = false
+deploy-auto: MIGRATION_AUTO_REPAIR_CLUSTER = true
 deploy-auto: deploy ## Automatically recover common lab/import deploy failures and use compact local-path storage sizes.
 
 status: ## Show cluster and workload status.
