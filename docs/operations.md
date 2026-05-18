@@ -58,6 +58,10 @@ When the SSH user needs sudo for RKE2 token or kubeconfig discovery,
 `deploy-auto` prompts once on the terminal and reuses that password only for the
 current run. Set `MIGRATION_BECOME_PASSWORD_PROMPT=false` for non-interactive
 runs that must fail instead of prompting.
+If one migration node is temporarily SSH-unreachable during automatic RKE2
+repair, the generated recovery inventory excludes that node and reconciles the
+reachable servers first. Set `MIGRATION_SKIP_UNREACHABLE_RKE2_NODES=false` to
+make an unreachable node fail the repair immediately.
 If `/tmp/urban-platform-import-inventory.yml` is not present, pass
 `MIGRATION_RKE2_NODES=node-1,node-2,node-3` once so the helper can rebuild that
 inventory.

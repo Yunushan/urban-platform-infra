@@ -297,6 +297,26 @@ prompt_for_become_password_if_needed() {
   echo "Using prompted sudo password for this deploy-auto run."
 }
 
+filter_ssh_reachable_nodes() {
+  local node
+  local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
+  local ssh_options=()
+
+  mapfile -t ssh_options < <(ssh_options_for_node)
+
+  for node in "$@"; do
+    node="${node//[[:space:]]/}"
+    if [ -z "${node}" ]; then
+      continue
+    fi
+    if ssh "${ssh_options[@]}" "${ssh_user}@${node}" "true" >/dev/null 2>&1; then
+      printf '%s\n' "${node}"
+    else
+      echo "RKE2 node ${node} is not reachable over SSH; excluding it from this automatic repair pass." >&2
+    fi
+  done
+}
+
 ssh_options_for_node() {
   printf '%s\n' "-o"
   printf '%s\n' "BatchMode=yes"
@@ -901,6 +921,23 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
       keepalived_interface="$(discover_remote_value_from_nodes "Keepalived interface" discover_remote_keepalived_interface "${rke2_nodes[@]}" || true)"
     fi
     keepalived_interface="${keepalived_interface:-eth0}"
+  fi
+
+  if [ "${MIGRATION_SKIP_UNREACHABLE_RKE2_NODES:-auto}" != "false" ]; then
+    original_rke2_node_count="${#rke2_nodes[@]}"
+    mapfile -t reachable_rke2_nodes < <(filter_ssh_reachable_nodes "${rke2_nodes[@]}")
+    if [ "${#reachable_rke2_nodes[@]}" -eq 0 ]; then
+      echo "No RKE2 nodes are reachable over SSH; cannot run automatic cluster repair." >&2
+      exit 1
+    fi
+    if [ "${#reachable_rke2_nodes[@]}" -lt "${original_rke2_node_count}" ]; then
+      echo "Continuing automatic cluster repair with ${#reachable_rke2_nodes[@]}/${original_rke2_node_count} SSH-reachable RKE2 nodes."
+    fi
+    rke2_nodes=("${reachable_rke2_nodes[@]}")
+    first_rke2_node="${rke2_nodes[0]}"
+    if [ -z "${explicit_cluster_vip}" ] && [ -z "${discovered_cluster_vip}" ]; then
+      cluster_vip="${first_rke2_node}"
+    fi
   fi
 
   {

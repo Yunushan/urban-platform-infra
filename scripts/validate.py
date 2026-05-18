@@ -464,6 +464,8 @@ for kubeconfig_script_token in [
     'MIGRATION_BECOME_PASSWORD_PROMPT',
     'validate_become_password_input',
     'prompt_for_become_password_if_needed',
+    'MIGRATION_SKIP_UNREACHABLE_RKE2_NODES',
+    'filter_ssh_reachable_nodes',
     'recover_become_password_from_fallback_inventory',
     'remote_sudo_sh',
     'rewrite_existing_kubeconfig_endpoint',
