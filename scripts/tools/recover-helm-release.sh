@@ -7,6 +7,7 @@ enabled="${RECOVER_HELM_RELEASE:-${DEPLOY_RECOVER_FAILED_RELEASE:-false}}"
 cleanup_stale_resources="${RECOVER_STALE_RESOURCES:-${DEPLOY_RECOVER_STALE_RESOURCES:-true}}"
 delete_pending_pvcs="${RECOVER_PENDING_PVCS:-${DEPLOY_RECOVER_PENDING_PVCS:-true}}"
 delete_all_pvcs="${RECOVER_DELETE_PVCS:-${DEPLOY_RECOVER_DELETE_PVCS:-false}}"
+recover_statefulsets="${RECOVER_STATEFULSETS:-${DEPLOY_RECOVER_STATEFULSETS:-false}}"
 timeout="${HELM_RECOVER_TIMEOUT:-${HELM_TIMEOUT:-10m}}"
 request_timeout="${KUBECTL_REQUEST_TIMEOUT:-120s}"
 selector="${HELM_RECOVER_SELECTOR:-app.kubernetes.io/part-of=urban-platform-infra}"
@@ -97,11 +98,35 @@ delete_pvcs() {
   kube -n "${namespace}" delete pvc "${pending_pvcs[@]}" --ignore-not-found --timeout="${timeout}" || true
 }
 
+delete_recoverable_statefulsets() {
+  local statefulsets=()
+  local statefulset
+
+  if [ "${recover_statefulsets}" != "true" ]; then
+    return 0
+  fi
+
+  for statefulset in zookeeper kafka redis; do
+    if kube -n "${namespace}" get statefulset "${statefulset}" >/dev/null 2>&1; then
+      statefulsets+=("${statefulset}")
+    fi
+  done
+
+  if [ "${#statefulsets[@]}" -eq 0 ]; then
+    echo "No recoverable StatefulSets found in namespace ${namespace}."
+    return 0
+  fi
+
+  echo "Deleting recoverable StatefulSets before Helm upgrade: ${statefulsets[*]}"
+  kube -n "${namespace}" delete statefulset "${statefulsets[@]}" --ignore-not-found --timeout="${timeout}" || true
+}
+
 status="$(release_status)"
 manifest_file=""
 
 if [ "${status}" = "deployed" ]; then
-  echo "Helm release ${release} is deployed; checking for recoverable Pending PVCs."
+  echo "Helm release ${release} is deployed; checking for recoverable StatefulSets and Pending PVCs."
+  delete_recoverable_statefulsets
   delete_pvcs
   exit 0
 fi

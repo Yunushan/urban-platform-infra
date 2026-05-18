@@ -52,10 +52,11 @@ make deploy-auto \
 
 `deploy-auto` installs local-path storage when needed, recovers a failed or
 `uninstalling` `urban-platform-infra` Helm release, removes stale resources from
-that release, and deletes only Pending PVCs by default, even when the previous
-Helm release is already `deployed`. It uses one lab replica and compact
-local-path storage sizes and classes for PostgreSQL, Elasticsearch, Kafka,
-ZooKeeper, and Redis. Bound PVCs are preserved unless
+that release, recreates the lab Kafka/ZooKeeper/Redis StatefulSets when their
+storage template must change, and deletes only Pending PVCs by default, even
+when the previous Helm release is already `deployed`. It uses one lab replica
+and compact local-path storage sizes and classes for PostgreSQL, Elasticsearch,
+Kafka, ZooKeeper, and Redis. Bound PVCs are preserved unless
 `DEPLOY_RECOVER_DELETE_PVCS=true` is set explicitly. It also disables Redis
 Sentinel for the one-replica lab profile and skips sanitized placeholder
 workloads whose images are still `example-app-*`, avoiding wasted memory and

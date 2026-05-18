@@ -29,6 +29,8 @@ HELM ?= helm
 HELM_INSTALL_SCRIPT ?= scripts/tools/install-helm.sh
 HELM_RECOVERY_SCRIPT ?= scripts/tools/recover-helm-release.sh
 HELM_TIMEOUT ?= 10m
+HELM_DEPLOY_RETRIES ?= 3
+HELM_DEPLOY_RETRY_DELAY ?= 20
 HELM_EXTRA_ARGS ?=
 HELMFILE ?= helmfile
 HELMFILE_CONFIG ?= deploy/helmfile.yaml.gotmpl
@@ -50,6 +52,7 @@ DEPLOY_RECOVER_FAILED_RELEASE ?= false
 DEPLOY_RECOVER_STALE_RESOURCES ?= true
 DEPLOY_RECOVER_PENDING_PVCS ?= true
 DEPLOY_RECOVER_DELETE_PVCS ?= false
+DEPLOY_RECOVER_STATEFULSETS ?= false
 DEPLOY_LAB_STORAGE ?= false
 DEPLOY_LAB_REPLICA_OVERRIDE ?= 1
 DEPLOY_LAB_AUTOSCALING ?= false
@@ -238,6 +241,7 @@ wait-operator-crds: ## Wait until CRDs required by the default platform chart ex
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl wait --for=condition=Established crd/imagecatalogs.postgresql.cnpg.io --timeout=$(OPERATOR_CRD_TIMEOUT)
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl wait --for=condition=Established crd/elasticsearches.elasticsearch.k8s.elastic.co --timeout=$(OPERATOR_CRD_TIMEOUT)
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl wait --for=condition=Established crd/kibanas.kibana.k8s.elastic.co --timeout=$(OPERATOR_CRD_TIMEOUT)
+	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl -n cnpg-system rollout status deployment/cloudnative-pg --timeout=$(OPERATOR_CRD_TIMEOUT)
 
 install-operators: install-helmfile operator-kubeconfig ensure-storageclass ## Install optional operators/charts needed for HA data and observability profiles.
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) OPERATOR_KUBECONFIG=$(OPERATOR_KUBECONFIG) HELMFILE=$(HELMFILE) HELMFILE_CONFIG=$(HELMFILE_CONFIG) HELMFILE_SYNC_RETRIES=$(HELMFILE_SYNC_RETRIES) HELMFILE_SYNC_RETRY_DELAY=$(HELMFILE_SYNC_RETRY_DELAY) KUBECONFIG_SCRIPT=$(KUBECONFIG_SCRIPT) ENV=$(ENV) ENGINE=$(ENGINE) INVENTORY=$(INVENTORY) ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) ANSIBLE_PLAYBOOK=$(ANSIBLE_PLAYBOOK) ANSIBLE_ARGS="$(ANSIBLE_ARGS)" MIGRATION_RKE2_NODES="$(MIGRATION_RKE2_NODES)" MIGRATION_SSH_USER="$(MIGRATION_SSH_USER)" MIGRATION_SSH_KEY="$(MIGRATION_SSH_KEY)" MIGRATION_BECOME_PASSWORD_FILE="$(MIGRATION_BECOME_PASSWORD_FILE)" MIGRATION_BECOME_PASSWORD_PROMPT="$(MIGRATION_BECOME_PASSWORD_PROMPT)" MIGRATION_CLUSTER_VIP="$(if $(MIGRATION_CLUSTER_VIP),$(MIGRATION_CLUSTER_VIP),$(DEPLOY_CLUSTER_VIP))" MIGRATION_KUBERNETES_API_VIP_PORT="$(MIGRATION_KUBERNETES_API_VIP_PORT)" MIGRATION_CLUSTER_DOMAIN="$(MIGRATION_CLUSTER_DOMAIN)" MIGRATION_RKE2_VERSION="$(MIGRATION_RKE2_VERSION)" MIGRATION_KEEPALIVED_AUTH_PASS="$(MIGRATION_KEEPALIVED_AUTH_PASS)" MIGRATION_KEEPALIVED_INTERFACE="$(MIGRATION_KEEPALIVED_INTERFACE)" bash $(HELMFILE_SYNC_SCRIPT)
@@ -249,7 +253,7 @@ ensure-namespace: ## Create and label the target namespace before deploying the 
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl label namespace $(NAMESPACE) pod-security.kubernetes.io/enforce=baseline pod-security.kubernetes.io/audit=restricted pod-security.kubernetes.io/warn=restricted pod-security.kubernetes.io/enforce-version=latest pod-security.kubernetes.io/audit-version=latest pod-security.kubernetes.io/warn-version=latest --overwrite
 
 recover-helm-release: operator-kubeconfig ensure-namespace ## Recover a failed, uninstalling, or stale platform Helm release before redeploying.
-	KUBECONFIG=$(OPERATOR_KUBECONFIG) HELM=$(HELM) PROJECT=$(PROJECT) NAMESPACE=$(NAMESPACE) HELM_TIMEOUT=$(HELM_TIMEOUT) DEPLOY_RECOVER_FAILED_RELEASE=$(DEPLOY_RECOVER_FAILED_RELEASE) DEPLOY_RECOVER_STALE_RESOURCES=$(DEPLOY_RECOVER_STALE_RESOURCES) DEPLOY_RECOVER_PENDING_PVCS=$(DEPLOY_RECOVER_PENDING_PVCS) DEPLOY_RECOVER_DELETE_PVCS=$(DEPLOY_RECOVER_DELETE_PVCS) bash $(HELM_RECOVERY_SCRIPT)
+	KUBECONFIG=$(OPERATOR_KUBECONFIG) HELM=$(HELM) PROJECT=$(PROJECT) NAMESPACE=$(NAMESPACE) HELM_TIMEOUT=$(HELM_TIMEOUT) DEPLOY_RECOVER_FAILED_RELEASE=$(DEPLOY_RECOVER_FAILED_RELEASE) DEPLOY_RECOVER_STALE_RESOURCES=$(DEPLOY_RECOVER_STALE_RESOURCES) DEPLOY_RECOVER_PENDING_PVCS=$(DEPLOY_RECOVER_PENDING_PVCS) DEPLOY_RECOVER_DELETE_PVCS=$(DEPLOY_RECOVER_DELETE_PVCS) DEPLOY_RECOVER_STATEFULSETS=$(DEPLOY_RECOVER_STATEFULSETS) bash $(HELM_RECOVERY_SCRIPT)
 
 deploy-dry-run: install-helm ## Render the Helm chart without applying it.
 	$(HELM) template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f $(VALUES) -f $(TOPOLOGY_VALUES) --dry-run > rendered.yaml
@@ -270,9 +274,23 @@ release-evidence: package-chart ## Generate rendered manifest, SPDX SBOM, and ch
 	$(PYTHON) scripts/release/generate_sbom.py --chart helm/urban-platform-infra --dist dist --rendered dist/rendered.yaml --sbom dist/urban-platform-infra.spdx.json --checksums dist/SHA256SUMS
 
 deploy: install-operators ensure-namespace recover-helm-release ## Deploy/upgrade the HA application platform.
-	KUBECONFIG=$(OPERATOR_KUBECONFIG) $(HELM) upgrade --install $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) --cleanup-on-fail --timeout $(HELM_TIMEOUT) $(HELM_DEPLOY_SET_ARGS) -f $(VALUES) -f $(TOPOLOGY_VALUES) $(HELM_EXTRA_ARGS)
+	@attempt=1; \
+	while true; do \
+		echo "Running Helm upgrade/install (attempt $$attempt/$(HELM_DEPLOY_RETRIES))."; \
+		if KUBECONFIG=$(OPERATOR_KUBECONFIG) $(HELM) upgrade --install $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) --cleanup-on-fail --timeout $(HELM_TIMEOUT) $(HELM_DEPLOY_SET_ARGS) -f $(VALUES) -f $(TOPOLOGY_VALUES) $(HELM_EXTRA_ARGS); then \
+			break; \
+		fi; \
+		status=$$?; \
+		if [ "$$attempt" -ge "$(HELM_DEPLOY_RETRIES)" ]; then \
+			exit "$$status"; \
+		fi; \
+		echo "Helm upgrade failed; retrying in $(HELM_DEPLOY_RETRY_DELAY)s."; \
+		sleep "$(HELM_DEPLOY_RETRY_DELAY)"; \
+		attempt=$$((attempt + 1)); \
+	done
 
 deploy-auto: DEPLOY_RECOVER_FAILED_RELEASE = true
+deploy-auto: DEPLOY_RECOVER_STATEFULSETS = true
 deploy-auto: DEPLOY_LAB_STORAGE = true
 deploy-auto: DEPLOY_SKIP_PLACEHOLDER_WORKLOADS = true
 deploy-auto: DEPLOY_REDIS_SENTINEL = false

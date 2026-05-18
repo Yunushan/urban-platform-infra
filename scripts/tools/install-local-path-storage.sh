@@ -116,7 +116,7 @@ discover_storage_nodes() {
 emit_prepare_host_path_script() {
   cat <<'REMOTE_PREPARE_LOCAL_PATH'
 set -eu
-IFS= read -r path
+path="${1:?missing local-path storage path}"
 mkdir -p "$path"
 chmod 0777 "$path"
 if command -v chcon >/dev/null 2>&1; then
@@ -144,17 +144,17 @@ prepare_host_path_on_node() {
 
   echo "Preparing local-path host path ${host_path} on ${ssh_user}@${node}."
   if [ "${ssh_user}" = "root" ]; then
-    { printf '%s\n' "${host_path}"; emit_prepare_host_path_script; } \
-      | ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sh -s"
+    emit_prepare_host_path_script \
+      | ssh "${ssh_options[@]}" "${ssh_user}@${node}" sh -s -- "${host_path}"
   elif ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -n true" >/dev/null 2>&1; then
-    { printf '%s\n' "${host_path}"; emit_prepare_host_path_script; } \
-      | ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -n sh -s"
+    emit_prepare_host_path_script \
+      | ssh "${ssh_options[@]}" "${ssh_user}@${node}" sudo -n sh -s -- "${host_path}"
   elif [ -n "${become_password}" ]; then
-    { printf '%s\n' "${become_password}"; printf '%s\n' "${host_path}"; emit_prepare_host_path_script; } \
-      | ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -S -p '' sh -s"
+    { printf '%s\n' "${become_password}"; emit_prepare_host_path_script; } \
+      | ssh "${ssh_options[@]}" "${ssh_user}@${node}" sudo -S sh -s -- "${host_path}"
   else
-    { printf '%s\n' "${host_path}"; emit_prepare_host_path_script; } \
-      | ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -n sh -s"
+    emit_prepare_host_path_script \
+      | ssh "${ssh_options[@]}" "${ssh_user}@${node}" sudo -n sh -s -- "${host_path}"
   fi
 }
 
