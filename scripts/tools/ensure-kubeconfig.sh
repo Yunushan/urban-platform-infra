@@ -70,6 +70,23 @@ write_kubeconfig_from_node() {
   rm -f "${tmp_kubeconfig}"
 }
 
+rewrite_existing_kubeconfig_endpoint() {
+  local endpoint_host="$1"
+  local endpoint_port="$2"
+  local tmp_kubeconfig
+
+  if [ ! -s "${OPERATOR_KUBECONFIG_PATH}" ]; then
+    return 1
+  fi
+
+  tmp_kubeconfig="$(mktemp)"
+  cp "${OPERATOR_KUBECONFIG_PATH}" "${tmp_kubeconfig}"
+  sed -i -E "s#server: https://[^[:space:]]+#server: https://${endpoint_host}:${endpoint_port}#" "${tmp_kubeconfig}"
+  install -d -m 0700 "$(dirname "${OPERATOR_KUBECONFIG_PATH}")"
+  install -m 0600 "${tmp_kubeconfig}" "${OPERATOR_KUBECONFIG_PATH}"
+  rm -f "${tmp_kubeconfig}"
+}
+
 yaml_quote() {
   local value="$1"
   printf "'"
@@ -479,6 +496,72 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
   else
     kubernetes_api_port="${MIGRATION_KUBERNETES_API_VIP_PORT:-${KUBERNETES_API_VIP_PORT:-6443}}"
   fi
+
+  if [ -s "${OPERATOR_KUBECONFIG_PATH}" ]; then
+    original_kubeconfig="$(mktemp)"
+    existing_kubeconfig_ready=false
+    endpoint_specs=()
+    cp "${OPERATOR_KUBECONFIG_PATH}" "${original_kubeconfig}"
+
+    if [ -n "${explicit_cluster_vip}" ] || [ -n "${discovered_cluster_vip}" ]; then
+      endpoint_specs+=("${cluster_vip}:${kubernetes_api_port}")
+    fi
+    for node in "${rke2_nodes[@]}"; do
+      node="${node//[[:space:]]/}"
+      if [ -n "${node}" ]; then
+        endpoint_specs+=("${node}:6443")
+      fi
+    done
+
+    for endpoint_spec in "${endpoint_specs[@]}"; do
+      endpoint_host="${endpoint_spec%:*}"
+      endpoint_port="${endpoint_spec##*:}"
+      if [ -z "${endpoint_host}" ] || [ -z "${endpoint_port}" ]; then
+        continue
+      fi
+      echo "Trying existing operator kubeconfig against https://${endpoint_host}:${endpoint_port}"
+      if rewrite_existing_kubeconfig_endpoint "${endpoint_host}" "${endpoint_port}" && kubernetes_api_ready; then
+        echo "Operator kubeconfig ready: ${OPERATOR_KUBECONFIG_PATH} (endpoint https://${endpoint_host}:${endpoint_port})"
+        existing_kubeconfig_ready=true
+        break
+      fi
+    done
+
+    if [ "${existing_kubeconfig_ready}" != "true" ] && [ "${MIGRATION_KUBE_API_TUNNEL:-auto}" != "false" ]; then
+      echo "Existing kubeconfig was not ready through direct endpoints; trying SSH tunnel fallback."
+      for tunnel_node in "${rke2_nodes[@]}"; do
+        tunnel_node="${tunnel_node//[[:space:]]/}"
+        if [ -z "${tunnel_node}" ]; then
+          continue
+        fi
+        if ! tunnel_port="$(start_kubernetes_api_tunnel "${tunnel_node}" "6443")"; then
+          echo "Could not open an SSH tunnel through ${tunnel_node}; trying the next node." >&2
+          continue
+        fi
+        if rewrite_existing_kubeconfig_endpoint "127.0.0.1" "${tunnel_port}" && kubernetes_api_ready; then
+          echo "Operator kubeconfig ready: ${OPERATOR_KUBECONFIG_PATH} (endpoint https://127.0.0.1:${tunnel_port} via SSH tunnel ${tunnel_node})"
+          existing_kubeconfig_ready=true
+          break
+        fi
+        echo "Kubernetes API was not ready through SSH tunnel via ${tunnel_node}; trying the next node." >&2
+        stop_kubernetes_api_tunnel "${tunnel_node}" "6443" "${tunnel_port}"
+      done
+    fi
+
+    if [ "${existing_kubeconfig_ready}" = "true" ]; then
+      rm -f "${original_kubeconfig}"
+      exit 0
+    fi
+
+    install -m 0600 "${original_kubeconfig}" "${OPERATOR_KUBECONFIG_PATH}"
+    rm -f "${original_kubeconfig}"
+    if [ "${MIGRATION_AUTO_REPAIR_CLUSTER:-false}" != "true" ]; then
+      echo "Existing operator kubeconfig could not reach the Kubernetes API through the VIP, node APIs, or SSH tunnel fallback." >&2
+      echo "Set MIGRATION_SSH_USER/MIGRATION_SSH_KEY if SSH tunneling is required, or fix the VIP/API path and rerun." >&2
+      exit 1
+    fi
+  fi
+
   ansible_user_for_nodes="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
   cluster_domain="${MIGRATION_CLUSTER_DOMAIN:-${CLUSTER_DOMAIN:-}}"
   if [ -z "${cluster_domain}" ]; then
