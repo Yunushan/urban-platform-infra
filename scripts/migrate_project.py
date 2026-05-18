@@ -527,6 +527,31 @@ def cleanup_operator_archives(archive_dir: Path) -> None:
         print(f"Removed {removed} local preload archive(s) from {archive_dir}.")
 
 
+def save_image_archive(
+    args: argparse.Namespace,
+    archive_path: Path,
+    target_image: str,
+    retry_build: tuple[Path, str] | None = None,
+) -> None:
+    if archive_path.exists():
+        archive_path.unlink()
+    try:
+        run_command(container_command(args, "save", "-o", str(archive_path), target_image))
+        return
+    except subprocess.CalledProcessError:
+        if archive_path.exists():
+            archive_path.unlink()
+        if retry_build is None:
+            raise
+
+    context, dockerfile = retry_build
+    print(f"Archive save failed for {target_image}; rebuilding without cache and retrying once.")
+    run_command(container_command(args, "build", "--no-cache", "-t", target_image, "-f", dockerfile, "."), cwd=context)
+    if archive_path.exists():
+        archive_path.unlink()
+    run_command(container_command(args, "save", "-o", str(archive_path), target_image))
+
+
 def resolve_build_source(compose_path: Path, build: Any) -> tuple[Path, str, str | None]:
     if isinstance(build, dict):
         context_value = str(build.get("context", "."))
@@ -1105,6 +1130,7 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
         target_image = local_import_image(args, record)
         image_refs = containerd_import_image_refs(target_image)
         compose_path = relative_compose_file(project_path, record.file)
+        retry_build: tuple[Path, str] | None = None
         try:
             if preload_streaming and all_preload_nodes_have_image(args, image_refs):
                 print(f"Image {image_refs[0]} is already present on all RKE2 nodes; skipping build, archive save, and upload.")
@@ -1122,6 +1148,7 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                 if not dockerfile_path.exists() or not dockerfile_path.is_file():
                     skipped.append(f"{record.file}::{record.name} (Dockerfile does not exist: {dockerfile_path})")
                     continue
+                retry_build = (context, dockerfile)
                 run_command(container_command(args, "build", "-t", target_image, "-f", dockerfile, "."), cwd=context)
             elif record.image:
                 source_ready, source_cleanup_images = ensure_source_image(args, record)
@@ -1142,9 +1169,7 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                     if args.cleanup_operator_images:
                         cleanup_operator_container_tags(args, [target_image])
                     continue
-                if archive_path.exists():
-                    archive_path.unlink()
-                run_command(container_command(args, "save", "-o", str(archive_path), target_image))
+                save_image_archive(args, archive_path, target_image, retry_build)
                 if preload_streaming:
                     copied = preload_archives_to_nodes(
                         args,

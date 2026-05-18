@@ -126,7 +126,9 @@ Image migration has three modes:
   RKE2 image directory; each archive is imported and removed before the next
   archive is copied. On retries, candidates already present on every RKE2 node
   skip build, archive save, and upload; nodes that already have a partially
-  migrated image skip that archive upload.
+  migrated image skip that archive upload. If the operator container cache has a
+  corrupted build layer and archive save fails, build-only candidates are rebuilt
+  once with `--no-cache` before failing the import.
 - `MIGRATION_IMAGE_MODE=skip` leaves application image movement out of the
   migration run. Use this when keeping the existing Compose deployment running
   temporarily behind external routing.
