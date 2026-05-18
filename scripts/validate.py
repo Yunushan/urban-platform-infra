@@ -461,6 +461,8 @@ for kubeconfig_script_token in [
     'MIGRATION_AUTO_REPAIR_CLUSTER',
     'MIGRATION_KEEPALIVED_AUTH_PASS',
     'MIGRATION_KEEPALIVED_INTERFACE',
+    'recover_become_password_from_fallback_inventory',
+    'remote_sudo_sh',
     'rewrite_existing_kubeconfig_endpoint',
     'kubernetes_api_ready_verbose',
     'tls-server-name',

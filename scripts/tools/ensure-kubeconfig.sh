@@ -36,10 +36,18 @@ write_kubeconfig_from_node() {
   become_password="$(migration_become_password)"
   tmp_kubeconfig="$(mktemp)"
   echo "Fetching RKE2 kubeconfig directly from ${ssh_user}@${node}."
-  if [ -z "${remote_kubeconfig_command}" ] && ! ssh "${ssh_options[@]}" "${ssh_user}@${node}" "test -e /etc/rancher/rke2/rke2.yaml"; then
-    rm -f "${tmp_kubeconfig}"
-    echo "RKE2 kubeconfig is not present on ${node} yet; this is normal before the first server is installed." >&2
-    return 2
+  if [ -z "${remote_kubeconfig_command}" ]; then
+    if [ -n "${become_password}" ]; then
+      if ! printf '%s\n' "${become_password}" | ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -S -p '' test -e /etc/rancher/rke2/rke2.yaml"; then
+        rm -f "${tmp_kubeconfig}"
+        echo "RKE2 kubeconfig is not present on ${node} yet; this is normal before the first server is installed." >&2
+        return 2
+      fi
+    elif ! ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -n test -e /etc/rancher/rke2/rke2.yaml"; then
+      rm -f "${tmp_kubeconfig}"
+      echo "RKE2 kubeconfig is not present on ${node} yet, or ${ssh_user} cannot check it without sudo." >&2
+      return 2
+    fi
   fi
   if [ -n "${remote_kubeconfig_command}" ]; then
     if ! printf '%s\n' "${remote_kubeconfig_command}" | ssh "${ssh_options[@]}" "${ssh_user}@${node}" 'sh -s' > "${tmp_kubeconfig}"; then
@@ -140,6 +148,33 @@ generate_keepalived_auth_pass() {
   return 1
 }
 
+recover_become_password_from_fallback_inventory() {
+  local recovered_password
+
+  if [ -n "${MIGRATION_BECOME_PASSWORD:-}" ] || [ -n "${MIGRATION_BECOME_PASSWORD_FILE:-}" ]; then
+    return 0
+  fi
+  if [ ! -r "${FALLBACK_INVENTORY_PATH}" ]; then
+    return 0
+  fi
+
+  recovered_password="$(
+    sed -nE "s/^[[:space:]]*ansible_become_password:[[:space:]]*'(.*)'[[:space:]]*$/\1/p" "${FALLBACK_INVENTORY_PATH}" \
+      | sed "s/''/'/g" \
+      | head -n 1
+  )"
+  if [ -z "${recovered_password}" ]; then
+    recovered_password="$(
+      sed -nE "s/^[[:space:]]*ansible_become_password:[[:space:]]*([^[:space:]#]+).*$/\1/p" "${FALLBACK_INVENTORY_PATH}" \
+        | head -n 1
+    )"
+  fi
+  if [ -n "${recovered_password}" ]; then
+    export MIGRATION_BECOME_PASSWORD="${recovered_password}"
+    echo "Recovered MIGRATION_BECOME_PASSWORD from ${FALLBACK_INVENTORY_PATH}."
+  fi
+}
+
 ssh_options_for_node() {
   printf '%s\n' "-o"
   printf '%s\n' "BatchMode=yes"
@@ -155,44 +190,47 @@ ssh_options_for_node() {
   fi
 }
 
-discover_remote_rke2_token() {
+remote_sudo_sh() {
   local node="$1"
   local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
+  local become_password
   local ssh_options=()
 
   mapfile -t ssh_options < <(ssh_options_for_node)
+  become_password="$(migration_become_password)"
 
-  ssh "${ssh_options[@]}" "${ssh_user}@${node}" 'sh -s' <<'REMOTE_DISCOVER_TOKEN' 2>/dev/null || true
-if ! sudo -n true 2>/dev/null; then
-  exit 0
-fi
+  if [ -n "${become_password}" ]; then
+    { printf '%s\n' "${become_password}"; cat; } \
+      | ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -S -p '' sh -s" 2>/dev/null || true
+  else
+    ssh "${ssh_options[@]}" "${ssh_user}@${node}" "sudo -n sh -s" 2>/dev/null || true
+  fi
+}
+
+discover_remote_rke2_token() {
+  local node="$1"
+
+  remote_sudo_sh "${node}" <<'REMOTE_DISCOVER_TOKEN'
 if [ -s /var/lib/rancher/rke2/server/node-token ]; then
-  sudo cat /var/lib/rancher/rke2/server/node-token
+  cat /var/lib/rancher/rke2/server/node-token
   exit 0
 fi
 if [ -s /var/lib/rancher/rke2/server/token ]; then
-  sudo cat /var/lib/rancher/rke2/server/token
+  cat /var/lib/rancher/rke2/server/token
   exit 0
 fi
 if [ -s /etc/rancher/rke2/config.yaml ]; then
-  sudo awk -F': *' '/^token:/ {print $2; exit}' /etc/rancher/rke2/config.yaml
+  awk -F': *' '/^token:/ {print $2; exit}' /etc/rancher/rke2/config.yaml
 fi
 REMOTE_DISCOVER_TOKEN
 }
 
 discover_remote_cluster_vip() {
   local node="$1"
-  local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
-  local ssh_options=()
 
-  mapfile -t ssh_options < <(ssh_options_for_node)
-
-  ssh "${ssh_options[@]}" "${ssh_user}@${node}" 'sh -s' <<'REMOTE_DISCOVER_CLUSTER_VIP' 2>/dev/null || true
-if ! sudo -n true 2>/dev/null; then
-  exit 0
-fi
+  remote_sudo_sh "${node}" <<'REMOTE_DISCOVER_CLUSTER_VIP'
 if [ -s /etc/rancher/rke2/config.yaml ]; then
-  sudo awk '
+  awk '
     /^server:/ {
       value=$0
       sub(/^[^:]+:[[:space:]]*/, "", value)
@@ -211,10 +249,11 @@ discover_remote_rke2_version() {
   local node="$1"
   local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
   local ssh_options=()
+  local version
 
   mapfile -t ssh_options < <(ssh_options_for_node)
 
-  ssh "${ssh_options[@]}" "${ssh_user}@${node}" 'sh -s' <<'REMOTE_DISCOVER_VERSION' 2>/dev/null || true
+  version="$(ssh "${ssh_options[@]}" "${ssh_user}@${node}" 'sh -s' <<'REMOTE_DISCOVER_VERSION' 2>/dev/null || true
 if command -v rke2 >/dev/null 2>&1; then
   rke2 --version
 elif [ -x /usr/local/bin/rke2 ]; then
@@ -223,65 +262,51 @@ elif [ -x /usr/bin/rke2 ]; then
   /usr/bin/rke2 --version
 elif [ -x /var/lib/rancher/rke2/bin/rke2 ]; then
   /var/lib/rancher/rke2/bin/rke2 --version
-elif sudo -n true 2>/dev/null; then
-  if sudo test -x /usr/local/bin/rke2; then
-    sudo /usr/local/bin/rke2 --version
-  elif sudo test -x /usr/bin/rke2; then
-    sudo /usr/bin/rke2 --version
-  elif sudo test -x /var/lib/rancher/rke2/bin/rke2; then
-    sudo /var/lib/rancher/rke2/bin/rke2 --version
-  fi
 fi
 REMOTE_DISCOVER_VERSION
+)"
+  if [ -n "${version}" ]; then
+    printf '%s\n' "${version}"
+    return 0
+  fi
+
+  remote_sudo_sh "${node}" <<'REMOTE_DISCOVER_VERSION_WITH_SUDO'
+if [ -x /usr/local/bin/rke2 ]; then
+  /usr/local/bin/rke2 --version
+elif [ -x /usr/bin/rke2 ]; then
+  /usr/bin/rke2 --version
+elif [ -x /var/lib/rancher/rke2/bin/rke2 ]; then
+  /var/lib/rancher/rke2/bin/rke2 --version
+fi
+REMOTE_DISCOVER_VERSION_WITH_SUDO
 }
 
 discover_remote_cluster_domain() {
   local node="$1"
-  local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
-  local ssh_options=()
 
-  mapfile -t ssh_options < <(ssh_options_for_node)
-
-  ssh "${ssh_options[@]}" "${ssh_user}@${node}" 'sh -s' <<'REMOTE_DISCOVER_DOMAIN' 2>/dev/null || true
-if ! sudo -n true 2>/dev/null; then
-  exit 0
-fi
+  remote_sudo_sh "${node}" <<'REMOTE_DISCOVER_DOMAIN'
 if [ -s /etc/rancher/rke2/config.yaml ]; then
-  sudo awk -F': *' '/^cluster-domain:/ {print $2; exit}' /etc/rancher/rke2/config.yaml
+  awk -F': *' '/^cluster-domain:/ {print $2; exit}' /etc/rancher/rke2/config.yaml
 fi
 REMOTE_DISCOVER_DOMAIN
 }
 
 discover_remote_keepalived_auth_pass() {
   local node="$1"
-  local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
-  local ssh_options=()
 
-  mapfile -t ssh_options < <(ssh_options_for_node)
-
-  ssh "${ssh_options[@]}" "${ssh_user}@${node}" 'sh -s' <<'REMOTE_DISCOVER_KEEPALIVED_AUTH' 2>/dev/null || true
-if ! sudo -n true 2>/dev/null; then
-  exit 0
-fi
+  remote_sudo_sh "${node}" <<'REMOTE_DISCOVER_KEEPALIVED_AUTH'
 if [ -s /etc/keepalived/keepalived.conf ]; then
-  sudo awk '/^[[:space:]]*auth_pass[[:space:]]+/ {print $2; exit}' /etc/keepalived/keepalived.conf
+  awk '/^[[:space:]]*auth_pass[[:space:]]+/ {print $2; exit}' /etc/keepalived/keepalived.conf
 fi
 REMOTE_DISCOVER_KEEPALIVED_AUTH
 }
 
 discover_remote_keepalived_interface() {
   local node="$1"
-  local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
-  local ssh_options=()
 
-  mapfile -t ssh_options < <(ssh_options_for_node)
-
-  ssh "${ssh_options[@]}" "${ssh_user}@${node}" 'sh -s' <<'REMOTE_DISCOVER_KEEPALIVED_INTERFACE' 2>/dev/null || true
-if ! sudo -n true 2>/dev/null; then
-  exit 0
-fi
+  remote_sudo_sh "${node}" <<'REMOTE_DISCOVER_KEEPALIVED_INTERFACE'
 if [ -s /etc/keepalived/keepalived.conf ]; then
-  interface="$(sudo awk '/^[[:space:]]*interface[[:space:]]+/ {print $2; exit}' /etc/keepalived/keepalived.conf)"
+  interface="$(awk '/^[[:space:]]*interface[[:space:]]+/ {print $2; exit}' /etc/keepalived/keepalived.conf)"
   if [ -n "${interface}" ]; then
     echo "${interface}"
     exit 0
@@ -503,21 +528,12 @@ stop_kubernetes_api_tunnel() {
 
 show_remote_rke2_diagnostics() {
   local node="$1"
-  local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
-  local ssh_options=()
-
-  mapfile -t ssh_options < <(ssh_options_for_node)
 
   echo "Remote RKE2 diagnostics for ${node}:" >&2
-  ssh "${ssh_options[@]}" "${ssh_user}@${node}" 'sh -s' <<'REMOTE_DIAGNOSTICS' >&2 || true
+  remote_sudo_sh "${node}" <<'REMOTE_DIAGNOSTICS' >&2 || true
 set -u
-if ! sudo -n true 2>/dev/null; then
-  echo "passwordless sudo is not available for this SSH user"
-  exit 0
-fi
-
 for service in rke2-server rke2-agent; do
-  state="$(sudo systemctl is-active "${service}" 2>/dev/null || true)"
+  state="$(systemctl is-active "${service}" 2>/dev/null || true)"
   if [ -n "${state}" ] && [ "${state}" != "unknown" ]; then
     echo "${service}: ${state}"
   fi
@@ -525,16 +541,16 @@ done
 
 if command -v ss >/dev/null 2>&1; then
   echo "listening RKE2 API ports:"
-  sudo ss -ltnp 2>/dev/null | awk 'NR == 1 || /:6443/ || /:9345/' || true
+  ss -ltnp 2>/dev/null | awk 'NR == 1 || /:6443/ || /:9345/' || true
 fi
 
 echo "local /readyz probe:"
 if [ -x /var/lib/rancher/rke2/bin/kubectl ]; then
-  sudo /var/lib/rancher/rke2/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get --raw=/readyz --request-timeout=10s || true
+  /var/lib/rancher/rke2/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get --raw=/readyz --request-timeout=10s || true
 elif command -v kubectl >/dev/null 2>&1; then
-  sudo kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get --raw=/readyz --request-timeout=10s || true
+  kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get --raw=/readyz --request-timeout=10s || true
 elif command -v curl >/dev/null 2>&1; then
-  sudo curl -ksS --max-time 10 https://127.0.0.1:6443/readyz || true
+  curl -ksS --max-time 10 https://127.0.0.1:6443/readyz || true
 else
   echo "kubectl/curl is not available"
 fi
@@ -561,6 +577,7 @@ if [ ! -f "${INVENTORY_PATH}" ] && [ -z "${MIGRATION_RKE2_NODES:-}" ] && [ -f "$
     echo "Recovered MIGRATION_RKE2_NODES from ${FALLBACK_INVENTORY_PATH}: ${MIGRATION_RKE2_NODES}"
   fi
 fi
+recover_become_password_from_fallback_inventory
 
 if [ ! -f "${INVENTORY_PATH}" ]; then
   if [ -z "${MIGRATION_RKE2_NODES:-}" ]; then
@@ -713,7 +730,7 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
   if [ -z "${rke2_token}" ]; then
     if [ "${rke2_version_source}" = "discovered" ]; then
       echo "RKE2 is already installed on ${first_rke2_node}, but the existing cluster token could not be read." >&2
-      echo "Fix passwordless sudo for ${ansible_user_for_nodes}; existing clusters must reuse the real RKE2 token." >&2
+      echo "Fix passwordless sudo for ${ansible_user_for_nodes} or set MIGRATION_BECOME_PASSWORD_FILE; existing clusters must reuse the real RKE2 token." >&2
       exit 1
     fi
     rke2_token="$(generate_rke2_token)"
