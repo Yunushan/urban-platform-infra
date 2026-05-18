@@ -637,9 +637,12 @@ for networkpolicy_token in [
     'urban-platform-cnpg-operator-ingress',
     '.Values.networkPolicy.cloudnativePgOperator.namespace',
     'app.kubernetes.io/managed-by: cloudnative-pg',
+    'urban-platform-eck-operator-ingress',
+    '.Values.networkPolicy.eckOperator.namespace',
+    'common.k8s.elastic.co/type: elasticsearch',
 ]:
     if networkpolicy_token not in networkpolicy_template_text:
-        errors.append(f'NetworkPolicy template missing CNPG operator ingress token: {networkpolicy_token}')
+        errors.append(f'NetworkPolicy template missing operator ingress token: {networkpolicy_token}')
 
 makefile_text = (ROOT / 'Makefile').read_text(encoding='utf-8')
 if 'CONFIRM_PROD' not in makefile_text:

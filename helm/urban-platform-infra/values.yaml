@@ -121,6 +121,11 @@ networkPolicy:
     ports:
     - 8000
     - 5432
+  eckOperator:
+    enabled: true
+    namespace: elastic-system
+    ports:
+    - 9200
   dns:
     enabled: true
     namespace: kube-system

@@ -29,6 +29,8 @@ NetworkPolicy is split into named policies:
 - `urban-platform-dns-egress` allows DNS only to the configured cluster DNS selector.
 - `urban-platform-cnpg-operator-ingress` allows the CloudNativePG operator to
   reach database instance-manager and PostgreSQL ports.
+- `urban-platform-eck-operator-ingress` allows the ECK operator to reach
+  Elasticsearch HTTP for health, license, and orchestration reconciliation.
 - `urban-platform-kubernetes-api-egress` allows controller and bootstrap pods to
   reach the Kubernetes API on TCP 443/6443.
 - `urban-platform-external-web-egress` allows configurable outbound TCP ports for package downloads or webhook access.

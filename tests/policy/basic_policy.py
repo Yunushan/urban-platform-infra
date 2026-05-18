@@ -92,6 +92,7 @@ expected_network_policies = {
     'urban-platform-same-namespace',
     'urban-platform-dns-egress',
     'urban-platform-cnpg-operator-ingress',
+    'urban-platform-eck-operator-ingress',
     'urban-platform-kubernetes-api-egress',
 }
 missing_network_policies = sorted(expected_network_policies - network_policies)
