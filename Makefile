@@ -59,6 +59,14 @@ DEPLOY_LAB_REPLICA_OVERRIDE ?= 1
 DEPLOY_LAB_AUTOSCALING ?= false
 DEPLOY_LAB_TOPOLOGY_SPREAD ?= false
 DEPLOY_SKIP_PLACEHOLDER_WORKLOADS ?= false
+DEPLOY_ROOT_WORKLOAD ?= app-27
+DEPLOY_ROOT_IMAGE_REPOSITORY ?=
+DEPLOY_ROOT_IMAGE_TAG ?=
+DEPLOY_ROOT_CONTAINER_PORT ?=
+DEPLOY_ROOT_SERVICE_PORT ?=
+DEPLOY_ROOT_PROBE_PORT ?=
+DEPLOY_ROOT_INGRESS_ENABLED ?= true
+DEPLOY_ROOT_INGRESS_PATH ?= /
 DEPLOY_DATABASE_STORAGE_SIZE ?= 2Gi
 DEPLOY_DATABASE_STORAGE_CLASS ?= $(LOCAL_PATH_STORAGE_CLASS)
 DEPLOY_ELASTICSEARCH_STORAGE ?= 5Gi
@@ -123,6 +131,13 @@ HELM_DEPLOY_SET_ARGS = \
 	$(if $(DEPLOY_TLS_SECRET_NAME),--set ingress.tls.secretName=$(DEPLOY_TLS_SECRET_NAME),) \
 	$(if $(DEPLOY_TLS_CREATE_SECRET),--set ingress.tls.createSecret=$(DEPLOY_TLS_CREATE_SECRET),) \
 	$(if $(filter true,$(DEPLOY_SKIP_PLACEHOLDER_WORKLOADS)),--set global.skipPlaceholderWorkloads=true,) \
+	$(if $(DEPLOY_ROOT_IMAGE_REPOSITORY),--set workloads.$(DEPLOY_ROOT_WORKLOAD).image.repository=$(DEPLOY_ROOT_IMAGE_REPOSITORY),) \
+	$(if $(DEPLOY_ROOT_IMAGE_TAG),--set-string workloads.$(DEPLOY_ROOT_WORKLOAD).image.tag=$(DEPLOY_ROOT_IMAGE_TAG),) \
+	$(if $(DEPLOY_ROOT_CONTAINER_PORT),--set 'workloads.$(DEPLOY_ROOT_WORKLOAD).ports[0].containerPort=$(DEPLOY_ROOT_CONTAINER_PORT)',) \
+	$(if $(DEPLOY_ROOT_SERVICE_PORT),--set 'workloads.$(DEPLOY_ROOT_WORKLOAD).ports[0].servicePort=$(DEPLOY_ROOT_SERVICE_PORT)',) \
+	$(if $(DEPLOY_ROOT_PROBE_PORT),--set workloads.$(DEPLOY_ROOT_WORKLOAD).probe.port=$(DEPLOY_ROOT_PROBE_PORT),) \
+	$(if $(DEPLOY_ROOT_INGRESS_ENABLED),--set workloads.$(DEPLOY_ROOT_WORKLOAD).ingress.enabled=$(DEPLOY_ROOT_INGRESS_ENABLED),) \
+	$(if $(DEPLOY_ROOT_INGRESS_PATH),--set workloads.$(DEPLOY_ROOT_WORKLOAD).ingress.path=$(DEPLOY_ROOT_INGRESS_PATH),) \
 	$(if $(filter true,$(DEPLOY_LAB_STORAGE)),--set global.replicaOverride=$(DEPLOY_LAB_REPLICA_OVERRIDE) --set global.defaultReplicas=$(DEPLOY_LAB_REPLICA_OVERRIDE) --set autoscaling.enabled=$(DEPLOY_LAB_AUTOSCALING) --set global.scheduling.topologySpread=$(DEPLOY_LAB_TOPOLOGY_SPREAD) --set databases.storageOverride.size=$(DEPLOY_DATABASE_STORAGE_SIZE) --set databases.storageOverride.className=$(DEPLOY_DATABASE_STORAGE_CLASS) --set 'observability.elasticsearch.nodeSets[0].storage=$(DEPLOY_ELASTICSEARCH_STORAGE)' --set messaging.kafka.storage.size=$(DEPLOY_KAFKA_STORAGE) --set messaging.kafka.storage.className=$(DEPLOY_DATABASE_STORAGE_CLASS) --set messaging.kafka.zookeeper.storage.size=$(DEPLOY_ZOOKEEPER_STORAGE) --set messaging.kafka.zookeeper.storage.className=$(DEPLOY_DATABASE_STORAGE_CLASS) --set messaging.redis.storage.size=$(DEPLOY_REDIS_STORAGE) --set messaging.redis.storage.className=$(DEPLOY_DATABASE_STORAGE_CLASS) --set messaging.redis.sentinel.enabled=$(DEPLOY_REDIS_SENTINEL),)
 
 define require_prod_confirmation
