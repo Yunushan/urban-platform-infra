@@ -574,6 +574,8 @@ databases:
       image:
         repository: timescale/timescaledb
         tag: 2.26.4-pg18
+      postgresUID: 70
+      postgresGID: 70
       imageCatalogRef:
         kind: ImageCatalog
         name: timescaledb

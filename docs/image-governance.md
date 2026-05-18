@@ -69,7 +69,9 @@ Kafka remains on the latest ZooKeeper-compatible Confluent Platform 7.9.x line. 
 
 The TimescaleDB tag does not start with a PostgreSQL major version, so the Helm
 chart declares a CloudNativePG `ImageCatalog` entry with `major: 18` and has the
-TimescaleDB `Cluster` reference that catalog.
+TimescaleDB `Cluster` reference that catalog. The image is based on the Alpine
+variant of the official Postgres image, so the TimescaleDB cluster overrides the
+global CNPG UID/GID defaults and runs PostgreSQL as UID/GID `70`.
 
 ## References
 

@@ -184,6 +184,8 @@ if timescaledb_catalog_ref.get('kind') != 'ImageCatalog' or timescaledb_catalog_
 timescaledb_catalog = values.get('databases', {}).get('imageCatalogs', {}).get('timescaledb', {})
 if timescaledb_catalog.get('enabled') is not True:
     errors.append('TimescaleDB CNPG ImageCatalog must be enabled by default')
+if timescaledb_values.get('postgresUID') != 70 or timescaledb_values.get('postgresGID') != 70:
+    errors.append('TimescaleDB CNPG cluster must run the Alpine postgres user as UID/GID 70')
 database_values = values.get('databases', {})
 if database_values.get('postgresUID') != 999 or database_values.get('postgresGID') != 999:
     errors.append('CNPG database defaults must run Docker Hub Postgres-family images as UID/GID 999')
