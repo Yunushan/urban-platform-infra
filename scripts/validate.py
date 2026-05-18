@@ -653,6 +653,7 @@ for makefile_helm_token in [
     'DEPLOY_RECOVER_FAILED_RELEASE',
     'deploy-auto:',
     'DEPLOY_LAB_STORAGE',
+    'DEPLOY_LAB_REPLICA_OVERRIDE',
     'wait-operator-crds:',
     '$(HELMFILE) -f $(HELMFILE_CONFIG) sync',
     'KUBECONFIG=$(OPERATOR_KUBECONFIG) $(HELMFILE)',
@@ -1082,6 +1083,25 @@ for database_token in [
 monitoring_services_text = (ROOT / 'helm/urban-platform-infra/templates/monitoring-servicemonitors.yaml').read_text(encoding='utf-8')
 if 'ServiceMonitor' not in monitoring_services_text or 'namespaceSelector' not in monitoring_services_text:
     errors.append('Monitoring ServiceMonitor template must define namespace-scoped generic targets')
+kafka_template_text = (ROOT / 'helm/urban-platform-infra/templates/messaging-kafka.yaml').read_text(encoding='utf-8')
+for kafka_template_token in [
+    '$zookeeperReplicas',
+    '$kafkaReplicas',
+    '$zookeeperServers',
+    '$zookeeperConnect',
+    '$kafkaReplicationFactor',
+    '$kafkaMinIsr',
+]:
+    if kafka_template_token not in kafka_template_text:
+        errors.append(f'Kafka template missing lab replica-aware token: {kafka_template_token}')
+redis_template_text = (ROOT / 'helm/urban-platform-infra/templates/redis.yaml').read_text(encoding='utf-8')
+for redis_template_token in [
+    '$redisReplicas',
+    '$sentinelQuorum',
+    'sentinel monitor mymaster',
+]:
+    if redis_template_token not in redis_template_text:
+        errors.append(f'Redis template missing lab replica-aware token: {redis_template_token}')
 status_script = (ROOT / 'scripts/health/status.sh').read_text(encoding='utf-8')
 for status_token in ['prometheusrules.monitoring.coreos.com', 'servicemonitors.monitoring.coreos.com', 'observability']:
     if status_token not in status_script:

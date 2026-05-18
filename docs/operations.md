@@ -47,9 +47,10 @@ make deploy-auto \
 
 `deploy-auto` installs local-path storage when needed, recovers a failed or
 `uninstalling` `urban-platform-infra` Helm release, removes stale resources from
-that release, and deletes only Pending PVCs by default. It uses compact lab
-storage sizes for PostgreSQL, Elasticsearch, Kafka, ZooKeeper, and Redis. Bound
-PVCs are preserved unless `DEPLOY_RECOVER_DELETE_PVCS=true` is set explicitly.
+that release, and deletes only Pending PVCs by default. It uses one lab replica
+and compact storage sizes for PostgreSQL, Elasticsearch, Kafka, ZooKeeper, and
+Redis. Bound PVCs are preserved unless `DEPLOY_RECOVER_DELETE_PVCS=true` is set
+explicitly.
 If the VIP kubeconfig times out after `import-auto`, the kubeconfig helper reuses
 the temporary migration inventory and falls back to an SSH tunnel to the RKE2 API.
 If `/tmp/urban-platform-import-inventory.yml` is not present, pass

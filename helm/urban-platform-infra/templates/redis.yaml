@@ -1,4 +1,6 @@
 {{- if .Values.messaging.redis.enabled }}
+{{- $redisReplicas := int (include "cip.replicaCount" (list . (.Values.messaging.redis.replicas | default 3))) }}
+{{- $sentinelQuorum := int (min 2 $redisReplicas) }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -11,7 +13,7 @@ data:
     protected-mode no
   sentinel.conf: |
     port 26379
-    sentinel monitor mymaster redis-0.redis-headless.{{ include "cip.namespace" . }}.svc.cluster.local 6379 2
+    sentinel monitor mymaster redis-0.redis-headless.{{ include "cip.namespace" . }}.svc.cluster.local 6379 {{ $sentinelQuorum }}
     sentinel down-after-milliseconds mymaster 5000
     sentinel failover-timeout mymaster 10000
     sentinel parallel-syncs mymaster 1
@@ -44,7 +46,7 @@ metadata:
     app.kubernetes.io/name: redis
 spec:
   serviceName: redis-headless
-  replicas: {{ include "cip.replicaCount" (list . (.Values.messaging.redis.replicas | default 3)) }}
+  replicas: {{ $redisReplicas }}
   selector:
     matchLabels:
       app.kubernetes.io/name: redis

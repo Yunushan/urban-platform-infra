@@ -46,6 +46,9 @@ DEPLOY_RECOVER_STALE_RESOURCES ?= true
 DEPLOY_RECOVER_PENDING_PVCS ?= true
 DEPLOY_RECOVER_DELETE_PVCS ?= false
 DEPLOY_LAB_STORAGE ?= false
+DEPLOY_LAB_REPLICA_OVERRIDE ?= 1
+DEPLOY_LAB_AUTOSCALING ?= false
+DEPLOY_LAB_TOPOLOGY_SPREAD ?= false
 DEPLOY_DATABASE_STORAGE_SIZE ?= 2Gi
 DEPLOY_DATABASE_STORAGE_CLASS ?= $(LOCAL_PATH_STORAGE_CLASS)
 DEPLOY_ELASTICSEARCH_STORAGE ?= 5Gi
@@ -107,7 +110,7 @@ HELM_DEPLOY_SET_ARGS = \
 	$(if $(DEPLOY_CLUSTER_VIP),--set global.cluster.vip=$(DEPLOY_CLUSTER_VIP),) \
 	$(if $(DEPLOY_TLS_SECRET_NAME),--set ingress.tls.secretName=$(DEPLOY_TLS_SECRET_NAME),) \
 	$(if $(DEPLOY_TLS_CREATE_SECRET),--set ingress.tls.createSecret=$(DEPLOY_TLS_CREATE_SECRET),) \
-	$(if $(filter true,$(DEPLOY_LAB_STORAGE)),--set databases.storageOverride.size=$(DEPLOY_DATABASE_STORAGE_SIZE) --set databases.storageOverride.className=$(DEPLOY_DATABASE_STORAGE_CLASS) --set 'observability.elasticsearch.nodeSets[0].storage=$(DEPLOY_ELASTICSEARCH_STORAGE)' --set messaging.kafka.storage.size=$(DEPLOY_KAFKA_STORAGE) --set messaging.kafka.zookeeper.storage.size=$(DEPLOY_ZOOKEEPER_STORAGE) --set messaging.redis.storage.size=$(DEPLOY_REDIS_STORAGE),)
+	$(if $(filter true,$(DEPLOY_LAB_STORAGE)),--set global.replicaOverride=$(DEPLOY_LAB_REPLICA_OVERRIDE) --set global.defaultReplicas=$(DEPLOY_LAB_REPLICA_OVERRIDE) --set autoscaling.enabled=$(DEPLOY_LAB_AUTOSCALING) --set global.scheduling.topologySpread=$(DEPLOY_LAB_TOPOLOGY_SPREAD) --set databases.storageOverride.size=$(DEPLOY_DATABASE_STORAGE_SIZE) --set databases.storageOverride.className=$(DEPLOY_DATABASE_STORAGE_CLASS) --set 'observability.elasticsearch.nodeSets[0].storage=$(DEPLOY_ELASTICSEARCH_STORAGE)' --set messaging.kafka.storage.size=$(DEPLOY_KAFKA_STORAGE) --set messaging.kafka.zookeeper.storage.size=$(DEPLOY_ZOOKEEPER_STORAGE) --set messaging.redis.storage.size=$(DEPLOY_REDIS_STORAGE),)
 
 define require_prod_confirmation
 	@if [ "$(ENV)" = "prod" ] && [ "$(CONFIRM_PROD)" != "true" ]; then \
