@@ -412,6 +412,17 @@ if [ -s "${OPERATOR_KUBECONFIG_PATH}" ] && command -v kubectl >/dev/null 2>&1 &&
   exit 0
 fi
 
+if [ ! -f "${INVENTORY_PATH}" ] && [ -z "${MIGRATION_RKE2_NODES:-}" ] && [ -f "${FALLBACK_INVENTORY_PATH}" ]; then
+  discovered_rke2_nodes="$(
+    sed -nE "s/^[[:space:]]*ansible_host:[[:space:]]*['\"]?([^'\"]+)['\"]?[[:space:]]*$/\1/p" "${FALLBACK_INVENTORY_PATH}" \
+      | paste -sd, -
+  )"
+  if [ -n "${discovered_rke2_nodes}" ]; then
+    export MIGRATION_RKE2_NODES="${discovered_rke2_nodes}"
+    echo "Recovered MIGRATION_RKE2_NODES from ${FALLBACK_INVENTORY_PATH}: ${MIGRATION_RKE2_NODES}"
+  fi
+fi
+
 if [ ! -f "${INVENTORY_PATH}" ]; then
   if [ -z "${MIGRATION_RKE2_NODES:-}" ]; then
     echo "Missing inventory ${INVENTORY_PATH}; cannot repair operator kubeconfig." >&2

@@ -34,6 +34,28 @@ workloads. When no StorageClass exists, `INSTALL_LOCAL_PATH_STORAGE=auto`
 installs Rancher local-path provisioner as a default lab StorageClass. Set
 `INSTALL_LOCAL_PATH_STORAGE=false` when production storage is managed separately.
 
+For an import/lab deployment, use the automatic recovery path instead of
+manually uninstalling stuck releases or deleting Pending PVCs:
+
+```bash
+make deploy-auto \
+  OPERATOR_KUBECONFIG=/root/.kube/config \
+  KUBECONFIG=/root/.kube/config \
+  DEPLOY_INGRESS_HOST=urban-platform.local \
+  DEPLOY_CLUSTER_VIP=192.168.1.121
+```
+
+`deploy-auto` installs local-path storage when needed, recovers a failed or
+`uninstalling` `urban-platform-infra` Helm release, removes stale resources from
+that release, and deletes only Pending PVCs by default. It uses compact lab
+storage sizes for PostgreSQL, Elasticsearch, Kafka, ZooKeeper, and Redis. Bound
+PVCs are preserved unless `DEPLOY_RECOVER_DELETE_PVCS=true` is set explicitly.
+If the VIP kubeconfig times out after `import-auto`, the kubeconfig helper reuses
+the temporary migration inventory and falls back to an SSH tunnel to the RKE2 API.
+If `/tmp/urban-platform-import-inventory.yml` is not present, pass
+`MIGRATION_RKE2_NODES=node-1,node-2,node-3` once so the helper can rebuild that
+inventory.
+
 The operator step uses `helmfile sync`, so the Helm diff plugin is not required
 on the operator machine.
 

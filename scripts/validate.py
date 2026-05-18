@@ -35,7 +35,8 @@ REQUIRED = [
     'scripts/import_project.py',
     'scripts/migrate_project.py',
     'scripts/tools/install-helm.sh', 'scripts/tools/install-helmfile.sh',
-    'scripts/tools/install-local-path-storage.sh', 'scripts/tools/ensure-kubeconfig.sh',
+    'scripts/tools/install-local-path-storage.sh', 'scripts/tools/recover-helm-release.sh',
+    'scripts/tools/ensure-kubeconfig.sh',
     'tests/policy/basic_policy.py', 'docs/bootstrap-safety.md', 'docs/secrets-management.md',
     'docs/supply-chain.md', 'docs/image-governance.md', 'docs/observability-slo.md',
     'docs/deployment-topologies.md', 'docs/runbooks.md', 'docs/release-guide.md',
@@ -647,6 +648,11 @@ for makefile_helm_token in [
     'ensure-storageclass:',
     'INSTALL_LOCAL_PATH_STORAGE',
     'scripts/tools/install-local-path-storage.sh',
+    'recover-helm-release:',
+    'scripts/tools/recover-helm-release.sh',
+    'DEPLOY_RECOVER_FAILED_RELEASE',
+    'deploy-auto:',
+    'DEPLOY_LAB_STORAGE',
     'wait-operator-crds:',
     '$(HELMFILE) -f $(HELMFILE_CONFIG) sync',
     'KUBECONFIG=$(OPERATOR_KUBECONFIG) $(HELMFILE)',
@@ -797,6 +803,18 @@ for local_path_installer_token in [
 ]:
     if local_path_installer_token not in local_path_installer_text:
         errors.append(f'Local-path installer script missing token: {local_path_installer_token}')
+
+helm_recovery_text = (ROOT / 'scripts/tools/recover-helm-release.sh').read_text(encoding='utf-8')
+for helm_recovery_token in [
+    'DEPLOY_RECOVER_FAILED_RELEASE',
+    'DEPLOY_RECOVER_PENDING_PVCS',
+    'DEPLOY_RECOVER_DELETE_PVCS',
+    '"${helm_bin}" get manifest',
+    'owner=helm,name=${release}',
+    'app.kubernetes.io/part-of=urban-platform-infra',
+]:
+    if helm_recovery_token not in helm_recovery_text:
+        errors.append(f'Helm recovery script missing token: {helm_recovery_token}')
 
 bootstrap_script = (ROOT / 'scripts/bootstrap.sh').read_text(encoding='utf-8')
 if 'CONFIRM_PROD' not in bootstrap_script:

@@ -27,6 +27,9 @@ PYTHON_DEPS_STAMP ?= .ansible/.python-deps.stamp
 CONFIRM_PROD ?= false
 HELM ?= helm
 HELM_INSTALL_SCRIPT ?= scripts/tools/install-helm.sh
+HELM_RECOVERY_SCRIPT ?= scripts/tools/recover-helm-release.sh
+HELM_TIMEOUT ?= 10m
+HELM_EXTRA_ARGS ?=
 HELMFILE ?= helmfile
 HELMFILE_CONFIG ?= deploy/helmfile.yaml.gotmpl
 HELMFILE_INSTALL_SCRIPT ?= scripts/tools/install-helmfile.sh
@@ -38,6 +41,22 @@ LOCAL_PATH_STORAGE_DEFAULT ?= true
 OPERATOR_CRD_TIMEOUT ?= 180s
 OPERATOR_KUBECONFIG ?= $(if $(KUBECONFIG),$(KUBECONFIG),$(HOME)/.kube/config)
 KUBECONFIG_SCRIPT ?= scripts/tools/ensure-kubeconfig.sh
+DEPLOY_RECOVER_FAILED_RELEASE ?= false
+DEPLOY_RECOVER_STALE_RESOURCES ?= true
+DEPLOY_RECOVER_PENDING_PVCS ?= true
+DEPLOY_RECOVER_DELETE_PVCS ?= false
+DEPLOY_LAB_STORAGE ?= false
+DEPLOY_DATABASE_STORAGE_SIZE ?= 2Gi
+DEPLOY_DATABASE_STORAGE_CLASS ?= $(LOCAL_PATH_STORAGE_CLASS)
+DEPLOY_ELASTICSEARCH_STORAGE ?= 5Gi
+DEPLOY_KAFKA_STORAGE ?= 5Gi
+DEPLOY_ZOOKEEPER_STORAGE ?= 2Gi
+DEPLOY_REDIS_STORAGE ?= 2Gi
+DEPLOY_INGRESS_HOST ?= $(MIGRATION_INGRESS_HOST)
+DEPLOY_CLUSTER_DOMAIN ?= $(if $(MIGRATION_CLUSTER_DOMAIN),$(MIGRATION_CLUSTER_DOMAIN),$(DEPLOY_INGRESS_HOST))
+DEPLOY_CLUSTER_VIP ?= $(MIGRATION_CLUSTER_VIP)
+DEPLOY_TLS_SECRET_NAME ?=
+DEPLOY_TLS_CREATE_SECRET ?=
 PROJECT_PATH ?=
 IMPORT_REPORT ?=
 IMPORT_STRICT ?= false
@@ -79,7 +98,16 @@ MIGRATION_NAMESPACE ?= $(NAMESPACE)
 MIGRATION_DUMP_DIR ?= $(MIGRATION_PRIVATE_DIR)/db-dumps
 MIGRATION_DB_TARGETS ?= $(MIGRATION_PRIVATE_DIR)/db-targets.yaml
 
-.PHONY: help validate image-policy lint configure import-check import-plan import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace deploy deploy-dry-run package-chart release-evidence status observability-status docker-up docker-down docker-status policy clean
+.PHONY: help validate image-policy lint configure import-check import-plan import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace recover-helm-release deploy deploy-auto deploy-dry-run package-chart release-evidence status observability-status docker-up docker-down docker-status policy clean
+
+HELM_DEPLOY_SET_ARGS = \
+	--set namespace.create=false \
+	$(if $(DEPLOY_INGRESS_HOST),--set ingress.host=$(DEPLOY_INGRESS_HOST),) \
+	$(if $(DEPLOY_CLUSTER_DOMAIN),--set global.cluster.domain=$(DEPLOY_CLUSTER_DOMAIN),) \
+	$(if $(DEPLOY_CLUSTER_VIP),--set global.cluster.vip=$(DEPLOY_CLUSTER_VIP),) \
+	$(if $(DEPLOY_TLS_SECRET_NAME),--set ingress.tls.secretName=$(DEPLOY_TLS_SECRET_NAME),) \
+	$(if $(DEPLOY_TLS_CREATE_SECRET),--set ingress.tls.createSecret=$(DEPLOY_TLS_CREATE_SECRET),) \
+	$(if $(filter true,$(DEPLOY_LAB_STORAGE)),--set databases.storageOverride.size=$(DEPLOY_DATABASE_STORAGE_SIZE) --set databases.storageOverride.className=$(DEPLOY_DATABASE_STORAGE_CLASS) --set 'observability.elasticsearch.nodeSets[0].storage=$(DEPLOY_ELASTICSEARCH_STORAGE)' --set messaging.kafka.storage.size=$(DEPLOY_KAFKA_STORAGE) --set messaging.kafka.zookeeper.storage.size=$(DEPLOY_ZOOKEEPER_STORAGE) --set messaging.redis.storage.size=$(DEPLOY_REDIS_STORAGE),)
 
 define require_prod_confirmation
 	@if [ "$(ENV)" = "prod" ] && [ "$(CONFIRM_PROD)" != "true" ]; then \
@@ -205,6 +233,9 @@ ensure-namespace: ## Create and label the target namespace before deploying the 
 		KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl create namespace $(NAMESPACE)
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl label namespace $(NAMESPACE) pod-security.kubernetes.io/enforce=baseline pod-security.kubernetes.io/audit=restricted pod-security.kubernetes.io/warn=restricted pod-security.kubernetes.io/enforce-version=latest pod-security.kubernetes.io/audit-version=latest pod-security.kubernetes.io/warn-version=latest --overwrite
 
+recover-helm-release: operator-kubeconfig ensure-namespace ## Recover a failed, uninstalling, or stale platform Helm release before redeploying.
+	KUBECONFIG=$(OPERATOR_KUBECONFIG) HELM=$(HELM) PROJECT=$(PROJECT) NAMESPACE=$(NAMESPACE) HELM_TIMEOUT=$(HELM_TIMEOUT) DEPLOY_RECOVER_FAILED_RELEASE=$(DEPLOY_RECOVER_FAILED_RELEASE) DEPLOY_RECOVER_STALE_RESOURCES=$(DEPLOY_RECOVER_STALE_RESOURCES) DEPLOY_RECOVER_PENDING_PVCS=$(DEPLOY_RECOVER_PENDING_PVCS) DEPLOY_RECOVER_DELETE_PVCS=$(DEPLOY_RECOVER_DELETE_PVCS) bash $(HELM_RECOVERY_SCRIPT)
+
 deploy-dry-run: install-helm ## Render the Helm chart without applying it.
 	$(HELM) template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f $(VALUES) -f $(TOPOLOGY_VALUES) --dry-run > rendered.yaml
 
@@ -223,8 +254,14 @@ release-evidence: package-chart ## Generate rendered manifest, SPDX SBOM, and ch
 	$(HELM) template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f $(VALUES) > dist/rendered.yaml
 	$(PYTHON) scripts/release/generate_sbom.py --chart helm/urban-platform-infra --dist dist --rendered dist/rendered.yaml --sbom dist/urban-platform-infra.spdx.json --checksums dist/SHA256SUMS
 
-deploy: install-operators ensure-namespace ## Deploy/upgrade the HA application platform.
-	KUBECONFIG=$(OPERATOR_KUBECONFIG) $(HELM) upgrade --install $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) --cleanup-on-fail --set namespace.create=false -f $(VALUES) -f $(TOPOLOGY_VALUES)
+deploy: install-operators ensure-namespace recover-helm-release ## Deploy/upgrade the HA application platform.
+	KUBECONFIG=$(OPERATOR_KUBECONFIG) $(HELM) upgrade --install $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) --cleanup-on-fail --timeout $(HELM_TIMEOUT) $(HELM_DEPLOY_SET_ARGS) -f $(VALUES) -f $(TOPOLOGY_VALUES) $(HELM_EXTRA_ARGS)
+
+deploy-auto: DEPLOY_RECOVER_FAILED_RELEASE = true
+deploy-auto: DEPLOY_LAB_STORAGE = true
+deploy-auto: DEPLOY_TLS_SECRET_NAME = urban-platform-tls
+deploy-auto: DEPLOY_TLS_CREATE_SECRET = false
+deploy-auto: deploy ## Automatically recover common lab/import deploy failures and use compact local-path storage sizes.
 
 status: ## Show cluster and workload status.
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) scripts/health/status.sh $(NAMESPACE)
