@@ -65,6 +65,9 @@ Operator Helmfile sync is retried automatically when the Kubernetes API returns
 transient VIP TLS handshake timeouts; each retry refreshes the operator
 kubeconfig first. When migration node addresses are available, the operator
 kubeconfig prefers direct RKE2 node API endpoints before falling back to the VIP.
+Before every Helmfile attempt, the wrapper waits for consecutive successful
+`/readyz`, `/version`, and `/openapi/v2` probes so large charts do not start
+while the API server is still brownout-prone.
 
 The operator step uses `helmfile sync`, so the Helm diff plugin is not required
 on the operator machine.

@@ -566,7 +566,9 @@ kubernetes_api_ready() {
   if ! command -v kubectl >/dev/null 2>&1; then
     return 0
   fi
-  KUBECONFIG="${OPERATOR_KUBECONFIG_PATH}" kubectl get --raw=/readyz --request-timeout=10s >/dev/null 2>&1
+  KUBECONFIG="${OPERATOR_KUBECONFIG_PATH}" kubectl get --raw=/readyz --request-timeout="${MIGRATION_KUBE_API_READY_TIMEOUT:-15s}" >/dev/null 2>&1 &&
+    KUBECONFIG="${OPERATOR_KUBECONFIG_PATH}" kubectl get --raw=/version --request-timeout="${MIGRATION_KUBE_API_VERSION_TIMEOUT:-15s}" >/dev/null 2>&1 &&
+    KUBECONFIG="${OPERATOR_KUBECONFIG_PATH}" kubectl get --raw=/openapi/v2 --request-timeout="${MIGRATION_KUBE_API_OPENAPI_TIMEOUT:-60s}" >/dev/null 2>&1
 }
 
 kubernetes_api_ready_verbose() {
@@ -575,11 +577,19 @@ kubernetes_api_ready_verbose() {
   if ! command -v kubectl >/dev/null 2>&1; then
     return 0
   fi
-  if output="$(KUBECONFIG="${OPERATOR_KUBECONFIG_PATH}" kubectl get --raw=/readyz --request-timeout=10s 2>&1)"; then
-    return 0
+  if ! output="$(KUBECONFIG="${OPERATOR_KUBECONFIG_PATH}" kubectl get --raw=/readyz --request-timeout="${MIGRATION_KUBE_API_READY_TIMEOUT:-15s}" 2>&1)"; then
+    echo "Kubernetes API /readyz probe failed: ${output}" >&2
+    return 1
   fi
-  echo "Kubernetes API probe failed: ${output}" >&2
-  return 1
+  if ! output="$(KUBECONFIG="${OPERATOR_KUBECONFIG_PATH}" kubectl get --raw=/version --request-timeout="${MIGRATION_KUBE_API_VERSION_TIMEOUT:-15s}" 2>&1)"; then
+    echo "Kubernetes API /version probe failed: ${output}" >&2
+    return 1
+  fi
+  if ! output="$(KUBECONFIG="${OPERATOR_KUBECONFIG_PATH}" kubectl get --raw=/openapi/v2 --request-timeout="${MIGRATION_KUBE_API_OPENAPI_TIMEOUT:-60s}" 2>&1)"; then
+    echo "Kubernetes API /openapi/v2 probe failed: ${output}" >&2
+    return 1
+  fi
+  return 0
 }
 
 start_kubernetes_api_tunnel() {
@@ -1078,7 +1088,7 @@ ANSIBLE_CONFIG="${ANSIBLE_CONFIG_PATH}" \
   "${extra_args[@]}"
 
 if command -v kubectl >/dev/null 2>&1; then
-  KUBECONFIG="${OPERATOR_KUBECONFIG_PATH}" kubectl get --raw=/readyz --request-timeout=10s >/dev/null
+  kubernetes_api_ready_verbose >/dev/null
 fi
 
 echo "Operator kubeconfig ready: ${OPERATOR_KUBECONFIG_PATH}"
