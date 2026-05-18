@@ -691,6 +691,8 @@ for migration_automation_token in [
     'postgres_client_container_command',
     'MIGRATION_POSTGRES_CLIENT_IMAGE',
     'docker.io/library/postgres:18.3',
+    'MIGRATION_SKIP_UNAVAILABLE_DATABASES',
+    '--strict-database-migration',
     'write_database_target_map',
     'preload_archives_to_nodes',
     'import_preloaded_archives_to_containerd',

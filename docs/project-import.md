@@ -136,7 +136,10 @@ Image migration has three modes:
   installed. If they are missing, it falls back to the selected container tool
   with `MIGRATION_POSTGRES_CLIENT_IMAGE` (`docker.io/library/postgres:18.3` by
   default) and `--network host`, so the operator does not need PostgreSQL client
-  packages installed manually.
+  packages installed manually. Source databases that are not reachable on their
+  Compose-published localhost ports are skipped by default and listed in the
+  output; set `MIGRATION_SKIP_UNAVAILABLE_DATABASES=false` when a production
+  migration must fail instead of continuing without that data.
 
 Image migration uses `MIGRATION_CONTAINER_TOOL=auto` by default. The automation
 prefers `docker` when it is installed, otherwise it uses `podman`. Set

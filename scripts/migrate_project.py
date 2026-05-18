@@ -1013,6 +1013,7 @@ def generate_bundle(
         f'MIGRATION_CLEANUP_OPERATOR_IMAGES="${{MIGRATION_CLEANUP_OPERATOR_IMAGES:-{str(args.cleanup_operator_images).lower()}}}"\n'
         f'MIGRATION_PRUNE_OPERATOR_CACHE="${{MIGRATION_PRUNE_OPERATOR_CACHE:-{str(args.prune_operator_cache).lower()}}}"\n'
         f'MIGRATION_SKIP_DOCKER_SOCKET_SERVICES="${{MIGRATION_SKIP_DOCKER_SOCKET_SERVICES:-{str(args.skip_docker_socket_services).lower()}}}"\n'
+        f'MIGRATION_SKIP_UNAVAILABLE_DATABASES="${{MIGRATION_SKIP_UNAVAILABLE_DATABASES:-{str(args.skip_unavailable_databases).lower()}}}"\n'
         f'MIGRATION_REGISTRY="${{MIGRATION_REGISTRY:-{args.registry}}}"\n'
         f'MIGRATION_IMAGE_TAG="${{MIGRATION_IMAGE_TAG:-{args.image_tag}}}"\n'
         f'MIGRATION_DUMP_DIR="${{MIGRATION_DUMP_DIR:-{args.dump_dir}}}"\n'
@@ -1028,6 +1029,8 @@ def generate_bundle(
         'if [ "$MIGRATION_PRUNE_OPERATOR_CACHE" = "false" ]; then PRUNE_OPERATOR_CACHE_FLAG="--no-prune-operator-cache"; fi\n'
         'DOCKER_SOCKET_FLAG="--skip-docker-socket-services"\n'
         'if [ "$MIGRATION_SKIP_DOCKER_SOCKET_SERVICES" = "false" ]; then DOCKER_SOCKET_FLAG="--include-docker-socket-services"; fi\n'
+        'DATABASE_FAILURE_FLAG="--skip-unavailable-databases"\n'
+        'if [ "$MIGRATION_SKIP_UNAVAILABLE_DATABASES" = "false" ]; then DATABASE_FAILURE_FLAG="--strict-database-migration"; fi\n'
     )
     callback = (
         'python3 "$REPO_ROOT/scripts/migrate_project.py" '
@@ -1040,7 +1043,7 @@ def generate_bundle(
         '--become-password-file "$MIGRATION_BECOME_PASSWORD_FILE" '
         '--container-tool "$MIGRATION_CONTAINER_TOOL" '
         '--postgres-client-image "$MIGRATION_POSTGRES_CLIENT_IMAGE" '
-        '$RKE2_IMPORT_FLAG $CLEANUP_OPERATOR_IMAGES_FLAG $PRUNE_OPERATOR_CACHE_FLAG $DOCKER_SOCKET_FLAG '
+        '$RKE2_IMPORT_FLAG $CLEANUP_OPERATOR_IMAGES_FLAG $PRUNE_OPERATOR_CACHE_FLAG $DOCKER_SOCKET_FLAG $DATABASE_FAILURE_FLAG '
         '--registry "$MIGRATION_REGISTRY" --image-tag "$MIGRATION_IMAGE_TAG" '
         '--dump-dir "$MIGRATION_DUMP_DIR" --db-targets "$MIGRATION_DB_TARGETS" '
         '--execute $ALLOW_FLAG '
@@ -1257,6 +1260,7 @@ def stage_databases(args: argparse.Namespace, service_pairs: list[tuple[import_p
     if not args.allow_secret_material:
         raise SystemExit("Refusing database dump/restore without --allow-secret-material.")
     dump_dir.mkdir(parents=True, exist_ok=True)
+    skipped_sources: list[str] = []
     use_local_pg_tools = local_postgres_client_tools_available()
     if use_local_pg_tools:
         print("Using local pg_dump/pg_restore for PostgreSQL-family migration.")
@@ -1289,16 +1293,27 @@ def stage_databases(args: argparse.Namespace, service_pairs: list[tuple[import_p
             str(dump_file),
         ]
         if use_local_pg_tools:
-            run_command(["pg_dump", *dump_args], env=run_env)
+            dump_command = ["pg_dump", *dump_args]
         else:
             container_dump_args = [
                 *dump_args[:-1],
                 f"/urban-platform-db-dumps/{dump_file.name}",
             ]
-            run_command(
-                postgres_client_container_command(args, dump_dir, ["PGPASSWORD"], "pg_dump", container_dump_args),
-                env=run_env,
+            dump_command = postgres_client_container_command(args, dump_dir, ["PGPASSWORD"], "pg_dump", container_dump_args)
+        try:
+            run_command(dump_command, env=run_env)
+        except subprocess.CalledProcessError as exc:
+            message = (
+                f"{record.file}::{record.name} source database at 127.0.0.1:{port} "
+                f"could not be dumped with user {env['user']} and database {env['database']}."
             )
+            if args.skip_unavailable_databases:
+                print(f"Skipping database source: {message}")
+                skipped_sources.append(message)
+                if dump_file.exists():
+                    dump_file.unlink()
+                continue
+            raise SystemExit(f"Database dump failed: {message}") from exc
         target_dsn = target_dsn_from_mapping(targets.get(record.name) or targets.get(alias), args.namespace, args.kubeconfig)
         if target_dsn:
             restore_args = [
@@ -1322,6 +1337,10 @@ def stage_databases(args: argparse.Namespace, service_pairs: list[tuple[import_p
                 )
         else:
             print(f"Dumped {alias}; no usable target mapping found in {db_targets_path}, so restore was skipped.")
+    if skipped_sources:
+        print("Skipped unavailable PostgreSQL-family source database(s):")
+        for item in skipped_sources:
+            print(f"- {item}")
 
 
 def ingress_host(args: argparse.Namespace, values: dict[str, Any]) -> str:
@@ -1544,6 +1563,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--no-prune-operator-cache", dest="prune_operator_cache", action="store_false")
     parser.add_argument("--skip-docker-socket-services", dest="skip_docker_socket_services", action="store_true", default=True)
     parser.add_argument("--include-docker-socket-services", dest="skip_docker_socket_services", action="store_false")
+    parser.add_argument("--skip-unavailable-databases", dest="skip_unavailable_databases", action="store_true", default=True)
+    parser.add_argument("--strict-database-migration", dest="skip_unavailable_databases", action="store_false")
     parser.add_argument("--registry", default="")
     parser.add_argument("--image-tag", default="imported-0.1.0")
     parser.add_argument("--private-dir", default=str(DEFAULT_PRIVATE_DIR))
