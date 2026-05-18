@@ -27,6 +27,8 @@ NetworkPolicy is split into named policies:
 - `urban-platform-same-namespace` allows same-namespace pod communication.
 - `urban-platform-ingress-controller` allows ingress from configured ingress-controller namespaces.
 - `urban-platform-dns-egress` allows DNS only to the configured cluster DNS selector.
+- `urban-platform-kubernetes-api-egress` allows controller and bootstrap pods to
+  reach the Kubernetes API on TCP 443/6443.
 - `urban-platform-external-web-egress` allows configurable outbound TCP ports for package downloads or webhook access.
 
 Keep `externalWeb.cidrs` narrow in production. The default `0.0.0.0/0` is a portable bootstrap setting, not a final enterprise allowlist.

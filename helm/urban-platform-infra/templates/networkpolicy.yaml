@@ -84,6 +84,31 @@ spec:
         - protocol: TCP
           port: 53
 {{- end }}
+{{- if .Values.networkPolicy.kubernetesApi.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: urban-platform-kubernetes-api-egress
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        {{- range .Values.networkPolicy.kubernetesApi.cidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        {{- range .Values.networkPolicy.kubernetesApi.ports }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+{{- end }}
 {{- if .Values.networkPolicy.externalWeb.enabled }}
 ---
 apiVersion: networking.k8s.io/v1

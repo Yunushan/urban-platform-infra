@@ -96,6 +96,14 @@ networks. Changing these values after a cluster is initialized requires
 rebuilding the RKE2 datastore/cluster; do not change them in-place on a running
 production cluster.
 
+## CloudNativePG InitDB pods cannot reach the API
+
+If CloudNativePG init jobs repeatedly fail with messages like
+`dial tcp 100.65.0.1:443: i/o timeout`, workload pods cannot reach the
+Kubernetes API service. Keep `networkPolicy.kubernetesApi.enabled=true`, and
+narrow `networkPolicy.kubernetesApi.cidrs` to your service CIDR and API endpoint
+CIDRs after bootstrap if you do not want the portable default.
+
 ## API server logs 502 to a pod IP
 
 Messages such as `Sending HTTP/1.1 502 response ... dial tcp 100.64.x.y:10250`

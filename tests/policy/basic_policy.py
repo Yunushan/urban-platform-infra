@@ -91,6 +91,7 @@ expected_network_policies = {
     'urban-platform-default-deny',
     'urban-platform-same-namespace',
     'urban-platform-dns-egress',
+    'urban-platform-kubernetes-api-egress',
 }
 missing_network_policies = sorted(expected_network_policies - network_policies)
 if missing_network_policies:

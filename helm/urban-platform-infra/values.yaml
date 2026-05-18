@@ -120,6 +120,13 @@ networkPolicy:
     namespace: kube-system
     podLabels:
       k8s-app: kube-dns
+  kubernetesApi:
+    enabled: true
+    cidrs:
+    - 0.0.0.0/0
+    ports:
+    - 443
+    - 6443
   externalWeb:
     enabled: true
     cidrs:
