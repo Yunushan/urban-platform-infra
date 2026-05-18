@@ -42,7 +42,7 @@ make deploy-auto \
   OPERATOR_KUBECONFIG=/root/.kube/config \
   KUBECONFIG=/root/.kube/config \
   DEPLOY_INGRESS_HOST=urban-platform.local \
-  DEPLOY_CLUSTER_VIP=192.168.1.121
+  DEPLOY_CLUSTER_VIP=192.0.2.121
 ```
 
 `deploy-auto` installs local-path storage when needed, recovers a failed or
