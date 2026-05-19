@@ -76,6 +76,10 @@ spec:
           ports:
             - name: redis
               containerPort: {{ .Values.messaging.redis.port }}
+          {{- with .Values.messaging.redis.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: config
               mountPath: /config
@@ -89,6 +93,10 @@ spec:
           ports:
             - name: sentinel
               containerPort: {{ .Values.messaging.redis.sentinel.port }}
+          {{- with .Values.messaging.redis.sentinel.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: config
               mountPath: /config

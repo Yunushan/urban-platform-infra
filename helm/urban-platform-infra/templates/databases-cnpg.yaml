@@ -6,6 +6,7 @@
 {{- $storageClass := $storageOverride.className | default $db.storage.className }}
 {{- $postgresUID := $db.postgresUID | default $.Values.databases.postgresUID }}
 {{- $postgresGID := $db.postgresGID | default $.Values.databases.postgresGID }}
+{{- $resources := $db.resources | default $.Values.databases.resources }}
 ---
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
@@ -18,6 +19,10 @@ metadata:
     urban-platform.io/database-engine: {{ $db.engine | quote }}
 spec:
   instances: {{ include "cip.replicaCount" (list $ ($db.instances | default $.Values.databases.defaultInstances)) }}
+  {{- with $resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   {{- if $postgresUID }}
   postgresUID: {{ $postgresUID }}
   {{- end }}

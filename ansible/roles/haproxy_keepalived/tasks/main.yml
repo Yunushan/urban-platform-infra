@@ -28,19 +28,28 @@
 
 - name: Build HAProxy VIP port and allowlist configuration
   ansible.builtin.set_fact:
-    haproxy_keepalived_edge_tcp_services: "{{ edge_extra_tcp_services | default([]) }}"
+    haproxy_keepalived_edge_tcp_services: >-
+      {{
+        ((edge_observability_ports_enabled | default(false) | bool)
+          | ternary(edge_observability_tcp_services | default([]), []))
+        + (edge_extra_tcp_services | default([]))
+      }}
     haproxy_keepalived_edge_allowed_cidrs: >-
       {{
         (edge_allowed_cidrs_text | default('') | trim | length > 0)
         | ternary((edge_allowed_cidrs_text | default('')).split(), edge_allowed_cidrs | default([]))
       }}
+  when: ansible_system == 'Linux'
+
+- name: Build HAProxy VIP port list
+  ansible.builtin.set_fact:
     haproxy_keepalived_vip_ports: >-
       {{
         [
           kubernetes_api_vip_port | default(7443),
           rke2_registration_vip_port | default(9346)
         ]
-        + ((edge_extra_tcp_services | default([])) | map(attribute='external_port') | list)
+        + (haproxy_keepalived_edge_tcp_services | map(attribute='external_port') | list)
       }}
   when: ansible_system == 'Linux'
 

@@ -5,9 +5,9 @@ global:
   imagePullSecrets: []
   imagePullPolicy: IfNotPresent
   enableServiceLinks: false
-  defaultReplicas: 3
-  replicaOverride: null
-  skipPlaceholderWorkloads: false
+  defaultReplicas: 1
+  replicaOverride: 1
+  skipPlaceholderWorkloads: true
   serviceAccount:
     create: true
     name: ''
@@ -31,7 +31,7 @@ global:
     seccompProfile:
       type: RuntimeDefault
   scheduling:
-    topologySpread: true
+    topologySpread: false
     antiAffinity: preferred
 namespace:
   create: true
@@ -41,6 +41,24 @@ namespace:
     audit: restricted
     warn: restricted
     version: latest
+  limitRange:
+    enabled: true
+    default:
+      cpu: 500m
+      memory: 512Mi
+    defaultRequest:
+      cpu: 50m
+      memory: 128Mi
+  resourceQuota:
+    enabled: true
+    hard:
+      requests.cpu: '6'
+      requests.memory: 8Gi
+      limits.cpu: '10'
+      limits.memory: 10Gi
+      requests.storage: 80Gi
+      persistentvolumeclaims: '60'
+      pods: '160'
 ingress:
   enabled: true
   className: traefik
@@ -103,7 +121,7 @@ secretManagement:
           key: example/urban-platform/ingress/tls
           property: tls.key
 autoscaling:
-  enabled: true
+  enabled: false
   default:
     minReplicas: 3
     maxReplicas: 9
@@ -241,12 +259,19 @@ webserver:
 messaging:
   kafka:
     enabled: true
-    replicas: 3
+    replicas: 1
     image:
       repository: confluentinc/cp-kafka
       tag: 7.9.6
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
     storage:
-      size: 50Gi
+      size: 2Gi
       className: ''
     ports:
       client: 9092
@@ -254,42 +279,77 @@ messaging:
       jmx: 29094
     zookeeper:
       enabled: true
-      replicas: 3
+      replicas: 1
       image:
         repository: confluentinc/cp-zookeeper
         tag: 7.9.6
+      resources:
+        requests:
+          cpu: 50m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
       storage:
-        size: 10Gi
+        size: 1Gi
         className: ''
     ui:
       enabled: true
-      replicas: 2
+      replicas: 1
       image:
         repository: provectuslabs/kafka-ui
         tag: v0.7.2
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          cpu: 250m
+          memory: 256Mi
       port: 8080
   redis:
     enabled: true
-    replicas: 3
+    replicas: 1
     image:
       repository: redis
       tag: '8.6.2'
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
     sentinel:
-      enabled: true
-      replicas: 3
+      enabled: false
+      replicas: 1
       port: 26379
+      resources:
+        requests:
+          cpu: 25m
+          memory: 64Mi
+        limits:
+          cpu: 100m
+          memory: 128Mi
     port: 6379
     storage:
-      size: 10Gi
+      size: 1Gi
       className: ''
 databases:
   enabled: true
   provider: cloudnative-pg
-  defaultInstances: 3
+  defaultInstances: 1
   postgresUID: 999
   postgresGID: 999
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
   storageOverride:
-    size: ''
+    size: 1Gi
     className: ''
   monitoring:
     enableDeprecatedPodMonitor: false
@@ -600,22 +660,22 @@ databases:
       backup:
         enabled: false
 observability:
-  profile: elasticsearch
+  profile: disabled
   stack:
-    name: elastic-eck-prometheus-grafana-opentelemetry
-    logging: elasticsearch
-    search: elasticsearch
-    metrics: prometheus
-    dashboards: grafana
-    telemetry: opentelemetry
-    traces: opentelemetry
+    name: disabled
+    logging: none
+    search: none
+    metrics: none
+    dashboards: none
+    telemetry: none
+    traces: none
   grafana:
-    enabled: true
+    enabled: false
   prometheus:
-    enabled: true
+    enabled: false
     provider: kube-prometheus-stack
   opentelemetry:
-    enabled: true
+    enabled: false
     mode: daemonset
     collector:
       name: opentelemetry-collector
@@ -625,9 +685,9 @@ observability:
       logs: true
       traces: true
   loki:
-    enabled: true
+    enabled: false
   elasticsearch:
-    enabled: true
+    enabled: false
     mode: eck
     name: city-elasticsearch
     version: 9.4.1
@@ -636,28 +696,35 @@ observability:
       tag: 9.4.1
     resources:
       requests:
-        cpu: 250m
-        memory: 2Gi
+        cpu: 100m
+        memory: 768Mi
       limits:
-        cpu: 1000m
-        memory: 2Gi
+        cpu: 500m
+        memory: 1Gi
     nodeSets:
     - name: default
-      count: 3
-      storage: 100Gi
+      count: 1
+      storage: 2Gi
     service:
       type: NodePort
       port: 9200
       nodePort: 30920
       externalTrafficPolicy: Local
   kibana:
-    enabled: true
+    enabled: false
     mode: eck
     version: 9.4.1
     image:
       repository: docker.elastic.co/kibana/kibana
       tag: 9.4.1
-    count: 2
+    count: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 256Mi
+      limits:
+        cpu: 250m
+        memory: 512Mi
     port: 5601
     service:
       type: NodePort
@@ -665,11 +732,18 @@ observability:
       nodePort: 30561
       externalTrafficPolicy: Local
   logstash:
-    enabled: true
-    replicas: 2
+    enabled: false
+    replicas: 1
     image:
       repository: docker.elastic.co/logstash/logstash
       tag: 9.4.0
+    resources:
+      requests:
+        cpu: 50m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
     ports:
     - name: beats
       containerPort: 5044
@@ -684,8 +758,8 @@ observability:
     enabled: false
     replicas: 3
   clickhouse:
-    enabled: true
-    replicas: 3
+    enabled: false
+    replicas: 1
 monitoring:
   enabled: false
   prometheus:

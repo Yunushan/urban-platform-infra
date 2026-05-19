@@ -70,6 +70,14 @@ spec:
   count: {{ include "cip.replicaCount" (list . (.Values.observability.kibana.count | default 2)) }}
   elasticsearchRef:
     name: {{ .Values.observability.elasticsearch.name }}
+  {{- with .Values.observability.kibana.resources }}
+  podTemplate:
+    spec:
+      containers:
+        - name: kibana
+          resources:
+            {{- toYaml . | nindent 12 }}
+  {{- end }}
   {{- if and ($kibanaIngress.enabled | default false) $kibanaIngressHost }}
   config:
     server.publicBaseUrl: {{ printf "https://%s" $kibanaIngressHost | quote }}

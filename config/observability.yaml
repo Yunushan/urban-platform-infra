@@ -1,12 +1,12 @@
-default: elasticsearch
-defaultStack: elastic-eck-prometheus-grafana-opentelemetry
+default: disabled
+defaultStack: disabled
 stack:
-  logging: elasticsearch
-  search: elasticsearch
-  metrics: prometheus
-  dashboards: grafana
-  telemetry: opentelemetry
-  traces: opentelemetry
+  logging: none
+  search: none
+  metrics: none
+  dashboards: none
+  telemetry: none
+  traces: none
 retention:
   metrics: 30d
   logs: 30d
@@ -18,22 +18,22 @@ alerting:
   runbooks: docs/runbooks.md
 profiles:
   grafana:
-    enabled: true
+    enabled: false
     purpose: dashboards
   prometheus:
-    enabled: true
+    enabled: false
     purpose: metrics/SLO alerting
     provider: kube-prometheus-stack
   opentelemetry:
-    enabled: true
+    enabled: false
     purpose: metrics/logs/traces collection
     mode: daemonset
   loki:
-    enabled: true
+    enabled: false
     purpose: logs
     defaultRetention: 30d
   elasticsearch:
-    enabled: true
+    enabled: false
     purpose: search/log analytics
     version: 9.4.1
   opensearch:
@@ -43,7 +43,7 @@ profiles:
     enabled: false
     purpose: log management/SIEM-like workflows
   clickhouse:
-    enabled: true
+    enabled: false
     purpose: analytics/time-series/log warehouse
 pipelines:
   default:

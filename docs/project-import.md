@@ -102,10 +102,11 @@ runs, put the sudo password in a local private file with mode `0600` and set
 `MIGRATION_BECOME_PASSWORD_PROMPT=false` to fail instead of prompting. Use
 `MIGRATION_RKE2_VERSION` or
 `MIGRATION_CLUSTER_DOMAIN` only when installing onto fresh nodes where those
-values cannot be discovered yet. For `import-auto`, if the Kubernetes API is
-listening but not ready, the same temporary inventory is used to reconcile the
-bootstrap and RKE2 playbooks once, then kubeconfig repair is retried. Set
-`MIGRATION_AUTO_REPAIR_CLUSTER=false` to disable that repair pass.
+values cannot be discovered yet. When migration node addresses are available and
+the Kubernetes API is listening but not ready, the same temporary inventory is
+used to reconcile the bootstrap and RKE2 playbooks once, then kubeconfig repair
+is retried. Three-node HA repair requires at least two SSH-reachable servers by
+default. Set `MIGRATION_AUTO_REPAIR_CLUSTER=false` to disable that repair pass.
 
 Image migration has three modes:
 

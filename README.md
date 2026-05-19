@@ -120,14 +120,14 @@ By default the Kubernetes profile deploys:
 | Control-plane access | HAProxy + Keepalived | VIP failover on `7443` for the API and `9346` for RKE2 registration |
 | Edge ingress | RKE2-bundled Traefik | Default ingress class `traefik`; RKE2 owns the bundled Traefik version, with an optional upstream chart pin mode, and nginx/ingress-nginx remains switchable |
 | Time sync | Chrony | Installed on every node |
-| Web gateway | `nginxinc/nginx-unprivileged:1.31.0` | 3 replicas, root ingress, HTTPS redirect, swappable with Apache HTTPD, Tomcat, or Traefik |
-| Application services | Sanitized `example-app-*` images | 3 replicas, PDB, HPA, anti-affinity/topology spread |
-| Kafka | `confluentinc/cp-kafka:7.9.6` + `confluentinc/cp-zookeeper:7.9.6` | 3 brokers, 3 ZooKeeper pods, Kafka UI |
-| Redis | `redis:8.6.2` | 3 Redis pods + Sentinel scaffolding |
-| PostgreSQL/PostGIS/TimescaleDB | `postgres:18.3`, `postgis/postgis:18-3.6`, `timescale/timescaledb:2.26.4-pg18` | CloudNativePG custom resources with 3 instances per database |
-| Observability | Elastic ECK `9.4.1` + Prometheus/Grafana + OpenTelemetry | ECK custom resources, kube-prometheus-stack, OpenTelemetry Collector, Logstash replicas |
-| Optional observability | Grafana Loki, OpenSearch, Graylog, ClickHouse | Switchable by Helmfile values/profile |
-| Agent monitoring | `zabbix/zabbix-agent2:ubuntu-7.4.10` | 3 replicas |
+| Web gateway | `nginxinc/nginx-unprivileged:1.31.0` | Low-resource default replica, HTTPS redirect, swappable with Apache HTTPD, Tomcat, or Traefik |
+| Application services | Sanitized `example-app-*` images | Skipped by default until real images are configured or imported |
+| Kafka | `confluentinc/cp-kafka:7.9.6` + `confluentinc/cp-zookeeper:7.9.6` | One compact broker and ZooKeeper pod for the lab profile |
+| Redis | `redis:8.6.2` | One compact Redis pod; Sentinel disabled by default |
+| PostgreSQL/PostGIS/TimescaleDB | `postgres:18.3`, `postgis/postgis:18-3.6`, `timescale/timescaledb:2.26.4-pg18` | CloudNativePG custom resources with one lab instance and 1 Gi storage override |
+| Observability | Disabled by default | Elasticsearch, Kibana, Grafana, Loki, ClickHouse, Logstash, Prometheus, and OpenTelemetry are opt-in |
+| Optional observability | Elastic ECK `9.4.1`, Grafana Loki, OpenSearch, Graylog, ClickHouse | Switchable by Helmfile env flags and values/profile |
+| Agent monitoring | `zabbix/zabbix-agent2:ubuntu-7.4.10` | Switchable workload |
 
 Supported topology profiles:
 
@@ -136,8 +136,9 @@ Supported topology profiles:
 - `three-node-ha`: default production HA.
 - `multi-node-ha`: three or five control-plane nodes plus scalable workers.
 
-The default operator bundle pins CloudNativePG 1.29+ and ECK 3.4+ so the
-PostgreSQL 18 and Elastic Stack 9.x defaults are admitted on Kubernetes 1.34.
+The default operator bundle pins CloudNativePG 1.29+ and keeps ECK 3.4+
+available so PostgreSQL 18 and optional Elastic Stack 9.x resources are
+admitted on Kubernetes 1.34.
 
 Topology contracts are in [`config/deployment-topologies.yaml`](config/deployment-topologies.yaml), Helm overrides are in [`helm/urban-platform-infra/topologies/`](helm/urban-platform-infra/topologies/), and starter inventories are in [`inventories/topologies/`](inventories/topologies/).
 
@@ -147,7 +148,7 @@ The image and port inventory is stored in [`config/services.catalog.yaml`](confi
 
 ```bash
 # Change deployment flavor without template edits
-python3 scripts/configure.py --engine k3s --ingress-controller traefik --webserver traefik --observability loki
+python3 scripts/configure.py --engine k3s --ingress-controller traefik --webserver traefik --observability disabled
 python3 scripts/configure.py --engine microk8s --webserver apache-httpd
 python3 scripts/configure.py --database cockroachdb
 python3 scripts/configure.py --database postgresql --ingress-controller nginx --webserver nginx --observability elasticsearch
@@ -195,10 +196,10 @@ Supported database profiles are defined in [`config/databases.catalog.yaml`](con
 5. Push local/private images to a registry or preload them onto all RKE2 nodes with `scripts/images/preload-rke2.sh`.
 6. Keep HTTPS redirect enabled; provide `ingress.tls.secretName` through cert-manager, External Secrets, SOPS, Sealed Secrets, or Vault before live production.
 7. Review `config/secrets.contract.yaml` and put secret values in SOPS, External Secrets, Sealed Secrets, or Vault.
-8. Choose storage classes for CloudNativePG, Kafka, Redis, Elasticsearch, and ClickHouse/OpenSearch if enabled.
+8. Choose storage classes for CloudNativePG, Kafka, Redis, Elasticsearch, and ClickHouse/OpenSearch if enabled; keep the low-resource lab storage overrides for 4-core/4 GiB nodes.
 9. Run `make lint`, `make validate`, `make policy`, `make deploy-dry-run`, and Ansible check targets before production deploy.
 10. Run `make image-policy` and use private-registry digest pins for production image overrides.
-11. Review `config/slo.yaml`; the default Helmfile stack installs ECK, kube-prometheus-stack/Grafana, and OpenTelemetry Collector, while chart `monitoring.enabled=true` should be enabled only after Prometheus Operator CRDs exist.
+11. Review `config/slo.yaml`; heavy observability is disabled by default for labs. Enable kube-prometheus-stack/Grafana, OpenTelemetry, Elasticsearch/Kibana, Loki, or ClickHouse only after the nodes have enough capacity, and set chart `monitoring.enabled=true` only after Prometheus Operator CRDs exist.
 12. Release only signed/evidenced chart artifacts with `make release-evidence`, SHA-256 checksums, SBOM metadata, and GitHub artifact attestations.
 
 ## License

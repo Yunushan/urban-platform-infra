@@ -72,6 +72,10 @@ spec:
               name: peer
             - containerPort: 3888
               name: election
+          {{- with .Values.messaging.kafka.zookeeper.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
   volumeClaimTemplates:
     - metadata:
         name: data
@@ -158,6 +162,10 @@ spec:
               name: external
             - containerPort: 29094
               name: jmx
+          {{- with .Values.messaging.kafka.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
   volumeClaimTemplates:
     - metadata:
         name: data
@@ -222,6 +230,10 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.messaging.kafka.ui.port | default 8080 }}
+          {{- with .Values.messaging.kafka.ui.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
 ---
 apiVersion: v1
 kind: Service

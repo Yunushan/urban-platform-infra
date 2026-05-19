@@ -582,6 +582,40 @@ run_cluster_repair() {
     "${extra_args[@]}"
 }
 
+auto_repair_cluster_enabled() {
+  case "${MIGRATION_AUTO_REPAIR_CLUSTER:-auto}" in
+    true|True|TRUE|1|yes|Yes|YES|always|Always|ALWAYS)
+      return 0
+      ;;
+    false|False|FALSE|0|no|No|NO|never|Never|NEVER)
+      return 1
+      ;;
+    auto|Auto|AUTO)
+      [ -n "${MIGRATION_RKE2_NODES:-}" ] || [ -f "${FALLBACK_INVENTORY_PATH}" ]
+      return
+      ;;
+    *)
+      echo "Unsupported MIGRATION_AUTO_REPAIR_CLUSTER=${MIGRATION_AUTO_REPAIR_CLUSTER}; use auto, true, or false." >&2
+      return 1
+      ;;
+  esac
+}
+
+minimum_reachable_repair_nodes() {
+  local original_node_count="$1"
+  local configured="${MIGRATION_REPAIR_MIN_REACHABLE_RKE2_NODES:-auto}"
+
+  if [ "${configured}" != "auto" ]; then
+    printf '%s\n' "${configured}"
+    return 0
+  fi
+  if [ "${original_node_count}" -ge 3 ]; then
+    printf '2\n'
+    return 0
+  fi
+  printf '1\n'
+}
+
 kubernetes_api_ready() {
   if ! command -v kubectl >/dev/null 2>&1; then
     return 0
@@ -848,7 +882,7 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
 
     install -m 0600 "${original_kubeconfig}" "${OPERATOR_KUBECONFIG_PATH}"
     rm -f "${original_kubeconfig}"
-    if [ "${MIGRATION_AUTO_REPAIR_CLUSTER:-false}" != "true" ]; then
+    if ! auto_repair_cluster_enabled; then
       echo "Existing operator kubeconfig could not reach the Kubernetes API through the VIP, node APIs, or SSH tunnel fallback." >&2
       echo "Set MIGRATION_SSH_USER/MIGRATION_SSH_KEY if SSH tunneling is required, or fix the VIP/API path and rerun." >&2
       exit 1
@@ -926,8 +960,15 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
   if [ "${MIGRATION_SKIP_UNREACHABLE_RKE2_NODES:-auto}" != "false" ]; then
     original_rke2_node_count="${#rke2_nodes[@]}"
     mapfile -t reachable_rke2_nodes < <(filter_ssh_reachable_nodes "${rke2_nodes[@]}")
+    minimum_reachable_nodes="$(minimum_reachable_repair_nodes "${original_rke2_node_count}")"
     if [ "${#reachable_rke2_nodes[@]}" -eq 0 ]; then
       echo "No RKE2 nodes are reachable over SSH; cannot run automatic cluster repair." >&2
+      exit 1
+    fi
+    if auto_repair_cluster_enabled && [ "${#reachable_rke2_nodes[@]}" -lt "${minimum_reachable_nodes}" ]; then
+      echo "Only ${#reachable_rke2_nodes[@]}/${original_rke2_node_count} RKE2 node(s) are reachable over SSH." >&2
+      echo "Automatic HA repair requires at least ${minimum_reachable_nodes} reachable node(s) to protect embedded-etcd quorum." >&2
+      echo "Power on or reconnect the missing VM(s), or override MIGRATION_REPAIR_MIN_REACHABLE_RKE2_NODES only for an intentional lab recovery." >&2
       exit 1
     fi
     if [ "${#reachable_rke2_nodes[@]}" -lt "${original_rke2_node_count}" ]; then
@@ -1092,7 +1133,7 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
           fi
         done
       fi
-      if [ "${MIGRATION_AUTO_REPAIR_CLUSTER:-false}" = "true" ]; then
+      if auto_repair_cluster_enabled; then
         run_cluster_repair
         export MIGRATION_AUTO_REPAIR_CLUSTER=false
         echo "Retrying operator kubeconfig after automatic cluster reconciliation."

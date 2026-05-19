@@ -2,7 +2,9 @@
 edge_allowed_cidrs: []
 edge_allowed_cidrs_text: ""
 edge_apply_allowlist_to_control_plane: false
-edge_extra_tcp_services:
+edge_observability_ports_enabled: false
+edge_extra_tcp_services: []
+edge_observability_tcp_services:
   - name: grafana
     external_port: 3000
     backend_port: 30300

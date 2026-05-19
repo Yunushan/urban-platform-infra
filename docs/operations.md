@@ -10,7 +10,9 @@ make deploy
 
 The deployment target installs Helm and Helmfile when missing, applies the
 templated operator Helmfile, waits for CNPG and ECK CRDs, then installs the
-platform chart.
+platform chart. The low-resource lab profile keeps Elasticsearch, Kibana,
+Grafana, Loki, ClickHouse, Logstash, Prometheus, and OpenTelemetry disabled
+unless their deploy flags are explicitly enabled.
 
 Before Helmfile, kubectl, or Helm touches the cluster, `make install-operators`
 and `make deploy` run `scripts/tools/ensure-kubeconfig.sh`. That script fetches
@@ -55,14 +57,16 @@ make deploy-auto \
 that release, recreates the lab Kafka/ZooKeeper/Redis StatefulSets when their
 storage template must change, and deletes only Pending PVCs by default, even
 when the previous Helm release is already `deployed`. It uses one lab replica
-and compact local-path storage sizes and classes for PostgreSQL, Elasticsearch,
-Kafka, ZooKeeper, and Redis. Bound PVCs are preserved unless
+and compact local-path storage sizes and classes for PostgreSQL, Kafka,
+ZooKeeper, Redis, and any explicitly enabled observability backend. Bound PVCs are preserved unless
 `DEPLOY_RECOVER_DELETE_PVCS=true` is set explicitly. It also disables Redis
 Sentinel for the one-replica lab profile and skips sanitized placeholder
 workloads whose images are still `example-app-*`, avoiding wasted memory and
 repeated image pulls until real application images are imported or configured.
-If the API is reachable but `/readyz` reports embedded-etcd
-readiness failures, `deploy-auto` also enables the guarded RKE2 repair pass.
+If the API is reachable but `/readyz` reports embedded-etcd readiness failures,
+operator kubeconfig repair runs in `auto` mode when migration node addresses are
+available. `deploy-auto` and `import-auto` still force that guarded RKE2 repair
+pass explicitly.
 If the VIP kubeconfig times out after `import-auto`, the kubeconfig helper reuses
 the temporary migration inventory and falls back to an SSH tunnel to the RKE2 API.
 When the SSH user needs sudo for RKE2 token or kubeconfig discovery,
@@ -71,8 +75,12 @@ current run. Set `MIGRATION_BECOME_PASSWORD_PROMPT=false` for non-interactive
 runs that must fail instead of prompting.
 If one migration node is temporarily SSH-unreachable during automatic RKE2
 repair, the generated recovery inventory excludes that node and reconciles the
-reachable servers first. Set `MIGRATION_SKIP_UNREACHABLE_RKE2_NODES=false` to
-make an unreachable node fail the repair immediately.
+reachable servers first. A three-node HA repair requires at least two
+SSH-reachable servers by default to preserve embedded-etcd quorum. Set
+`MIGRATION_SKIP_UNREACHABLE_RKE2_NODES=false` to make an unreachable node fail
+the repair immediately, or override
+`MIGRATION_REPAIR_MIN_REACHABLE_RKE2_NODES` only for an intentional lab
+recovery.
 If `/tmp/urban-platform-import-inventory.yml` is not present, pass
 `MIGRATION_RKE2_NODES=node-1,node-2,node-3` once so the helper can rebuild that
 inventory.
@@ -97,7 +105,7 @@ make status
 make observability-status
 ```
 
-Install ECK, kube-prometheus-stack/Grafana, and OpenTelemetry Collector with `make install-operators`, then enable `monitoring.enabled=true` in a production override file when the Prometheus Operator CRDs are present.
+`make install-operators` installs the required operators and only installs optional observability charts when their flags are enabled. For the 4-core/4 GiB lab profile, those observability services are off by default. Re-enable only what you need, for example with `DEPLOY_ENABLE_PROMETHEUS=true DEPLOY_ENABLE_GRAFANA=true` for metrics dashboards or `DEPLOY_ENABLE_ELASTICSEARCH=true DEPLOY_ENABLE_KIBANA=true DEPLOY_ENABLE_LOGSTASH=true` for Elastic, then enable `monitoring.enabled=true` in a production override file when the Prometheus Operator CRDs are present.
 
 Service objectives live in `config/slo.yaml`. Alert runbooks live in `docs/runbooks.md`.
 
@@ -117,7 +125,7 @@ Recommended before production:
 
 ## Logs
 
-Default pipeline: OpenTelemetry Collector -> Logstash -> Elasticsearch -> Kibana, with Prometheus/Grafana for metrics and dashboards. Optional pipelines are configured in `config/observability.yaml`.
+Default lab pipeline: application logs go to stdout/stderr and heavy observability backends are disabled. Production pipelines such as OpenTelemetry Collector -> Logstash -> Elasticsearch -> Kibana, or Prometheus/Grafana for metrics and dashboards, are configured in `config/observability.yaml` and enabled through deploy flags or values overrides.
 
 ## Monthly Review
 

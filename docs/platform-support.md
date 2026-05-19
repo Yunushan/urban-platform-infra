@@ -10,7 +10,7 @@
 - Ingress controller: RKE2-bundled Traefik by default, switchable to a pinned upstream Traefik chart or ingress-nginx
 - Webserver: nginx
 - Database profile: PostgreSQL/PostGIS/TimescaleDB via CloudNativePG
-- Observability profile: Elastic ECK + Prometheus/Grafana + OpenTelemetry Collector
+- Observability profile: disabled low-resource lab profile by default; Elastic ECK, Prometheus/Grafana, OpenTelemetry, Loki, and ClickHouse are opt-in
 
 ## Supported profiles
 

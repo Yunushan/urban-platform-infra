@@ -61,10 +61,11 @@ releases:
     namespace: observability
     chart: prometheus-community/kube-prometheus-stack
     version: 61.7.2
-    installed: {{ env "INSTALL_PROMETHEUS" | default "true" }}
+    installed: {{ env "INSTALL_PROMETHEUS" | default "false" }}
     createNamespace: true
     values:
       - grafana:
+          enabled: {{ env "GRAFANA_ENABLED" | default "false" }}
           service:
             type: {{ env "GRAFANA_SERVICE_TYPE" | default "NodePort" | quote }}
             nodePort: {{ env "GRAFANA_NODE_PORT" | default "30300" }}
@@ -74,7 +75,7 @@ releases:
     namespace: observability
     chart: open-telemetry/opentelemetry-collector
     version: 0.153.0
-    installed: {{ env "INSTALL_OPENTELEMETRY" | default "true" }}
+    installed: {{ env "INSTALL_OPENTELEMETRY" | default "false" }}
     createNamespace: true
     values:
       - mode: daemonset
@@ -91,16 +92,16 @@ releases:
             enabled: true
         resources:
           requests:
-            cpu: 100m
-            memory: 256Mi
+            cpu: 50m
+            memory: 128Mi
           limits:
-            memory: 512Mi
+            memory: 256Mi
 
   - name: loki
     namespace: observability
     chart: grafana/loki
     version: 6.12.0
-    installed: {{ env "INSTALL_LOKI" | default "true" }}
+    installed: {{ env "INSTALL_LOKI" | default "false" }}
     createNamespace: true
     values:
       - deploymentMode: SingleBinary
@@ -147,7 +148,7 @@ releases:
   - name: clickhouse
     namespace: observability
     chart: bitnami/clickhouse
-    installed: {{ env "INSTALL_CLICKHOUSE" | default "true" }}
+    installed: {{ env "INSTALL_CLICKHOUSE" | default "false" }}
     createNamespace: true
     values:
       - service:

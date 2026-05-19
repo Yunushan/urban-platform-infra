@@ -24,6 +24,10 @@ spec:
         - name: logstash
           image: {{ include "cip.image" (list . .Values.observability.logstash.image) | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy | quote }}
+          {{- with .Values.observability.logstash.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             {{- range .Values.observability.logstash.ports }}
             - name: {{ .name | quote }}

@@ -1,12 +1,12 @@
 # Observability, SLOs, and Production Operations
 
-This project should be observable before it is scaled. The default enterprise stack is Elastic ECK plus Prometheus/Grafana plus OpenTelemetry Collector: Elasticsearch/Kibana/Logstash handle log search, kube-prometheus-stack provides metrics and dashboards, and OpenTelemetry Collector gathers cluster telemetry. SLO and alerting resources are disabled by default in the application chart so the chart can render without Prometheus Operator CRDs, then enabled after `kube-prometheus-stack` is installed.
+This project should be observable before it is scaled, but the default lab profile is intentionally lightweight for 4-core/4 GiB nodes. Elasticsearch, Kibana, Grafana, Loki, ClickHouse, Logstash, Prometheus, and OpenTelemetry are disabled by default. The production stack can still be enabled: Elasticsearch/Kibana/Logstash handle log search, kube-prometheus-stack provides metrics and dashboards, and OpenTelemetry Collector gathers cluster telemetry. SLO and alerting resources are disabled by default in the application chart so the chart can render without Prometheus Operator CRDs, then enabled after `kube-prometheus-stack` is installed.
 
 ## Article 8 Baseline
 
 The production baseline is:
 
-1. Install ECK, kube-prometheus-stack/Grafana, and OpenTelemetry Collector through `deploy/helmfile.yaml.gotmpl`.
+1. Enable only the observability components the environment can support through `deploy/helmfile.yaml.gotmpl` or deploy env flags.
 2. Enable chart monitoring only after the Prometheus Operator CRDs exist.
 3. Keep service objectives in `config/slo.yaml`.
 4. Keep alert runbooks in `docs/runbooks.md`.

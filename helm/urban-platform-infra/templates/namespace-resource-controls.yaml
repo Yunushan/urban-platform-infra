@@ -1,0 +1,31 @@
+{{- if .Values.namespace.limitRange.enabled }}
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: {{ include "cip.name" . }}-defaults
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+spec:
+  limits:
+    - type: Container
+      default:
+        {{- toYaml .Values.namespace.limitRange.default | nindent 8 }}
+      defaultRequest:
+        {{- toYaml .Values.namespace.limitRange.defaultRequest | nindent 8 }}
+{{- end }}
+{{- if and .Values.namespace.limitRange.enabled .Values.namespace.resourceQuota.enabled }}
+---
+{{- end }}
+{{- if .Values.namespace.resourceQuota.enabled }}
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: {{ include "cip.name" . }}-quota
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+spec:
+  hard:
+    {{- toYaml .Values.namespace.resourceQuota.hard | nindent 4 }}
+{{- end }}

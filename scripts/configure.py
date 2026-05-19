@@ -19,7 +19,7 @@ def main():
     parser.add_argument('--webserver', choices=['nginx','apache-httpd','apache-tomcat','traefik'])
     parser.add_argument('--ingress-controller', choices=['traefik','nginx'])
     parser.add_argument('--database')
-    parser.add_argument('--observability', choices=['elasticsearch','loki','opensearch','graylog','clickhouse','grafana'])
+    parser.add_argument('--observability', choices=['disabled','elasticsearch','loki','opensearch','graylog','clickhouse','grafana'])
     parser.add_argument('--values', default=str(ROOT / 'helm/urban-platform-infra/values.yaml'))
     args = parser.parse_args()
 
@@ -43,13 +43,36 @@ def main():
     if args.observability:
         obs = values.setdefault('observability', {})
         obs['profile'] = args.observability
+        disabled = args.observability == 'disabled'
+        stack = obs.setdefault('stack', {})
+        if disabled:
+            stack.update({
+                'name': 'disabled',
+                'logging': 'none',
+                'search': 'none',
+                'metrics': 'none',
+                'dashboards': 'none',
+                'telemetry': 'none',
+                'traces': 'none',
+            })
+        else:
+            stack.update({
+                'name': 'elastic-eck-prometheus-grafana-opentelemetry' if args.observability == 'elasticsearch' else args.observability,
+                'logging': args.observability,
+                'search': args.observability if args.observability in ['elasticsearch', 'opensearch'] else 'none',
+                'metrics': 'prometheus',
+                'dashboards': 'grafana',
+                'telemetry': 'opentelemetry',
+                'traces': 'opentelemetry',
+            })
         for key in ['loki','opensearch','graylog','clickhouse']:
-            obs.setdefault(key, {})['enabled'] = key == args.observability
+            obs.setdefault(key, {})['enabled'] = (not disabled) and key == args.observability
         obs.setdefault('elasticsearch', {})['enabled'] = args.observability == 'elasticsearch'
         obs.setdefault('kibana', {})['enabled'] = args.observability == 'elasticsearch'
-        obs.setdefault('grafana', {})['enabled'] = args.observability in ['grafana','loki','clickhouse','elasticsearch']
-        obs.setdefault('prometheus', {})['enabled'] = True
-        obs.setdefault('opentelemetry', {})['enabled'] = True
+        obs.setdefault('grafana', {})['enabled'] = (not disabled) and args.observability in ['grafana','loki','clickhouse','elasticsearch']
+        obs.setdefault('prometheus', {})['enabled'] = not disabled
+        obs.setdefault('opentelemetry', {})['enabled'] = not disabled
+        obs.setdefault('logstash', {})['enabled'] = args.observability == 'elasticsearch'
 
     write_yaml(values_path, values)
     print(f'Updated {values_path}')

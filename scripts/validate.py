@@ -157,8 +157,12 @@ if values['global']['cluster']['engine'] != 'rke2':
     errors.append('Default engine must be rke2')
 if values['global']['cluster']['nodes'] != 3:
     errors.append('Default cluster node count must be 3')
-if values['global'].get('replicaOverride') is not None:
-    errors.append('Default global.replicaOverride must be null; topology overrides may set it')
+if values['global'].get('replicaOverride') != 1:
+    errors.append('Default global.replicaOverride must be 1 for the low-resource lab profile')
+if values['global'].get('skipPlaceholderWorkloads') is not True:
+    errors.append('Default placeholder workloads must be skipped for the low-resource lab profile')
+if values.get('autoscaling', {}).get('enabled') is not False:
+    errors.append('Autoscaling must default to disabled for the low-resource lab profile')
 if values['webserver']['provider'] != 'nginx':
     errors.append('Default webserver must be nginx')
 if values.get('secretManagement', {}).get('enabled') is not False:
@@ -177,6 +181,11 @@ if values.get('webserver', {}).get('ingress', {}).get('enabled') is not False:
     errors.append('Webserver root ingress must be disabled by default; the imported gateway owns the public root route')
 if values.get('namespace', {}).get('create') is not True:
     errors.append('Namespace manifest rendering must be enabled by default for GitOps and policy checks')
+namespace_values = values.get('namespace', {})
+if namespace_values.get('limitRange', {}).get('enabled') is not True:
+    errors.append('Namespace LimitRange must be enabled by default for lab resource guardrails')
+if namespace_values.get('resourceQuota', {}).get('enabled') is not True:
+    errors.append('Namespace ResourceQuota must be enabled by default for lab resource guardrails')
 if values.get('monitoring', {}).get('enabled') is not False:
     errors.append('Monitoring CRDs must be disabled by default so the chart renders before operators are installed')
 timescaledb_values = values.get('databases', {}).get('instances', {}).get('timescaledb', {})
@@ -192,16 +201,14 @@ database_values = values.get('databases', {})
 if database_values.get('postgresUID') != 999 or database_values.get('postgresGID') != 999:
     errors.append('CNPG database defaults must run Docker Hub Postgres-family images as UID/GID 999')
 observability_values = values.get('observability', {})
-if observability_values.get('stack', {}).get('name') != 'elastic-eck-prometheus-grafana-opentelemetry':
-    errors.append('Default observability stack must be Elastic ECK + Prometheus/Grafana + OpenTelemetry')
+if observability_values.get('profile') != 'disabled' or observability_values.get('stack', {}).get('name') != 'disabled':
+    errors.append('Default observability stack must be disabled for the low-resource lab profile')
 for observability_component in ['elasticsearch', 'kibana', 'logstash', 'grafana', 'prometheus', 'opentelemetry', 'loki', 'clickhouse']:
-    if observability_values.get(observability_component, {}).get('enabled') is not True:
-        errors.append(f'Default observability component must be enabled: {observability_component}')
+    if observability_values.get(observability_component, {}).get('enabled') is not False:
+        errors.append(f'Default observability component must be disabled: {observability_component}')
 elasticsearch_resources = observability_values.get('elasticsearch', {}).get('resources', {})
 if not elasticsearch_resources.get('requests', {}).get('cpu') or not elasticsearch_resources.get('limits', {}).get('cpu'):
     errors.append('Default Elasticsearch ECK resources must include CPU requests and limits')
-if elasticsearch_resources.get('requests', {}).get('memory') != elasticsearch_resources.get('limits', {}).get('memory'):
-    errors.append('Default Elasticsearch ECK memory request and limit must match for ECK resource-aware management')
 if observability_values.get('elasticsearch', {}).get('service', {}).get('nodePort') != 30920:
     errors.append('Default Elasticsearch service must expose the expected NodePort 30920 for edge VIP forwarding')
 kibana_values = observability_values.get('kibana', {})
@@ -485,6 +492,10 @@ for kubeconfig_script_token in [
     'MIGRATION_CLUSTER_DOMAIN',
     'MIGRATION_RKE2_VERSION',
     'MIGRATION_AUTO_REPAIR_CLUSTER',
+    'auto_repair_cluster_enabled',
+    'MIGRATION_REPAIR_MIN_REACHABLE_RKE2_NODES',
+    'minimum_reachable_repair_nodes',
+    'Automatic HA repair requires at least',
     'MIGRATION_KEEPALIVED_AUTH_PASS',
     'MIGRATION_KEEPALIVED_INTERFACE',
     'MIGRATION_BECOME_PASSWORD_PROMPT',
@@ -743,8 +754,16 @@ for makefile_helm_token in [
     'DEPLOY_SKIP_PLACEHOLDER_WORKLOADS',
     'DEPLOY_ALLOWED_CIDRS',
     'DEPLOY_CONFIGURE_EDGE_PORTS',
+    'DEPLOY_ENABLE_ECK',
+    'DEPLOY_ENABLE_PROMETHEUS',
+    'DEPLOY_ENABLE_GRAFANA',
+    'DEPLOY_ENABLE_OPENTELEMETRY',
+    'DEPLOY_ENABLE_ELASTICSEARCH',
+    'DEPLOY_ENABLE_KIBANA',
+    'DEPLOY_ENABLE_LOGSTASH',
     'DEPLOY_ENABLE_LOKI',
     'DEPLOY_ENABLE_CLICKHOUSE',
+    'DEPLOY_EDGE_OBSERVABILITY_PORTS',
     'DEPLOY_KIBANA_NODE_PORT',
     'DEPLOY_ELASTICSEARCH_NODE_PORT',
     'DEPLOY_GRAFANA_NODE_PORT',
@@ -1218,6 +1237,8 @@ for database_token in [
     'storageClass:',
     'postgresUID:',
     'postgresGID:',
+    '$resources',
+    '.Values.databases.resources',
 ]:
     if database_token not in database_template_text:
         errors.append(f'Database template missing required token: {database_token}')
@@ -1232,6 +1253,9 @@ for kafka_template_token in [
     '$zookeeperConnect',
     '$kafkaReplicationFactor',
     '$kafkaMinIsr',
+    '.Values.messaging.kafka.zookeeper.resources',
+    '.Values.messaging.kafka.resources',
+    '.Values.messaging.kafka.ui.resources',
 ]:
     if kafka_template_token not in kafka_template_text:
         errors.append(f'Kafka template missing lab replica-aware token: {kafka_template_token}')
@@ -1240,9 +1264,15 @@ for redis_template_token in [
     '$redisReplicas',
     '$sentinelQuorum',
     'sentinel monitor mymaster',
+    '.Values.messaging.redis.resources',
+    '.Values.messaging.redis.sentinel.resources',
 ]:
     if redis_template_token not in redis_template_text:
         errors.append(f'Redis template missing lab replica-aware token: {redis_template_token}')
+namespace_resource_template = (ROOT / 'helm/urban-platform-infra/templates/namespace-resource-controls.yaml').read_text(encoding='utf-8')
+for namespace_resource_token in ['kind: LimitRange', 'kind: ResourceQuota', '.Values.namespace.limitRange', '.Values.namespace.resourceQuota']:
+    if namespace_resource_token not in namespace_resource_template:
+        errors.append(f'Namespace resource guardrail template missing token: {namespace_resource_token}')
 eck_template_text = (ROOT / 'helm/urban-platform-infra/templates/observability-eck.yaml').read_text(encoding='utf-8')
 for eck_template_token in [
     'podTemplate:',
@@ -1270,15 +1300,18 @@ for status_token in ['prometheusrules.monitoring.coreos.com', 'servicemonitors.m
     if status_token not in status_script:
         errors.append(f'status script missing observability check: {status_token}')
 observability_contract = yaml.safe_load((ROOT / 'config/observability.yaml').read_text(encoding='utf-8'))
-if observability_contract.get('defaultStack') != 'elastic-eck-prometheus-grafana-opentelemetry':
-    errors.append('Observability contract must declare the enterprise default stack')
+if observability_contract.get('default') != 'disabled' or observability_contract.get('defaultStack') != 'disabled':
+    errors.append('Observability contract must default to the disabled low-resource profile')
 for observability_profile in ['elasticsearch', 'grafana', 'prometheus', 'opentelemetry', 'loki', 'clickhouse']:
-    if observability_contract.get('profiles', {}).get(observability_profile, {}).get('enabled') is not True:
-        errors.append(f'Observability contract must enable default profile: {observability_profile}')
+    if observability_contract.get('profiles', {}).get(observability_profile, {}).get('enabled') is not False:
+        errors.append(f'Observability contract must disable default profile: {observability_profile}')
 helmfile_text = (ROOT / 'deploy/helmfile.yaml.gotmpl').read_text(encoding='utf-8')
 for helmfile_token in [
     'open-telemetry.github.io/opentelemetry-helm-charts',
     'opentelemetry-collector',
+    'INSTALL_ECK',
+    'INSTALL_PROMETHEUS',
+    'GRAFANA_ENABLED',
     'INSTALL_OPENTELEMETRY',
     'kube-prometheus-stack',
     'GRAFANA_NODE_PORT',
@@ -1290,7 +1323,7 @@ for helmfile_token in [
     'eck-operator',
     'version: 0.28.0',
     'version: 3.4.0',
-    'memory: 512Mi',
+    'memory: 256Mi',
 ]:
     if helmfile_token not in helmfile_text:
         errors.append(f'Helmfile missing default observability stack token: {helmfile_token}')
