@@ -238,6 +238,42 @@
             "warn",
             "version"
           ]
+        },
+        "limitRange": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "default": {
+              "$ref": "#/$defs/resourceList"
+            },
+            "defaultRequest": {
+              "$ref": "#/$defs/resourceList"
+            }
+          },
+          "required": [
+            "enabled",
+            "default",
+            "defaultRequest"
+          ]
+        },
+        "resourceQuota": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "hard": {
+              "$ref": "#/$defs/resourceList"
+            }
+          },
+          "required": [
+            "enabled",
+            "hard"
+          ]
         }
       },
       "required": [
@@ -745,6 +781,16 @@
       "required": [
         "enabled"
       ]
+    },
+    "resourceList": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "integer",
+          "number"
+        ]
+      }
     },
     "imagePullPolicy": {
       "type": "string",
