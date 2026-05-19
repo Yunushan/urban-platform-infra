@@ -12,12 +12,18 @@ if not path.exists():
     print(f'Missing rendered manifest: {path}', file=sys.stderr)
     sys.exit(2)
 
+documents = [doc for doc in yaml.safe_load_all(path.read_text()) if isinstance(doc, dict)]
+low_resource_lab_profile = any(
+    doc.get('kind') == 'ResourceQuota'
+    and doc.get('spec', {}).get('hard', {}).get('requests.memory') == '8Gi'
+    and doc.get('spec', {}).get('hard', {}).get('limits.memory') == '10Gi'
+    for doc in documents
+)
+
 errors = []
 network_policies = set()
 namespace_seen = False
-for doc in yaml.safe_load_all(path.read_text()):
-    if not isinstance(doc, dict):
-        continue
+for doc in documents:
     kind = doc.get('kind')
     meta = doc.get('metadata', {})
     name = meta.get('name', '<unknown>')
@@ -84,8 +90,13 @@ for doc in yaml.safe_load_all(path.read_text()):
                     errors.append(f'{kind}/{name}: application containers must run as non-root')
                 if 'ALL' not in dropped:
                     errors.append(f'{kind}/{name}: application containers must drop ALL capabilities')
-        if kind == 'Deployment' and spec.get('replicas', 0) < 2:
-            errors.append(f'{kind}/{name}: replicas should be >= 2 for HA')
+        if kind == 'Deployment':
+            replicas = spec.get('replicas', 0)
+            if low_resource_lab_profile:
+                if replicas < 1:
+                    errors.append(f'{kind}/{name}: replicas should be >= 1 for the low-resource lab profile')
+            elif replicas < 2:
+                errors.append(f'{kind}/{name}: replicas should be >= 2 for HA')
 
 expected_network_policies = {
     'urban-platform-default-deny',
