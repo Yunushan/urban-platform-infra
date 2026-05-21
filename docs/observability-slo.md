@@ -4,6 +4,14 @@ This project should be observable before it is scaled, but the default lab profi
 
 ## Article 8 Baseline
 
+The local Article 8 planner is `scripts/observability_plan.py`. It generates a
+public-safe readiness report for SLOs, alert rules, runbooks, ServiceMonitor
+gates, and disabled-by-default observability components:
+
+```bash
+make observability-plan
+```
+
 The production baseline is:
 
 1. Enable only the observability components the environment can support through `deploy/helmfile.yaml.gotmpl` or deploy env flags.
@@ -11,6 +19,10 @@ The production baseline is:
 3. Keep service objectives in `config/slo.yaml`.
 4. Keep alert runbooks in `docs/runbooks.md`.
 5. Page only on user-impacting or data-risk conditions; create tickets for early warning.
+
+The generated `reports/observability-plan.md` file is safe to share. It reports
+readiness state only, never kubeconfigs, private endpoints, credentials, event
+payloads, or logs.
 
 ## Enable Monitoring Rules
 

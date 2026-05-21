@@ -3,10 +3,40 @@
 {{- if $db.enabled }}
 {{- $storageOverride := $.Values.databases.storageOverride | default dict }}
 {{- $storageSize := $storageOverride.size | default $db.storage.size | default "20Gi" }}
-{{- $storageClass := $storageOverride.className | default $db.storage.className }}
+{{- $explicitStorageClass := $storageOverride.className | default $db.storage.className | default "" }}
+{{- $storageClass := include "cip.storageClassName" (list $ $explicitStorageClass "hot") }}
 {{- $postgresUID := $db.postgresUID | default $.Values.databases.postgresUID }}
 {{- $postgresGID := $db.postgresGID | default $.Values.databases.postgresGID }}
 {{- $resources := $db.resources | default $.Values.databases.resources }}
+{{- $globalBackup := $.Values.databases.backup | default dict }}
+{{- $dbBackup := $db.backup | default dict }}
+{{- $globalObjectStore := $globalBackup.objectStore | default dict }}
+{{- $dbObjectStore := $dbBackup.objectStore | default dict }}
+{{- $storageTiers := $.Values.storageTiers | default dict }}
+{{- $coldTier := get $storageTiers "cold" | default dict }}
+{{- $coldObjectStore := $coldTier.objectStore | default dict }}
+{{- $backupSecretRef := $coldObjectStore.secretRef | default dict }}
+{{- if $globalObjectStore.secretRef }}
+{{- $backupSecretRef = $globalObjectStore.secretRef | default dict }}
+{{- end }}
+{{- if $dbObjectStore.secretRef }}
+{{- $backupSecretRef = $dbObjectStore.secretRef | default dict }}
+{{- end }}
+{{- $backupEnabled := or ($globalBackup.enabled | default false) ($dbBackup.enabled | default false) }}
+{{- $backupObjectStoreEnabled := or ($globalObjectStore.enabled | default false) ($dbObjectStore.enabled | default false) ($coldObjectStore.enabled | default false) }}
+{{- $backupProvider := coalesce $dbObjectStore.provider $globalObjectStore.provider $coldObjectStore.provider "s3-compatible" }}
+{{- $backupSecretName := coalesce $backupSecretRef.name "" }}
+{{- $backupBucket := coalesce $dbObjectStore.bucket $globalObjectStore.bucket $coldObjectStore.bucket "" }}
+{{- $backupPrefix := coalesce $dbObjectStore.prefix $globalObjectStore.prefix $coldObjectStore.prefix "urban-platform/databases" }}
+{{- $backupSafePrefix := trimAll "/" $backupPrefix }}
+{{- $backupDestinationPath := coalesce $dbObjectStore.destinationPath $globalObjectStore.destinationPath "" }}
+{{- $backupEndpointURL := coalesce $dbObjectStore.endpointURL $globalObjectStore.endpointURL "" }}
+{{- $backupCompression := coalesce $dbObjectStore.compression $globalObjectStore.compression "gzip" }}
+{{- $backupReady := and $backupEnabled $backupObjectStoreEnabled $backupSecretName (or $backupDestinationPath $backupBucket) (or (eq $backupProvider "s3-compatible") (eq $backupProvider "aws-s3")) }}
+{{- $globalBackupSchedule := $globalBackup.schedule | default dict }}
+{{- $dbBackupSchedule := $dbBackup.schedule | default dict }}
+{{- $backupScheduleEnabled := and $backupReady (or ($globalBackupSchedule.enabled | default false) ($dbBackupSchedule.enabled | default false)) }}
+{{- $backupScheduleCron := coalesce $dbBackupSchedule.cron $globalBackupSchedule.cron "0 0 2 * * *" }}
 ---
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
@@ -48,10 +78,54 @@ spec:
     {{- if $storageClass }}
     storageClass: {{ $storageClass | quote }}
     {{- end }}
+  {{- if $backupReady }}
+  backup:
+    retentionPolicy: {{ coalesce $dbBackup.retentionPolicy $globalBackup.retentionPolicy "30d" | quote }}
+    barmanObjectStore:
+      {{- if $backupDestinationPath }}
+      destinationPath: {{ $backupDestinationPath | quote }}
+      {{- else if $backupSafePrefix }}
+      destinationPath: {{ printf "s3://%s/%s/%s" $backupBucket $backupSafePrefix $name | quote }}
+      {{- else }}
+      destinationPath: {{ printf "s3://%s/%s" $backupBucket $name | quote }}
+      {{- end }}
+      serverName: {{ $name | quote }}
+      {{- if $backupEndpointURL }}
+      endpointURL: {{ $backupEndpointURL | quote }}
+      {{- end }}
+      s3Credentials:
+        accessKeyId:
+          name: {{ $backupSecretName | quote }}
+          key: {{ coalesce $backupSecretRef.accessKeyIdKey "accessKeyId" | quote }}
+        secretAccessKey:
+          name: {{ $backupSecretName | quote }}
+          key: {{ coalesce $backupSecretRef.secretAccessKeyKey "secretAccessKey" | quote }}
+      wal:
+        compression: {{ $backupCompression | quote }}
+      data:
+        compression: {{ $backupCompression | quote }}
+  {{- end }}
   {{- if $.Values.databases.monitoring.enableDeprecatedPodMonitor }}
   monitoring:
     enablePodMonitor: true
   {{- end }}
+{{- if $backupScheduleEnabled }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{ printf "%s-backup" $name | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "cip.namespace" $ }}
+  labels:
+    {{- include "cip.labels" $ | nindent 4 }}
+    app.kubernetes.io/name: {{ printf "%s-backup" $name | trunc 63 | trimSuffix "-" }}
+    urban-platform.io/database-engine: {{ $db.engine | quote }}
+spec:
+  schedule: {{ $backupScheduleCron | quote }}
+  backupOwnerReference: self
+  cluster:
+    name: {{ $name }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

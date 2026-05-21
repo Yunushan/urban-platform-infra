@@ -1,0 +1,89 @@
+defaultProfile: disabled
+profiles:
+  disabled:
+    description: Public-safe default. Keep runtime hardening advisory until a cluster owner opts in.
+    enabled: false
+    enforcementMode: audit
+    policyEngine: none
+    podSecurityEnforce: baseline
+    requireDigestImages: false
+    requireSignedImages: false
+    requireReadOnlyRootFilesystem: false
+    requireRunAsNonRoot: true
+    requireRuntimeDefaultSeccomp: true
+    requireDropAllCapabilities: true
+    disallowPrivilegeEscalation: true
+    disallowHostNamespaces: true
+  lab-audit:
+    description: Lab-safe audit profile for 4 GiB/node clusters and import rehearsal.
+    enabled: true
+    enforcementMode: audit
+    policyEngine: native-psa
+    podSecurityEnforce: baseline
+    podSecurityAudit: restricted
+    podSecurityWarn: restricted
+    requireDigestImages: false
+    requireSignedImages: false
+    requireReadOnlyRootFilesystem: false
+    requireRunAsNonRoot: true
+    requireRuntimeDefaultSeccomp: true
+    requireDropAllCapabilities: true
+    disallowPrivilegeEscalation: true
+    disallowHostNamespaces: true
+  production-restricted:
+    description: Production profile for restricted Pod Security and immutable image identity.
+    enabled: true
+    enforcementMode: enforce
+    policyEngine: kyverno
+    podSecurityEnforce: restricted
+    podSecurityAudit: restricted
+    podSecurityWarn: restricted
+    requireDigestImages: true
+    requireSignedImages: false
+    requireReadOnlyRootFilesystem: true
+    requireRunAsNonRoot: true
+    requireRuntimeDefaultSeccomp: true
+    requireDropAllCapabilities: true
+    disallowPrivilegeEscalation: true
+    disallowHostNamespaces: true
+  enterprise-signed:
+    description: Enterprise profile for restricted runtime controls and signed digest admission.
+    enabled: true
+    enforcementMode: enforce
+    policyEngine: kyverno
+    podSecurityEnforce: restricted
+    podSecurityAudit: restricted
+    podSecurityWarn: restricted
+    requireDigestImages: true
+    requireSignedImages: true
+    requireReadOnlyRootFilesystem: true
+    requireRunAsNonRoot: true
+    requireRuntimeDefaultSeccomp: true
+    requireDropAllCapabilities: true
+    disallowPrivilegeEscalation: true
+    disallowHostNamespaces: true
+controller:
+  publicSafeReport: true
+  report: reports/runtime-hardening-plan.md
+  overrides: reports/runtime-hardening-values.yaml
+  policyEngines:
+    - none
+    - native-psa
+    - kyverno
+    - gatekeeper
+  admissionChecks:
+    - pod-security-admission-labels
+    - no-host-namespaces
+    - non-root-containers
+    - runtime-default-seccomp
+    - drop-all-capabilities
+    - no-privilege-escalation
+    - read-only-root-filesystem
+    - digest-pinned-images
+    - signed-images
+guardrails:
+  - keep runtimeHardening.enabled=false in committed defaults
+  - start with lab-audit before enforcing restricted controls
+  - enforce read-only root filesystems only after writable paths are mapped to emptyDir or PVCs
+  - require digest pins before signed-image admission becomes blocking
+  - keep Kyverno or another admission engine disabled until cluster capacity and ownership are ready

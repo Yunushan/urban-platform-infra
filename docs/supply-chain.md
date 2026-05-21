@@ -13,6 +13,13 @@ Release integrity depends on four controls:
 
 The GitHub release workflow packages the Helm chart, renders the default manifest, generates `dist/SHA256SUMS`, generates `dist/urban-platform-infra.spdx.json`, and attests the evidence with GitHub artifact attestations. The GitLab tag pipeline mirrors the checksum and SBOM evidence path for private GitLab users.
 
+The local Article 6 verifier is `scripts/release/verify_release_evidence.py`.
+`make release-evidence` now runs it after generating artifacts, and
+`make verify-release-evidence` can validate an existing `dist/` directory
+without rebuilding. The verifier checks chart version versus tag, required
+artifact presence, SHA-256 contents, SPDX JSON structure, and public-safe text
+patterns before writing `reports/release-evidence-verification.md`.
+
 ## Release Evidence
 
 Expected release evidence:
@@ -31,6 +38,7 @@ The checksum file is the first offline integrity check. The GitHub attestation i
 After downloading release evidence:
 
 ```bash
+make verify-release-evidence RELEASE_TAG=v0.1.0
 sha256sum -c dist/SHA256SUMS
 gh attestation verify dist/urban-platform-infra-0.1.0.tgz --repo OWNER/REPO
 ```

@@ -2,6 +2,7 @@
 {{- $redisReplicas := int (include "cip.replicaCount" (list . (.Values.messaging.redis.replicas | default 3))) }}
 {{- $sentinelQuorum := int (min 2 $redisReplicas) }}
 {{- $sentinelEnabled := and .Values.messaging.redis.sentinel.enabled (gt $redisReplicas 1) }}
+{{- $redisStorageClass := include "cip.storageClassName" (list . (.Values.messaging.redis.storage.className | default "") "hot") }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -110,8 +111,8 @@ spec:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
-{{ if .Values.messaging.redis.storage.className }}
-        storageClassName: {{ .Values.messaging.redis.storage.className | quote }}
+{{ if $redisStorageClass }}
+        storageClassName: {{ $redisStorageClass | quote }}
 {{ end }}
         resources:
           requests:

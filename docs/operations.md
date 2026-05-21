@@ -31,6 +31,13 @@ explicitly when database scraping is required.
 For lab clusters or small disks, override all CloudNativePG PVCs with
 `databases.storageOverride.size` and, when the cluster does not have a default
 StorageClass, `databases.storageOverride.className`.
+
+For environments with separate storage backends, configure optional
+hot/warm/cold storage tiers in `storageTiers`. The hot tier can act as the
+default StorageClass fallback for stateful chart workloads when their explicit
+storage class is empty. Warm and cold tiers are public-safe contracts for
+compressed history, backups, import dumps, snapshots, and release evidence; see
+[`docs/storage-tiers.md`](storage-tiers.md).
 `make install-operators` checks for a StorageClass before installing stateful
 workloads. When no StorageClass exists, `INSTALL_LOCAL_PATH_STORAGE=auto`
 installs Rancher local-path provisioner as a default lab StorageClass. Set
@@ -45,7 +52,9 @@ For an import/lab deployment, use the automatic recovery path instead of
 manually uninstalling stuck releases or deleting Pending PVCs:
 
 ```bash
+make environment-profile-plan ENV_PROFILE=lab IMPORT_REDACT=true
 make deploy-auto \
+  HELM_EXTRA_ARGS="-f reports/environment-profile-values.yaml" \
   OPERATOR_KUBECONFIG="$OPERATOR_KUBECONFIG" \
   KUBECONFIG="$KUBECONFIG" \
   DEPLOY_INGRESS_HOST="$DEPLOY_INGRESS_HOST" \
@@ -63,12 +72,121 @@ ZooKeeper, Redis, and any explicitly enabled observability backend. Bound PVCs a
 Sentinel for the one-replica lab profile and skips sanitized placeholder
 workloads whose images are still `example-app-*`, avoiding wasted memory and
 repeated image pulls until real application images are imported or configured.
+`make environment-profile-plan` aligns the lab, staging, or production intent
+before deploy/import work starts. It writes
+`reports/environment-profile-plan.md` and
+`reports/environment-profile-values.yaml`, tying topology, Helm replica/storage
+defaults, migration profile, image mode, database strictness, edge routing,
+backup, observability, optional capabilities, and release evidence requirements
+together in one public-safe report.
+`import-auto` also defaults to `MIGRATION_PROFILE=lab`. That profile writes
+`reports/import-migration/lab-profile-values.yaml` and applies small resource
+requests/limits to generated imported workloads. Keep this profile for
+4 GiB/node labs; switch to `MIGRATION_PROFILE=production` only after capacity,
+backup, storage, and database cutover plans are reviewed.
+Before running a large image import, run `make image-cache-plan`. It writes
+`reports/image-cache-plan.md` with the selected registry or preload strategy,
+RKE2 node count, running containerd import behavior, and operator cache cleanup
+settings. The report is public-safe and does not list node addresses, image
+layers, or registry credentials.
+Before production registry mode, run `make registry-promotion-plan`. It writes
+`reports/registry-promotion-controller.md` and
+`reports/registry-promotion-values.yaml`, confirming registry profile, image
+pull secret, digest pins, and promotion evidence before the mutating image stage
+or an external promotion pipeline runs.
+Before enabling GitOps reconciliation, run `make gitops-delivery-plan`. It
+writes `reports/gitops-delivery-plan.md` and
+`reports/gitops-delivery-values.yaml`, confirming operator-managed, Argo CD, or
+Flux delivery intent, drift posture, protected-branch expectations, and
+required preflight checks without printing private repository URLs or values
+file names when redaction is enabled.
+Before enabling canary or blue-green delivery, run
+`make progressive-delivery-plan`. It writes
+`reports/progressive-delivery-plan.md` and
+`reports/progressive-delivery-values.yaml`, confirming rollout strategy,
+controller ownership, traffic provider, SLO analysis, GitOps readiness, and
+rollback drill evidence. Keep progressive delivery disabled until the plan is
+reviewed and automatic promotion has an explicit owner.
+Before enabling HPA, VPA, KEDA, or cluster autoscaler automation, run
+`make scaling-policy-plan`. It writes `reports/scaling-policy-plan.md` and
+`reports/scaling-policy-values.yaml`, confirming capacity evidence, metrics
+source readiness, SLO alert coverage, event-trigger ownership, and load-test
+evidence. Keep runtime autoscaling disabled until a private overlay has been
+reviewed.
+Before tightening egress or enabling Linkerd/Istio, run
+`make network-connectivity-plan`. It writes
+`reports/network-connectivity-plan.md` and
+`reports/network-connectivity-values.yaml`, confirming NetworkPolicy, DNS, TLS,
+Kubernetes API egress, external egress contract, and service mesh readiness
+without printing private routes or CIDR inventories. Keep mesh and stricter
+egress plan-only until health probes and rollback behavior are proven.
+Before enabling OIDC/SSO, broad RBAC changes, or tenant namespaces, run
+`make access-governance-plan`. It writes
+`reports/access-governance-plan.md` and
+`reports/access-governance-values.yaml`, confirming service-account token
+automount, least-privilege RBAC, identity provider, audit policy, break-glass,
+and tenant isolation readiness without printing users, groups, tenants, or
+identity provider URLs.
+Before assembling compliance evidence or audit packs, run
+`make compliance-evidence-plan`. It writes
+`reports/compliance-evidence-plan.md` and
+`reports/compliance-evidence-values.yaml`, confirming control-map, private
+evidence-index, restore drill, access review, incident drill, checksum,
+attestation, and retention readiness without exporting private evidence or
+claiming certification.
+Before enabling production paging or incident-management integrations, run
+`make incident-response-plan`. It writes
+`reports/incident-response-plan.md` and
+`reports/incident-response-values.yaml`, confirming alert route ownership,
+escalation rota, pager service, runbook index, service ownership, communication
+template, stakeholder map, incident drill, post-incident review, and regulatory
+owner readiness without paging anyone or printing private contacts.
+Before enforcing production change approvals or maintenance windows, run
+`make change-management-plan`. It writes
+`reports/change-management-plan.md` and
+`reports/change-management-values.yaml`, confirming change-ticket, approval,
+risk, impact, freeze-check, stakeholder notice, rollback, smoke-test,
+deployment evidence, and post-change review readiness without creating tickets
+or printing private approver details.
+Before claiming disaster recovery or business continuity readiness, run
+`make disaster-recovery-plan`. It writes
+`reports/disaster-recovery-plan.md` and
+`reports/disaster-recovery-values.yaml`, confirming RTO/RPO, dependency map,
+criticality map, backup replication, database restore, RKE2 etcd restore,
+namespace restore, application smoke test, failover runbook, communications,
+manual workaround, supplier ownership, and post-drill review readiness without
+printing private recovery sites or drill evidence.
+Before running the database stage, run `make database-migration-plan`. It writes
+`reports/database-migration-plan.md` with the target-map status, dump directory,
+PostgreSQL client fallback image, supported engines, and lab/production
+source-skipping behavior without printing DSNs or passwords.
+Before applying imported public routes, run `make edge-migration-plan`. It
+writes `reports/edge-migration-plan.md` with the selected ingress class, TLS
+mode, source allowlist state, HTTP redirect behavior, and backend-Service apply
+guard without printing private DNS names, VIPs, or TLS material.
 If the API is reachable but `/readyz` reports embedded-etcd readiness failures,
 operator kubeconfig repair runs in `auto` mode when migration node addresses are
 available. `deploy-auto` and `import-auto` still force that guarded RKE2 repair
 pass explicitly.
 If the VIP kubeconfig times out after `import-auto`, the kubeconfig helper reuses
 the temporary migration inventory and falls back to an SSH tunnel to the RKE2 API.
+Before `import-auto` applies secrets, restores databases, or applies manifests,
+it runs the import cluster preflight and writes
+`reports/import-migration/import-preflight.md`. That gate checks Kubernetes
+`/readyz`, node readiness and pressure conditions, StorageClass availability,
+ingress DNS/TLS reachability policy, remote RKE2 service health, HAProxy,
+Keepalived, and node disk headroom when `MIGRATION_RKE2_NODES` is set. It also
+writes `reports/import-migration/import-capacity.md`, which estimates generated
+imported workload CPU/memory requests against cluster allocatable capacity and
+limits lab imports to a small workload count by default. The same flow writes
+`reports/import-migration/import-batches.md` and
+`reports/import-migration/import-batches.yaml`; lab mode defaults to
+`MIGRATION_IMPORT_BATCH=auto`, so an oversized import runs the first bounded
+application batch instead of every generated workload. Resume is enabled by
+default. Successful service-secret, image, database, and manifest stages are
+recorded in the private `MIGRATION_STATE_FILE` and summarized publicly in
+`reports/import-migration/import-resume.md`; reruns skip completed scopes unless
+`MIGRATION_FORCE_RERUN=true` is set.
 When the SSH user needs sudo for RKE2 token or kubeconfig discovery,
 `deploy-auto` prompts once on the terminal and reuses that password only for the
 current run. Set `MIGRATION_BECOME_PASSWORD_PROMPT=false` for non-interactive
@@ -98,16 +216,53 @@ needed, and removes a stale pending Helm secret only as a final recovery step.
 The operator step uses `helmfile sync`, so the Helm diff plugin is not required
 on the operator machine.
 
+## Optional Capabilities
+
+Optional platform capabilities are disabled by default. Enable them only after
+capacity, ownership, storage, DNS, TLS, secret references, and rollback plans
+are reviewed.
+
+Examples:
+
+```bash
+make install-operators DEPLOY_ENABLE_MINIO=true
+make install-operators DEPLOY_ENABLE_RABBITMQ=true
+make install-operators DEPLOY_ENABLE_KEYCLOAK=true
+make install-operators DEPLOY_ENABLE_EMQX=true
+make install-operators DEPLOY_ENABLE_NATS=true
+make install-operators DEPLOY_ENABLE_VAULT=true
+make install-operators DEPLOY_ENABLE_KYVERNO=true
+make install-operators DEPLOY_ENABLE_TEMPORAL=true
+make install-operators DEPLOY_ENABLE_ARGO_WORKFLOWS=true
+```
+
+For small labs, enable only one optional capability at a time. See
+[`docs/platform-capabilities.md`](platform-capabilities.md).
+
 ## Observe
 
 ```bash
 make status
+make cluster-doctor
+make lab-deploy-plan
+make observability-plan
 make observability-status
 ```
 
+Use `make cluster-doctor` when RKE2 API, VIP, HAProxy, Keepalived, SSH/sudo,
+or kubeconfig health is unclear. It writes a public-safe report to
+`reports/cluster-doctor.md`. Use `make cluster-repair` only when you
+intentionally want the guarded kubeconfig/RKE2 repair helper to run.
+
+Use `make lab-deploy-plan` before deploying into a constrained lab. It writes a
+capacity report and an optional first-wave overlay at
+`reports/lab-deploy-values.yaml`. Apply that overlay with
+`HELM_EXTRA_ARGS="-f reports/lab-deploy-values.yaml"` only after reviewing the
+report.
+
 `make install-operators` installs the required operators and only installs optional observability charts when their flags are enabled. For the 4-core/4 GiB lab profile, those observability services are off by default. Re-enable only what you need, for example with `DEPLOY_ENABLE_PROMETHEUS=true DEPLOY_ENABLE_GRAFANA=true` for metrics dashboards or `DEPLOY_ENABLE_ELASTICSEARCH=true DEPLOY_ENABLE_KIBANA=true DEPLOY_ENABLE_LOGSTASH=true` for Elastic, then enable `monitoring.enabled=true` in a production override file when the Prometheus Operator CRDs are present.
 
-Service objectives live in `config/slo.yaml`. Alert runbooks live in `docs/runbooks.md`.
+Service objectives live in `config/slo.yaml`. Alert runbooks live in `docs/runbooks.md`. `make observability-plan` produces a public-safe readiness report before any monitoring or logging stack is enabled.
 
 ## Upgrade Image Tags
 
@@ -115,13 +270,25 @@ Edit `helm/urban-platform-infra/values.yaml` or use dependency automation to pro
 
 ## Backup
 
-Recommended before production:
+Backup support is optional and disabled by default. Generate the public-safe
+plan before enabling anything:
 
-- CloudNativePG scheduled backups to S3-compatible storage.
-- Elasticsearch snapshots to S3-compatible storage.
+```bash
+make backup-plan
+```
+
+Production backup enablement should include:
+
+- CloudNativePG Barman backups to an object-store cold tier.
+- Velero namespace and persistent-volume metadata backups when the operator is
+  explicitly installed.
+- RKE2 etcd snapshots copied off the nodes.
 - Kafka topic backup or MirrorMaker/replication strategy.
 - Redis RDB/AOF persistence and backup.
 - GitOps repository backup.
+
+See [`docs/backup-restore.md`](backup-restore.md). Keep real bucket names,
+secret references, and restore evidence in private operator records.
 
 ## Logs
 

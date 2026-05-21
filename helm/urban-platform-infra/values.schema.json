@@ -204,6 +204,39 @@
         "scheduling"
       ]
     },
+    "imagePromotionController": {
+      "$ref": "#/$defs/imagePromotionController"
+    },
+    "runtimeHardening": {
+      "$ref": "#/$defs/runtimeHardening"
+    },
+    "gitOpsDelivery": {
+      "$ref": "#/$defs/gitOpsDelivery"
+    },
+    "progressiveDelivery": {
+      "$ref": "#/$defs/progressiveDelivery"
+    },
+    "scalingPolicy": {
+      "$ref": "#/$defs/scalingPolicy"
+    },
+    "networkConnectivity": {
+      "$ref": "#/$defs/networkConnectivity"
+    },
+    "accessGovernance": {
+      "$ref": "#/$defs/accessGovernance"
+    },
+    "complianceEvidence": {
+      "$ref": "#/$defs/complianceEvidence"
+    },
+    "incidentResponse": {
+      "$ref": "#/$defs/incidentResponse"
+    },
+    "changeManagement": {
+      "$ref": "#/$defs/changeManagement"
+    },
+    "disasterRecovery": {
+      "$ref": "#/$defs/disasterRecovery"
+    },
     "namespace": {
       "type": "object",
       "additionalProperties": false,
@@ -281,6 +314,101 @@
         "name",
         "podSecurity"
       ]
+    },
+    "storageTiers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hot": {
+          "$ref": "#/$defs/storageTier"
+        },
+        "warm": {
+          "$ref": "#/$defs/storageTier"
+        },
+        "cold": {
+          "$ref": "#/$defs/storageTier"
+        }
+      },
+      "required": [
+        "hot",
+        "warm",
+        "cold"
+      ]
+    },
+    "backup": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "velero": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "installOperator": {
+              "type": "boolean"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "bucket": {
+              "type": "string"
+            },
+            "prefix": {
+              "type": "string"
+            },
+            "snapshotsEnabled": {
+              "type": "boolean"
+            },
+            "nodeAgentEnabled": {
+              "type": "boolean"
+            }
+          }
+        },
+        "rke2Etcd": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
+        "imageArchives": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
+        "externalProviders": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "urbackup": {
+              "$ref": "#/$defs/externalBackupProvider"
+            },
+            "restic": {
+              "$ref": "#/$defs/externalBackupProvider"
+            },
+            "kopia": {
+              "$ref": "#/$defs/externalBackupProvider"
+            },
+            "borg": {
+              "$ref": "#/$defs/externalBackupProvider"
+            }
+          }
+        }
+      }
     },
     "ingress": {
       "type": "object",
@@ -385,7 +513,11 @@
         "provider": {
           "type": "string",
           "enum": [
-            "external-secrets"
+            "external-secrets",
+            "kubernetes",
+            "sealed-secrets",
+            "sops",
+            "vault"
           ]
         },
         "refreshInterval": {
@@ -412,6 +544,27 @@
             "kind"
           ]
         },
+        "providerAdapters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kubernetesDirect": {
+              "$ref": "#/$defs/secretProviderAdapter"
+            },
+            "externalSecrets": {
+              "$ref": "#/$defs/secretProviderAdapter"
+            },
+            "vault": {
+              "$ref": "#/$defs/secretProviderAdapter"
+            },
+            "sops": {
+              "$ref": "#/$defs/secretProviderAdapter"
+            },
+            "sealedSecrets": {
+              "$ref": "#/$defs/secretProviderAdapter"
+            }
+          }
+        },
         "externalSecrets": {
           "type": "object",
           "additionalProperties": {
@@ -423,6 +576,7 @@
         "enabled",
         "provider",
         "refreshInterval",
+        "providerAdapters",
         "secretStoreRef",
         "externalSecrets"
       ]
@@ -733,6 +887,57 @@
         "postgresGID": {
           "type": "integer",
           "minimum": 1
+        },
+        "backup": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "retentionPolicy": {
+              "type": "string"
+            },
+            "compression": {
+              "type": "string"
+            },
+            "objectStore": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "destinationPath": {
+                  "type": "string"
+                },
+                "endpointURL": {
+                  "type": "string"
+                },
+                "bucket": {
+                  "type": "string"
+                },
+                "prefix": {
+                  "type": "string"
+                }
+              }
+            },
+            "schedule": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "cron": {
+                  "type": "string"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -745,17 +950,1753 @@
     "messaging": {
       "type": "object"
     },
+    "platformCapabilities": {
+      "type": "object",
+      "description": "Optional platform capability catalog. All capabilities are disabled by default.",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
     "zabbixAgent": {
       "type": "object"
     }
   },
   "required": [
     "global",
+    "imagePromotionController",
+    "runtimeHardening",
+    "gitOpsDelivery",
+    "progressiveDelivery",
+    "scalingPolicy",
+    "networkConnectivity",
+    "accessGovernance",
+    "complianceEvidence",
+    "incidentResponse",
+    "changeManagement",
+    "disasterRecovery",
     "namespace",
     "webserver",
     "workloads"
   ],
   "$defs": {
+    "imagePromotionController": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "lab-preload",
+            "production-registry",
+            "enterprise-signed"
+          ]
+        },
+        "executionMode": {
+          "type": "string",
+          "enum": [
+            "plan",
+            "enforce"
+          ]
+        },
+        "imageMode": {
+          "type": "string",
+          "enum": [
+            "registry",
+            "preload",
+            "skip"
+          ]
+        },
+        "registry": {
+          "type": "string"
+        },
+        "imagePullSecret": {
+          "$ref": "#/$defs/kubernetesName"
+        },
+        "credentialSource": {
+          "type": "string",
+          "enum": [
+            "none",
+            "existing-login",
+            "env",
+            "external-secret",
+            "vault"
+          ]
+        },
+        "requireDigestPins": {
+          "type": "boolean"
+        },
+        "requireVulnerabilityScan": {
+          "type": "boolean"
+        },
+        "requireSbom": {
+          "type": "boolean"
+        },
+        "requireSignatureOrAttestation": {
+          "type": "boolean"
+        },
+        "requirePromotionRecord": {
+          "type": "boolean"
+        },
+        "reports": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "controller": {
+              "type": "string"
+            },
+            "overrides": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "controller",
+            "overrides"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "profile",
+        "executionMode",
+        "imageMode",
+        "imagePullSecret",
+        "credentialSource",
+        "requireDigestPins",
+        "requireVulnerabilityScan",
+        "requireSbom",
+        "requireSignatureOrAttestation",
+        "requirePromotionRecord",
+        "reports"
+      ]
+    },
+    "runtimeHardening": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "lab-audit",
+            "production-restricted",
+            "enterprise-signed"
+          ]
+        },
+        "enforcementMode": {
+          "type": "string",
+          "enum": [
+            "audit",
+            "enforce"
+          ]
+        },
+        "policyEngine": {
+          "type": "string",
+          "enum": [
+            "none",
+            "native-psa",
+            "kyverno",
+            "gatekeeper"
+          ]
+        },
+        "podSecurity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "targetEnforce": {
+              "$ref": "#/$defs/podSecurityLevel"
+            },
+            "targetAudit": {
+              "$ref": "#/$defs/podSecurityLevel"
+            },
+            "targetWarn": {
+              "$ref": "#/$defs/podSecurityLevel"
+            },
+            "requirePinnedVersion": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "targetEnforce",
+            "targetAudit",
+            "targetWarn",
+            "requirePinnedVersion"
+          ]
+        },
+        "workloadSecurity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requireRunAsNonRoot": {
+              "type": "boolean"
+            },
+            "requireReadOnlyRootFilesystem": {
+              "type": "boolean"
+            },
+            "requireRuntimeDefaultSeccomp": {
+              "type": "boolean"
+            },
+            "requireDropAllCapabilities": {
+              "type": "boolean"
+            },
+            "disallowPrivilegeEscalation": {
+              "type": "boolean"
+            },
+            "disallowHostNamespaces": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "requireRunAsNonRoot",
+            "requireReadOnlyRootFilesystem",
+            "requireRuntimeDefaultSeccomp",
+            "requireDropAllCapabilities",
+            "disallowPrivilegeEscalation",
+            "disallowHostNamespaces"
+          ]
+        },
+        "images": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requireDigestPins": {
+              "type": "boolean"
+            },
+            "requireSignatureVerification": {
+              "type": "boolean"
+            },
+            "allowedRegistries": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "uniqueItems": true
+            },
+            "deniedTags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "requireDigestPins",
+            "requireSignatureVerification",
+            "allowedRegistries",
+            "deniedTags"
+          ]
+        },
+        "reports": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": "string"
+            },
+            "overrides": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "plan",
+            "overrides"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "profile",
+        "enforcementMode",
+        "policyEngine",
+        "podSecurity",
+        "workloadSecurity",
+        "images",
+        "reports"
+      ]
+    },
+    "gitOpsDelivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "operator-managed",
+            "lab-argocd",
+            "production-argocd",
+            "production-flux"
+          ]
+        },
+        "controller": {
+          "type": "string",
+          "enum": [
+            "none",
+            "argocd",
+            "flux"
+          ]
+        },
+        "reconciliation": {
+          "type": "string",
+          "enum": [
+            "manual",
+            "automated"
+          ]
+        },
+        "driftDetection": {
+          "type": "string",
+          "enum": [
+            "report-only",
+            "warn",
+            "enforce"
+          ]
+        },
+        "prune": {
+          "type": "boolean"
+        },
+        "selfHeal": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "repoURL": {
+              "type": "string"
+            },
+            "targetRevision": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "valueFiles": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "repoURL",
+            "targetRevision",
+            "path",
+            "valueFiles"
+          ]
+        },
+        "reports": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": "string"
+            },
+            "overrides": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "plan",
+            "overrides"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "profile",
+        "controller",
+        "reconciliation",
+        "driftDetection",
+        "prune",
+        "selfHeal",
+        "source",
+        "reports"
+      ]
+    },
+    "progressiveDelivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "lab-canary",
+            "production-canary",
+            "production-blue-green"
+          ]
+        },
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "rolling-update",
+            "canary",
+            "blue-green"
+          ]
+        },
+        "controller": {
+          "type": "string",
+          "enum": [
+            "none",
+            "native",
+            "argo-rollouts",
+            "flagger"
+          ]
+        },
+        "trafficProvider": {
+          "type": "string",
+          "enum": [
+            "native",
+            "traefik",
+            "nginx",
+            "linkerd",
+            "istio"
+          ]
+        },
+        "analysis": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "disabled",
+                "manual",
+                "automated"
+              ]
+            },
+            "metrics": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "enabled",
+            "mode",
+            "metrics"
+          ]
+        },
+        "canary": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "uniqueItems": true
+            },
+            "maxUnavailable": {
+              "type": "string"
+            },
+            "maxSurge": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "enabled",
+            "steps",
+            "maxUnavailable",
+            "maxSurge"
+          ]
+        },
+        "blueGreen": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "previewService": {
+              "type": "boolean"
+            },
+            "autoPromotion": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "previewService",
+            "autoPromotion"
+          ]
+        },
+        "rollback": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "automatic": {
+              "type": "boolean"
+            },
+            "requireSmokeTests": {
+              "type": "boolean"
+            },
+            "requireRollbackDrill": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "automatic",
+            "requireSmokeTests",
+            "requireRollbackDrill"
+          ]
+        },
+        "reports": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": "string"
+            },
+            "overrides": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "plan",
+            "overrides"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "profile",
+        "strategy",
+        "controller",
+        "trafficProvider",
+        "analysis",
+        "canary",
+        "blueGreen",
+        "rollback",
+        "reports"
+      ]
+    },
+    "scalingPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "lab-rightsize",
+            "production-hpa",
+            "event-driven-keda",
+            "enterprise-autoscaling"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "rightsize",
+            "hpa",
+            "keda",
+            "enterprise"
+          ]
+        },
+        "metricsSource": {
+          "type": "string"
+        },
+        "hpa": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "minReplicas": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxReplicas": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "targetCPUUtilizationPercentage": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "required": [
+            "enabled",
+            "minReplicas",
+            "maxReplicas",
+            "targetCPUUtilizationPercentage"
+          ]
+        },
+        "vpa": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "updateMode": {
+              "type": "string",
+              "enum": [
+                "Off",
+                "Initial",
+                "Recreate",
+                "Auto"
+              ]
+            }
+          },
+          "required": [
+            "enabled",
+            "updateMode"
+          ]
+        },
+        "keda": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "triggers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "enabled",
+            "triggers"
+          ]
+        },
+        "clusterAutoscaler": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "external",
+                "managed",
+                "disabled"
+              ]
+            }
+          },
+          "required": [
+            "enabled",
+            "mode"
+          ]
+        },
+        "rightSizing": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "capacityUtilizationLimit": {
+              "type": [
+                "string",
+                "number"
+              ]
+            },
+            "requireRequests": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "capacityUtilizationLimit",
+            "requireRequests"
+          ]
+        },
+        "reports": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": "string"
+            },
+            "overrides": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "plan",
+            "overrides"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "profile",
+        "mode",
+        "metricsSource",
+        "hpa",
+        "vpa",
+        "keda",
+        "clusterAutoscaler",
+        "rightSizing",
+        "reports"
+      ]
+    },
+    "networkConnectivity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "lab-baseline",
+            "production-restricted",
+            "mesh-linkerd",
+            "mesh-istio"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "baseline",
+            "audit",
+            "restricted-networkpolicy",
+            "service-mesh"
+          ]
+        },
+        "ingressClassName": {
+          "type": "string"
+        },
+        "networkPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "defaultDeny": {
+              "type": "boolean"
+            },
+            "dnsEgress": {
+              "type": "boolean"
+            },
+            "kubernetesApiEgress": {
+              "type": "boolean"
+            },
+            "externalWebEgress": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "profile",
+            "defaultDeny",
+            "dnsEgress",
+            "kubernetesApiEgress",
+            "externalWebEgress"
+          ]
+        },
+        "serviceMesh": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "provider": {
+              "type": "string",
+              "enum": [
+                "none",
+                "linkerd",
+                "istio"
+              ]
+            },
+            "mtlsMode": {
+              "type": "string"
+            },
+            "trafficPolicy": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "enabled",
+            "provider",
+            "mtlsMode",
+            "trafficPolicy"
+          ]
+        },
+        "egress": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string"
+            },
+            "requireExplicitCidrs": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode",
+            "requireExplicitCidrs"
+          ]
+        },
+        "dns": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "namespace": {
+              "$ref": "#/$defs/kubernetesName"
+            }
+          },
+          "required": [
+            "provider",
+            "namespace"
+          ]
+        },
+        "tls": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string"
+            },
+            "requireTrustedIssuer": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode",
+            "requireTrustedIssuer"
+          ]
+        },
+        "reports": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": "string"
+            },
+            "overrides": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "plan",
+            "overrides"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "profile",
+        "mode",
+        "ingressClassName",
+        "networkPolicy",
+        "serviceMesh",
+        "egress",
+        "dns",
+        "tls",
+        "reports"
+      ]
+    },
+    "accessGovernance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "lab-audit",
+            "production-rbac",
+            "oidc-sso",
+            "multi-tenant"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "baseline",
+            "audit",
+            "least-privilege",
+            "oidc",
+            "tenant-isolation"
+          ]
+        },
+        "rbac": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "strategy": {
+              "type": "string"
+            },
+            "requireLeastPrivilege": {
+              "type": "boolean"
+            },
+            "serviceAccountTokenAutomount": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "strategy",
+            "requireLeastPrivilege",
+            "serviceAccountTokenAutomount"
+          ]
+        },
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "provider": {
+              "type": "string",
+              "enum": [
+                "none",
+                "external-oidc",
+                "keycloak",
+                "dex",
+                "cloud-iam"
+              ]
+            },
+            "requireMfa": {
+              "type": "boolean"
+            },
+            "requireGroupMapping": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "provider",
+            "requireMfa",
+            "requireGroupMapping"
+          ]
+        },
+        "audit": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "mode": {
+              "type": "string"
+            },
+            "requireAuditPolicy": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "mode",
+            "requireAuditPolicy"
+          ]
+        },
+        "breakGlass": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requireTimeBoxedAccess": {
+              "type": "boolean"
+            },
+            "requireReview": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "requireTimeBoxedAccess",
+            "requireReview"
+          ]
+        },
+        "tenantIsolation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "mode": {
+              "type": "string"
+            },
+            "requireNamespaceContract": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "mode",
+            "requireNamespaceContract"
+          ]
+        },
+        "reports": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": "string"
+            },
+            "overrides": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "plan",
+            "overrides"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "profile",
+        "mode",
+        "rbac",
+        "identity",
+        "audit",
+        "breakGlass",
+        "tenantIsolation",
+        "reports"
+      ]
+    },
+    "complianceEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "lab-evidence",
+            "staging-control-review",
+            "production-audit-pack",
+            "regulated-retention"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "baseline",
+            "lab-summary",
+            "control-review",
+            "audit-pack",
+            "regulated-retention"
+          ]
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "collectReports": {
+              "type": "boolean"
+            },
+            "requirePrivateIndex": {
+              "type": "boolean"
+            },
+            "requireReleaseTag": {
+              "type": "boolean"
+            },
+            "requireControlMap": {
+              "type": "boolean"
+            },
+            "requireRestoreDrill": {
+              "type": "boolean"
+            },
+            "requireAccessReview": {
+              "type": "boolean"
+            },
+            "requireIncidentDrill": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "collectReports",
+            "requirePrivateIndex",
+            "requireReleaseTag",
+            "requireControlMap",
+            "requireRestoreDrill",
+            "requireAccessReview",
+            "requireIncidentDrill"
+          ]
+        },
+        "retention": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "days": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "storageTier": {
+              "type": "string",
+              "enum": [
+                "none",
+                "hot",
+                "warm",
+                "cold"
+              ]
+            }
+          },
+          "required": [
+            "enabled",
+            "days",
+            "storageTier"
+          ]
+        },
+        "packaging": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "format": {
+              "type": "string",
+              "enum": [
+                "report-only",
+                "markdown",
+                "markdown-with-checksums",
+                "audit-pack"
+              ]
+            },
+            "includeChecksums": {
+              "type": "boolean"
+            },
+            "includeAttestations": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "format",
+            "includeChecksums",
+            "includeAttestations"
+          ]
+        },
+        "reports": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": "string"
+            },
+            "overrides": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "plan",
+            "overrides"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "profile",
+        "mode",
+        "evidence",
+        "retention",
+        "packaging",
+        "reports"
+      ]
+    },
+    "incidentResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "lab-readiness",
+            "staging-drill",
+            "production-oncall",
+            "regulated-incident"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "baseline",
+            "readiness",
+            "drill",
+            "oncall",
+            "regulated"
+          ]
+        },
+        "severityModel": {
+          "type": "string",
+          "enum": [
+            "none",
+            "simple",
+            "sev1-sev4"
+          ]
+        },
+        "alerting": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requireAlertRoutes": {
+              "type": "boolean"
+            },
+            "requirePaging": {
+              "type": "boolean"
+            },
+            "requireQuietHours": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "requireAlertRoutes",
+            "requirePaging",
+            "requireQuietHours"
+          ]
+        },
+        "runbooks": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requireRunbookIndex": {
+              "type": "boolean"
+            },
+            "requireServiceOwnership": {
+              "type": "boolean"
+            },
+            "requireRollbackSteps": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "requireRunbookIndex",
+            "requireServiceOwnership",
+            "requireRollbackSteps"
+          ]
+        },
+        "communications": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requireCommsTemplate": {
+              "type": "boolean"
+            },
+            "requireStakeholderMap": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "requireCommsTemplate",
+            "requireStakeholderMap"
+          ]
+        },
+        "drills": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requireIncidentDrill": {
+              "type": "boolean"
+            },
+            "requirePostIncidentReview": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "requireIncidentDrill",
+            "requirePostIncidentReview"
+          ]
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requireTimeline": {
+              "type": "boolean"
+            },
+            "requireActionItems": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "requireTimeline",
+            "requireActionItems"
+          ]
+        },
+        "reports": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": "string"
+            },
+            "overrides": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "plan",
+            "overrides"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "profile",
+        "mode",
+        "severityModel",
+        "alerting",
+        "runbooks",
+        "communications",
+        "drills",
+        "evidence",
+        "reports"
+      ]
+    },
+    "changeManagement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "lab-change",
+            "staging-approval",
+            "production-cab",
+            "regulated-change"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "baseline",
+            "lab",
+            "approval",
+            "cab",
+            "regulated"
+          ]
+        },
+        "approvalModel": {
+          "type": "string",
+          "enum": [
+            "none",
+            "operator-self-check",
+            "technical-approval",
+            "cab",
+            "regulated-cab"
+          ]
+        },
+        "changeControl": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requireChangeTicket": {
+              "type": "boolean"
+            },
+            "requireApprovals": {
+              "type": "boolean"
+            },
+            "requireRiskAssessment": {
+              "type": "boolean"
+            },
+            "requireImpactAssessment": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "requireChangeTicket",
+            "requireApprovals",
+            "requireRiskAssessment",
+            "requireImpactAssessment"
+          ]
+        },
+        "maintenanceWindow": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requireWindow": {
+              "type": "boolean"
+            },
+            "requireFreezeCheck": {
+              "type": "boolean"
+            },
+            "requireStakeholderNotice": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "requireWindow",
+            "requireFreezeCheck",
+            "requireStakeholderNotice"
+          ]
+        },
+        "rollout": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requireRollbackPlan": {
+              "type": "boolean"
+            },
+            "requireSmokeTests": {
+              "type": "boolean"
+            },
+            "requirePostChangeReview": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "requireRollbackPlan",
+            "requireSmokeTests",
+            "requirePostChangeReview"
+          ]
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requireChangeRecord": {
+              "type": "boolean"
+            },
+            "requireDeploymentEvidence": {
+              "type": "boolean"
+            },
+            "requireApprovalEvidence": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "requireChangeRecord",
+            "requireDeploymentEvidence",
+            "requireApprovalEvidence"
+          ]
+        },
+        "reports": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": "string"
+            },
+            "overrides": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "plan",
+            "overrides"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "profile",
+        "mode",
+        "approvalModel",
+        "changeControl",
+        "maintenanceWindow",
+        "rollout",
+        "evidence",
+        "reports"
+      ]
+    },
+    "disasterRecovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "lab-dr",
+            "staging-rehearsal",
+            "production-dr",
+            "regulated-bcp"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "baseline",
+            "rehearsal",
+            "production",
+            "regulated"
+          ]
+        },
+        "tier": {
+          "type": "string"
+        },
+        "failoverModel": {
+          "type": "string",
+          "enum": [
+            "none",
+            "backup-restore",
+            "single-region-ha",
+            "multi-zone",
+            "warm-standby",
+            "active-passive",
+            "active-active"
+          ]
+        },
+        "recoveryObjectives": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requireRtoRpo": {
+              "type": "boolean"
+            },
+            "requireDependencyMap": {
+              "type": "boolean"
+            },
+            "requireCriticalityMap": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "requireRtoRpo",
+            "requireDependencyMap",
+            "requireCriticalityMap"
+          ]
+        },
+        "replication": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requireBackupReplication": {
+              "type": "boolean"
+            },
+            "requireDataReplication": {
+              "type": "boolean"
+            },
+            "requireCrossZonePlacement": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "requireBackupReplication",
+            "requireDataReplication",
+            "requireCrossZonePlacement"
+          ]
+        },
+        "restoreDrills": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requireDatabaseRestore": {
+              "type": "boolean"
+            },
+            "requireEtcdRestore": {
+              "type": "boolean"
+            },
+            "requireNamespaceRestore": {
+              "type": "boolean"
+            },
+            "requireApplicationSmokeTest": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "requireDatabaseRestore",
+            "requireEtcdRestore",
+            "requireNamespaceRestore",
+            "requireApplicationSmokeTest"
+          ]
+        },
+        "continuity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requireRunbook": {
+              "type": "boolean"
+            },
+            "requireCommsPlan": {
+              "type": "boolean"
+            },
+            "requireManualWorkaround": {
+              "type": "boolean"
+            },
+            "requireSupplierContacts": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "requireRunbook",
+            "requireCommsPlan",
+            "requireManualWorkaround",
+            "requireSupplierContacts"
+          ]
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requireDrillEvidence": {
+              "type": "boolean"
+            },
+            "requireRtoEvidence": {
+              "type": "boolean"
+            },
+            "requirePostDrillReview": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "requireDrillEvidence",
+            "requireRtoEvidence",
+            "requirePostDrillReview"
+          ]
+        },
+        "reports": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": "string"
+            },
+            "overrides": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "plan",
+            "overrides"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "profile",
+        "mode",
+        "tier",
+        "failoverModel",
+        "recoveryObjectives",
+        "replication",
+        "restoreDrills",
+        "continuity",
+        "evidence",
+        "reports"
+      ]
+    },
     "kubernetesName": {
       "type": "string",
       "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
@@ -890,6 +2831,35 @@
         }
       ]
     },
+    "secretProviderAdapter": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "automaticImport": {
+          "type": "boolean"
+        },
+        "rendersPlainKubernetesSecrets": {
+          "type": "boolean"
+        },
+        "requiredGate": {
+          "type": "string"
+        },
+        "requiredOperator": {
+          "type": "string"
+        },
+        "encryptedPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "automaticImport",
+        "rendersPlainKubernetesSecrets"
+      ]
+    },
     "externalSecret": {
       "type": "object",
       "additionalProperties": false,
@@ -994,6 +2964,117 @@
       "required": [
         "type"
       ]
+    },
+    "storageTierObjectStore": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "s3-compatible",
+            "aws-s3",
+            "azure-blob",
+            "gcs"
+          ]
+        },
+        "bucket": {
+          "type": "string"
+        },
+        "prefix": {
+          "type": "string"
+        },
+        "secretRef": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "namespace": {
+              "type": "string"
+            },
+            "accessKeyIdKey": {
+              "type": "string"
+            },
+            "secretAccessKeyKey": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required": [
+        "enabled",
+        "provider"
+      ]
+    },
+    "storageTier": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "storageClassName": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "objectStore": {
+          "$ref": "#/$defs/storageTierObjectStore"
+        }
+      },
+      "required": [
+        "enabled",
+        "storageClassName"
+      ]
+    },
+    "externalBackupProvider": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "installInCluster": {
+          "type": "boolean"
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "secretRef": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "namespace": {
+              "type": "string"
+            }
+          }
+        },
+        "scope": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     },
     "workload": {
       "type": "object",

@@ -33,6 +33,297 @@ global:
   scheduling:
     topologySpread: false
     antiAffinity: preferred
+imagePromotionController:
+  enabled: false
+  profile: disabled
+  executionMode: plan
+  imageMode: registry
+  registry: ''
+  imagePullSecret: registry-credentials
+  credentialSource: external-secret
+  requireDigestPins: true
+  requireVulnerabilityScan: true
+  requireSbom: true
+  requireSignatureOrAttestation: true
+  requirePromotionRecord: true
+  reports:
+    controller: reports/registry-promotion-controller.md
+    overrides: reports/registry-promotion-values.yaml
+runtimeHardening:
+  enabled: false
+  profile: disabled
+  enforcementMode: audit
+  policyEngine: none
+  podSecurity:
+    targetEnforce: baseline
+    targetAudit: restricted
+    targetWarn: restricted
+    requirePinnedVersion: true
+  workloadSecurity:
+    requireRunAsNonRoot: true
+    requireReadOnlyRootFilesystem: false
+    requireRuntimeDefaultSeccomp: true
+    requireDropAllCapabilities: true
+    disallowPrivilegeEscalation: true
+    disallowHostNamespaces: true
+  images:
+    requireDigestPins: false
+    requireSignatureVerification: false
+    allowedRegistries: []
+    deniedTags:
+      - latest
+      - latest-pg16
+      - latest-pg17
+      - latest-pg18
+  reports:
+    plan: reports/runtime-hardening-plan.md
+    overrides: reports/runtime-hardening-values.yaml
+gitOpsDelivery:
+  enabled: false
+  profile: operator-managed
+  controller: none
+  reconciliation: manual
+  driftDetection: report-only
+  prune: false
+  selfHeal: false
+  source:
+    repoURL: https://git.example.invalid/platform/urban-platform-infra.git
+    targetRevision: main
+    path: helm/urban-platform-infra
+    valueFiles:
+      - values.yaml
+  reports:
+    plan: reports/gitops-delivery-plan.md
+    overrides: reports/gitops-delivery-values.yaml
+progressiveDelivery:
+  enabled: false
+  profile: disabled
+  strategy: rolling-update
+  controller: none
+  trafficProvider: native
+  analysis:
+    enabled: false
+    mode: disabled
+    metrics: []
+  canary:
+    enabled: false
+    steps: []
+    maxUnavailable: 25%
+    maxSurge: 25%
+  blueGreen:
+    enabled: false
+    previewService: false
+    autoPromotion: false
+  rollback:
+    automatic: false
+    requireSmokeTests: true
+    requireRollbackDrill: false
+  reports:
+    plan: reports/progressive-delivery-plan.md
+    overrides: reports/progressive-delivery-values.yaml
+scalingPolicy:
+  enabled: false
+  profile: disabled
+  mode: disabled
+  metricsSource: none
+  hpa:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 70
+  vpa:
+    enabled: false
+    updateMode: Off
+  keda:
+    enabled: false
+    triggers: []
+  clusterAutoscaler:
+    enabled: false
+    mode: external
+  rightSizing:
+    enabled: false
+    capacityUtilizationLimit: '0.70'
+    requireRequests: true
+  reports:
+    plan: reports/scaling-policy-plan.md
+    overrides: reports/scaling-policy-values.yaml
+networkConnectivity:
+  enabled: false
+  profile: disabled
+  mode: baseline
+  ingressClassName: traefik
+  networkPolicy:
+    enabled: true
+    profile: existing-defaults
+    defaultDeny: true
+    dnsEgress: true
+    kubernetesApiEgress: true
+    externalWebEgress: true
+  serviceMesh:
+    enabled: false
+    provider: none
+    mtlsMode: disabled
+    trafficPolicy: disabled
+  egress:
+    mode: existing-rules
+    requireExplicitCidrs: false
+  dns:
+    provider: kube-dns
+    namespace: kube-system
+  tls:
+    mode: ingress-secret
+    requireTrustedIssuer: false
+  reports:
+    plan: reports/network-connectivity-plan.md
+    overrides: reports/network-connectivity-values.yaml
+accessGovernance:
+  enabled: false
+  profile: disabled
+  mode: baseline
+  rbac:
+    enabled: false
+    strategy: existing-serviceaccount
+    requireLeastPrivilege: false
+    serviceAccountTokenAutomount: false
+  identity:
+    enabled: false
+    provider: none
+    requireMfa: false
+    requireGroupMapping: false
+  audit:
+    enabled: false
+    mode: platform-default
+    requireAuditPolicy: false
+  breakGlass:
+    enabled: false
+    requireTimeBoxedAccess: true
+    requireReview: false
+  tenantIsolation:
+    enabled: false
+    mode: single-namespace
+    requireNamespaceContract: false
+  reports:
+    plan: reports/access-governance-plan.md
+    overrides: reports/access-governance-values.yaml
+complianceEvidence:
+  enabled: false
+  profile: disabled
+  mode: baseline
+  evidence:
+    collectReports: false
+    requirePrivateIndex: false
+    requireReleaseTag: false
+    requireControlMap: false
+    requireRestoreDrill: false
+    requireAccessReview: false
+    requireIncidentDrill: false
+  retention:
+    enabled: false
+    days: 0
+    storageTier: none
+  packaging:
+    enabled: false
+    format: report-only
+    includeChecksums: false
+    includeAttestations: false
+  reports:
+    plan: reports/compliance-evidence-plan.md
+    overrides: reports/compliance-evidence-values.yaml
+incidentResponse:
+  enabled: false
+  profile: disabled
+  mode: baseline
+  severityModel: none
+  alerting:
+    enabled: false
+    requireAlertRoutes: false
+    requirePaging: false
+    requireQuietHours: false
+  runbooks:
+    enabled: false
+    requireRunbookIndex: false
+    requireServiceOwnership: false
+    requireRollbackSteps: false
+  communications:
+    enabled: false
+    requireCommsTemplate: false
+    requireStakeholderMap: false
+  drills:
+    enabled: false
+    requireIncidentDrill: false
+    requirePostIncidentReview: false
+  evidence:
+    enabled: false
+    requireTimeline: false
+    requireActionItems: false
+  reports:
+    plan: reports/incident-response-plan.md
+    overrides: reports/incident-response-values.yaml
+changeManagement:
+  enabled: false
+  profile: disabled
+  mode: baseline
+  approvalModel: none
+  changeControl:
+    enabled: false
+    requireChangeTicket: false
+    requireApprovals: false
+    requireRiskAssessment: false
+    requireImpactAssessment: false
+  maintenanceWindow:
+    enabled: false
+    requireWindow: false
+    requireFreezeCheck: false
+    requireStakeholderNotice: false
+  rollout:
+    enabled: false
+    requireRollbackPlan: false
+    requireSmokeTests: false
+    requirePostChangeReview: false
+  evidence:
+    enabled: false
+    requireChangeRecord: false
+    requireDeploymentEvidence: false
+    requireApprovalEvidence: false
+  reports:
+    plan: reports/change-management-plan.md
+    overrides: reports/change-management-values.yaml
+disasterRecovery:
+  enabled: false
+  profile: disabled
+  mode: baseline
+  tier: none
+  failoverModel: none
+  recoveryObjectives:
+    enabled: false
+    requireRtoRpo: false
+    requireDependencyMap: false
+    requireCriticalityMap: false
+  replication:
+    enabled: false
+    requireBackupReplication: false
+    requireDataReplication: false
+    requireCrossZonePlacement: false
+  restoreDrills:
+    enabled: false
+    requireDatabaseRestore: false
+    requireEtcdRestore: false
+    requireNamespaceRestore: false
+    requireApplicationSmokeTest: false
+  continuity:
+    enabled: false
+    requireRunbook: false
+    requireCommsPlan: false
+    requireManualWorkaround: false
+    requireSupplierContacts: false
+  evidence:
+    enabled: false
+    requireDrillEvidence: false
+    requireRtoEvidence: false
+    requirePostDrillReview: false
+  reports:
+    plan: reports/disaster-recovery-plan.md
+    overrides: reports/disaster-recovery-values.yaml
 namespace:
   create: true
   name: urban-platform
@@ -59,6 +350,92 @@ namespace:
       requests.storage: 80Gi
       persistentvolumeclaims: '60'
       pods: '160'
+storageTiers:
+  hot:
+    enabled: false
+    storageClassName: ''
+    description: Active low-latency PVCs for databases, Kafka, Redis, and stateful workloads.
+  warm:
+    enabled: false
+    storageClassName: ''
+    description: Lower-cost PVCs for compressed history and medium-retention analytics.
+  cold:
+    enabled: false
+    storageClassName: ''
+    description: Archive tier for backups, database dumps, old logs, and release evidence.
+    objectStore:
+      enabled: false
+      provider: s3-compatible
+      bucket: ''
+      prefix: urban-platform
+      secretRef:
+        name: ''
+        namespace: ''
+        accessKeyIdKey: accessKeyId
+        secretAccessKeyKey: secretAccessKey
+backup:
+  enabled: false
+  profile: disabled
+  velero:
+    enabled: false
+    installOperator: false
+    provider: aws
+    bucket: ''
+    prefix: urban-platform
+    secretRef:
+      name: ''
+      namespace: velero
+    snapshotsEnabled: false
+    nodeAgentEnabled: false
+    schedule:
+      enabled: false
+      name: daily-platform-backup
+      cron: "0 2 * * *"
+      ttl: 720h0m0s
+  rke2Etcd:
+    enabled: false
+    schedule: ''
+    retention: 7
+  imageArchives:
+    enabled: false
+    retention: 7d
+  externalProviders:
+    urbackup:
+      enabled: false
+      mode: external
+      installInCluster: false
+      endpoint: ''
+      secretRef:
+        name: ''
+        namespace: ''
+      scope:
+        hostImageBackups: false
+        fileBackups: false
+        legacyComposeBackups: false
+        databasePluginBackups: false
+    restic:
+      enabled: false
+      mode: operator-artifacts
+      repository: ''
+      secretRef:
+        name: ''
+        namespace: ''
+      paths:
+      - /var/lib/urban-platform/private
+    kopia:
+      enabled: false
+      mode: operator-artifacts
+      repository: ''
+      secretRef:
+        name: ''
+        namespace: ''
+    borg:
+      enabled: false
+      mode: operator-artifacts
+      repository: ''
+      secretRef:
+        name: ''
+        namespace: ''
 ingress:
   enabled: true
   className: traefik
@@ -91,6 +468,32 @@ secretManagement:
   enabled: false
   provider: external-secrets
   refreshInterval: 1h
+  providerAdapters:
+    kubernetesDirect:
+      enabled: false
+      automaticImport: true
+      rendersPlainKubernetesSecrets: true
+      requiredGate: MIGRATION_ALLOW_SECRET_MATERIAL=true
+    externalSecrets:
+      enabled: false
+      automaticImport: true
+      rendersPlainKubernetesSecrets: false
+      requiredOperator: external-secrets-operator
+    vault:
+      enabled: false
+      automaticImport: true
+      rendersPlainKubernetesSecrets: false
+      requiredOperator: external-secrets-operator
+    sops:
+      enabled: false
+      automaticImport: false
+      rendersPlainKubernetesSecrets: false
+      encryptedPath: secrets/
+    sealedSecrets:
+      enabled: false
+      automaticImport: false
+      rendersPlainKubernetesSecrets: false
+      requiredOperator: sealed-secrets-controller
   secretStoreRef:
     name: vault
     kind: ClusterSecretStore
@@ -335,6 +738,66 @@ messaging:
     storage:
       size: 1Gi
       className: ''
+platformCapabilities:
+  enabled: false
+  objectStorage:
+    minio:
+      enabled: false
+      mode: external-or-helmfile
+      installOperator: false
+      endpoint: ''
+      secretRef:
+        name: ''
+        namespace: ''
+  messaging:
+    mqtt:
+      enabled: false
+      provider: emqx
+      emqx:
+        enabled: false
+      mosquitto:
+        enabled: false
+        mode: custom-or-external
+    rabbitmq:
+      enabled: false
+    nats:
+      enabled: false
+  kafkaEcosystem:
+    schemaRegistry:
+      enabled: false
+      mode: external-or-helmfile
+    kafkaConnect:
+      enabled: false
+      mode: external-or-operator
+    debezium:
+      enabled: false
+      mode: kafka-connect-plugin
+  identity:
+    keycloak:
+      enabled: false
+      mode: external-or-helmfile
+  secrets:
+    vault:
+      enabled: false
+      mode: external-or-helmfile
+  policy:
+    kyverno:
+      enabled: false
+      mode: helmfile
+  workflows:
+    temporal:
+      enabled: false
+      mode: helmfile
+    argoWorkflows:
+      enabled: false
+      mode: helmfile
+  serviceMesh:
+    enabled: false
+    provider: none
+    linkerd:
+      enabled: false
+    istio:
+      enabled: false
 databases:
   enabled: true
   provider: cloudnative-pg
@@ -356,6 +819,21 @@ databases:
   backup:
     enabled: false
     retentionPolicy: 30d
+    compression: gzip
+    objectStore:
+      enabled: false
+      provider: s3-compatible
+      destinationPath: ''
+      endpointURL: ''
+      bucket: ''
+      prefix: urban-platform/databases
+      secretRef:
+        name: ''
+        accessKeyIdKey: accessKeyId
+        secretAccessKeyKey: secretAccessKey
+    schedule:
+      enabled: false
+      cron: "0 0 2 * * *"
   imageCatalogs:
     timescaledb:
       enabled: true

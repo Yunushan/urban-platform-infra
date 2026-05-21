@@ -3,6 +3,7 @@
 {{- $isPlaceholderWorkload := regexMatch "^example-app-[0-9]+$" $imageRepository }}
 {{- if and $svc.enabled (not (and ($.Values.global.skipPlaceholderWorkloads | default false) $isPlaceholderWorkload)) }}
 {{- $kind := default "Deployment" $svc.kind }}
+{{- $statefulStorageClass := include "cip.storageClassName" (list $ (dig "storage" "className" "" $svc) "hot") }}
 {{- $ingressHost := include "cip.ingressHost" $ }}
 {{- $ingressTlsSecretName := include "cip.ingressTlsSecretName" $ }}
 ---
@@ -108,8 +109,8 @@ spec:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
-        {{- if $svc.storage.className }}
-        storageClassName: {{ $svc.storage.className | quote }}
+        {{- if $statefulStorageClass }}
+        storageClassName: {{ $statefulStorageClass | quote }}
         {{- end }}
         resources:
           requests:

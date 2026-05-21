@@ -48,6 +48,22 @@ The rendered-manifest policy check now verifies:
 - Pods disable service account token automount and service links.
 - Application workloads use `RuntimeDefault` seccomp, run as non-root, disable privilege escalation, and drop all Linux capabilities.
 
+## Runtime Hardening Plan
+
+Article 17 adds `make runtime-hardening-plan`, backed by
+`config/runtime-hardening.yaml`. The committed chart keeps
+`runtimeHardening.enabled=false`, while the planner produces public-safe
+profiles for:
+
+- `lab-audit`: baseline enforcement with restricted audit/warn.
+- `production-restricted`: restricted Pod Security, digest pins, and read-only
+  root filesystem readiness.
+- `enterprise-signed`: production-restricted plus signed-image admission intent.
+
+Use the generated `reports/runtime-hardening-values.yaml` as a private overlay
+template after imported workloads have writable paths mapped to `emptyDir`,
+PVCs, or application-owned directories.
+
 ## References
 
 - Kubernetes Pod Security Standards: https://kubernetes.io/docs/concepts/security/pod-security-standards/

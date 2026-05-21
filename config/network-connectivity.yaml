@@ -1,0 +1,161 @@
+defaultProfile: disabled
+enabledByDefault: false
+profiles:
+  disabled:
+    description: Keep existing chart NetworkPolicy defaults and do not enable mesh or stricter egress automation.
+    enabled: false
+    mode: baseline
+    ingressClassName: traefik
+    networkPolicy:
+      enabled: true
+      profile: existing-defaults
+      defaultDeny: true
+      dnsEgress: true
+      kubernetesApiEgress: true
+      externalWebEgress: true
+    serviceMesh:
+      enabled: false
+      provider: none
+      mtlsMode: disabled
+      trafficPolicy: disabled
+    egress:
+      mode: existing-rules
+      requireExplicitCidrs: false
+    dns:
+      provider: kube-dns
+      namespace: kube-system
+    tls:
+      mode: ingress-secret
+      requireTrustedIssuer: false
+  lab-baseline:
+    description: Lab-safe connectivity review for constrained RKE2 clusters.
+    enabled: false
+    mode: audit
+    ingressClassName: traefik
+    networkPolicy:
+      enabled: true
+      profile: lab-default-deny
+      defaultDeny: true
+      dnsEgress: true
+      kubernetesApiEgress: true
+      externalWebEgress: true
+    serviceMesh:
+      enabled: false
+      provider: none
+      mtlsMode: disabled
+      trafficPolicy: disabled
+    egress:
+      mode: reviewed-shared-web-egress
+      requireExplicitCidrs: false
+    dns:
+      provider: kube-dns
+      namespace: kube-system
+    tls:
+      mode: self-signed-or-lab-secret
+      requireTrustedIssuer: false
+  production-restricted:
+    description: Production route, DNS, TLS, and egress review before tightening NetworkPolicy.
+    enabled: false
+    mode: restricted-networkpolicy
+    ingressClassName: traefik
+    requireTrafficInventory: true
+    requireDnsTlsEvidence: true
+    requireEgressReview: true
+    networkPolicy:
+      enabled: true
+      profile: production-default-deny
+      defaultDeny: true
+      dnsEgress: true
+      kubernetesApiEgress: true
+      externalWebEgress: false
+    serviceMesh:
+      enabled: false
+      provider: none
+      mtlsMode: disabled
+      trafficPolicy: disabled
+    egress:
+      mode: explicit-cidr-and-fqdn-contract
+      requireExplicitCidrs: true
+    dns:
+      provider: kube-dns
+      namespace: kube-system
+    tls:
+      mode: cert-manager-or-private-ca
+      requireTrustedIssuer: true
+  mesh-linkerd:
+    description: Lightweight service mesh readiness for mTLS and telemetry after baseline policies are stable.
+    enabled: false
+    mode: service-mesh
+    ingressClassName: traefik
+    requireTrafficInventory: true
+    requireDnsTlsEvidence: true
+    requireMeshReadiness: true
+    networkPolicy:
+      enabled: true
+      profile: mesh-compatible-default-deny
+      defaultDeny: true
+      dnsEgress: true
+      kubernetesApiEgress: true
+      externalWebEgress: false
+    serviceMesh:
+      enabled: true
+      provider: linkerd
+      mtlsMode: permissive-first
+      trafficPolicy: opt-in
+    egress:
+      mode: explicit-cidr-and-service-contract
+      requireExplicitCidrs: true
+    dns:
+      provider: kube-dns
+      namespace: kube-system
+    tls:
+      mode: cert-manager-or-private-ca
+      requireTrustedIssuer: true
+  mesh-istio:
+    description: Enterprise mesh readiness for strict mTLS, traffic policy, and telemetry ownership.
+    enabled: false
+    mode: service-mesh
+    ingressClassName: traefik
+    requireTrafficInventory: true
+    requireDnsTlsEvidence: true
+    requireMeshReadiness: true
+    networkPolicy:
+      enabled: true
+      profile: mesh-compatible-default-deny
+      defaultDeny: true
+      dnsEgress: true
+      kubernetesApiEgress: true
+      externalWebEgress: false
+    serviceMesh:
+      enabled: true
+      provider: istio
+      mtlsMode: permissive-first
+      trafficPolicy: opt-in
+    egress:
+      mode: explicit-cidr-and-service-entry-contract
+      requireExplicitCidrs: true
+    dns:
+      provider: kube-dns
+      namespace: kube-system
+    tls:
+      mode: cert-manager-or-private-ca
+      requireTrustedIssuer: true
+controller:
+  report: reports/network-connectivity-plan.md
+  overrides: reports/network-connectivity-values.yaml
+supportedServiceMeshes:
+  - none
+  - linkerd
+  - istio
+requiredChecks:
+  - traffic inventory reviewed
+  - DNS and TLS ownership documented
+  - ingress class and source allowlist reviewed
+  - Kubernetes API egress policy reviewed
+  - external egress CIDRs or private egress gateway reviewed
+  - service mesh capacity and rollout ownership reviewed before enablement
+guardrails:
+  - keep network connectivity automation disabled by default in committed values
+  - do not print private hostnames, VIPs, node names, service names, or CIDR inventories in public reports
+  - avoid strict mesh mTLS until health probes, operators, migrations, and rollback paths are tested
+  - keep egress broad in lab if private dependency destinations are not fully inventoried

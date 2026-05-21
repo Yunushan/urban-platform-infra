@@ -41,6 +41,21 @@ app.kubernetes.io/part-of: urban-platform-infra
 {{- end -}}
 {{- end -}}
 
+{{- define "cip.storageClassName" -}}
+{{- $root := index . 0 -}}
+{{- $explicit := index . 1 | default "" -}}
+{{- $tierName := index . 2 | default "hot" -}}
+{{- if $explicit -}}
+{{- $explicit -}}
+{{- else -}}
+{{- $tiers := $root.Values.storageTiers | default dict -}}
+{{- $tier := get $tiers $tierName | default dict -}}
+{{- if and ($tier.enabled | default false) $tier.storageClassName -}}
+{{- $tier.storageClassName -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "cip.serviceAccountName" -}}
 {{- if .Values.global.serviceAccount.name -}}
 {{- .Values.global.serviceAccount.name | trunc 63 | trimSuffix "-" -}}

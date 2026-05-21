@@ -1,0 +1,352 @@
+defaultProfile: lab
+profiles:
+  lab:
+    description: Constrained validation or migration rehearsal environment.
+    environment: lab
+    topology: three-node-ha
+    migrationProfile: lab
+    imageMode: preload
+    databaseMigrationProfile: lab
+    edgeMigrationProfile: traefik-public
+    secretProviderProfile: kubernetes-direct
+    registryPromotionProfile: lab-preload
+    runtimeHardeningProfile: lab-audit
+    gitOpsProfile: operator-managed
+    progressiveDeliveryProfile: lab-canary
+    scalingPolicyProfile: lab-rightsize
+    networkConnectivityProfile: lab-baseline
+    accessGovernanceProfile: lab-audit
+    complianceEvidenceProfile: lab-evidence
+    incidentResponseProfile: lab-readiness
+    changeManagementProfile: lab-change
+    disasterRecoveryProfile: lab-dr
+    backupProfile: disabled
+    observabilityProfile: disabled
+    optionalCapabilities: disabled
+    importBatch: auto
+    strictDatabaseMigration: false
+    requireIngressEndpoint: false
+    requirePrivateRegistry: false
+    requireRestoreDrill: false
+    requireReleaseEvidence: false
+    helmValues:
+      global:
+        environment: lab
+        defaultReplicas: 1
+        replicaOverride: 1
+        skipPlaceholderWorkloads: true
+        scheduling:
+          topologySpread: false
+          antiAffinity: preferred
+      autoscaling:
+        enabled: false
+      backup:
+        enabled: false
+        profile: disabled
+      gitOpsDelivery:
+        enabled: false
+        profile: operator-managed
+        controller: none
+        reconciliation: manual
+        driftDetection: report-only
+        prune: false
+        selfHeal: false
+      progressiveDelivery:
+        enabled: false
+        profile: lab-canary
+        strategy: canary
+        controller: native
+        trafficProvider: native
+      scalingPolicy:
+        enabled: false
+        profile: lab-rightsize
+        mode: rightsize
+        metricsSource: none
+      networkConnectivity:
+        enabled: false
+        profile: lab-baseline
+        mode: audit
+        ingressClassName: traefik
+      accessGovernance:
+        enabled: false
+        profile: lab-audit
+        mode: audit
+      complianceEvidence:
+        enabled: false
+        profile: lab-evidence
+        mode: lab-summary
+      incidentResponse:
+        enabled: false
+        profile: lab-readiness
+        mode: readiness
+      changeManagement:
+        enabled: false
+        profile: lab-change
+        mode: lab
+      disasterRecovery:
+        enabled: false
+        profile: lab-dr
+        mode: rehearsal
+      observability:
+        profile: disabled
+        prometheus:
+          enabled: false
+        grafana:
+          enabled: false
+        elasticsearch:
+          enabled: false
+        kibana:
+          enabled: false
+        logstash:
+          enabled: false
+        loki:
+          enabled: false
+        clickhouse:
+          enabled: false
+      platformCapabilities:
+        enabled: false
+      messaging:
+        kafka:
+          replicas: 1
+          ui:
+            enabled: false
+        redis:
+          replicas: 1
+          sentinel:
+            enabled: false
+      databases:
+        defaultInstances: 1
+  staging:
+    description: Non-production integration environment for route, backup, and observability rehearsal.
+    environment: staging
+    topology: two-node-lab
+    migrationProfile: lab
+    imageMode: registry
+    databaseMigrationProfile: lab
+    edgeMigrationProfile: traefik-public
+    secretProviderProfile: external-secrets
+    registryPromotionProfile: production-registry
+    runtimeHardeningProfile: lab-audit
+    gitOpsProfile: lab-argocd
+    progressiveDeliveryProfile: lab-canary
+    scalingPolicyProfile: production-hpa
+    networkConnectivityProfile: production-restricted
+    accessGovernanceProfile: production-rbac
+    complianceEvidenceProfile: staging-control-review
+    incidentResponseProfile: staging-drill
+    changeManagementProfile: staging-approval
+    disasterRecoveryProfile: staging-rehearsal
+    backupProfile: rehearsal
+    observabilityProfile: standard
+    optionalCapabilities: explicit
+    importBatch: auto
+    strictDatabaseMigration: false
+    requireIngressEndpoint: true
+    requirePrivateRegistry: true
+    requireRestoreDrill: true
+    requireReleaseEvidence: false
+    helmValues:
+      global:
+        environment: staging
+        defaultReplicas: 2
+        replicaOverride: 2
+        skipPlaceholderWorkloads: true
+        scheduling:
+          topologySpread: true
+          antiAffinity: preferred
+      autoscaling:
+        enabled: true
+      backup:
+        enabled: false
+        profile: disabled
+      gitOpsDelivery:
+        enabled: true
+        profile: lab-argocd
+        controller: argocd
+        reconciliation: automated
+        driftDetection: warn
+        prune: false
+        selfHeal: true
+      progressiveDelivery:
+        enabled: false
+        profile: lab-canary
+        strategy: canary
+        controller: native
+        trafficProvider: native
+      scalingPolicy:
+        enabled: false
+        profile: production-hpa
+        mode: hpa
+        metricsSource: prometheus-adapter
+      networkConnectivity:
+        enabled: false
+        profile: production-restricted
+        mode: restricted-networkpolicy
+        ingressClassName: traefik
+      accessGovernance:
+        enabled: false
+        profile: production-rbac
+        mode: least-privilege
+      complianceEvidence:
+        enabled: false
+        profile: staging-control-review
+        mode: control-review
+      incidentResponse:
+        enabled: false
+        profile: staging-drill
+        mode: drill
+      changeManagement:
+        enabled: false
+        profile: staging-approval
+        mode: approval
+      disasterRecovery:
+        enabled: false
+        profile: staging-rehearsal
+        mode: rehearsal
+      observability:
+        profile: standard
+        prometheus:
+          enabled: true
+        grafana:
+          enabled: true
+        elasticsearch:
+          enabled: false
+        kibana:
+          enabled: false
+        logstash:
+          enabled: false
+        loki:
+          enabled: false
+        clickhouse:
+          enabled: false
+      platformCapabilities:
+        enabled: false
+      messaging:
+        kafka:
+          replicas: 2
+          ui:
+            enabled: false
+        redis:
+          replicas: 2
+          sentinel:
+            enabled: true
+      databases:
+        defaultInstances: 2
+  production:
+    description: Capacity-planned HA production environment.
+    environment: production
+    topology: three-node-ha
+    migrationProfile: production
+    imageMode: registry
+    databaseMigrationProfile: production
+    edgeMigrationProfile: traefik-public
+    secretProviderProfile: vault
+    registryPromotionProfile: enterprise-signed
+    runtimeHardeningProfile: production-restricted
+    gitOpsProfile: production-argocd
+    progressiveDeliveryProfile: production-canary
+    scalingPolicyProfile: production-hpa
+    networkConnectivityProfile: production-restricted
+    accessGovernanceProfile: oidc-sso
+    complianceEvidenceProfile: production-audit-pack
+    incidentResponseProfile: production-oncall
+    changeManagementProfile: production-cab
+    disasterRecoveryProfile: production-dr
+    backupProfile: production
+    observabilityProfile: production
+    optionalCapabilities: explicit
+    importBatch: all
+    strictDatabaseMigration: true
+    requireIngressEndpoint: true
+    requirePrivateRegistry: true
+    requireRestoreDrill: true
+    requireReleaseEvidence: true
+    helmValues:
+      global:
+        environment: production
+        defaultReplicas: 3
+        replicaOverride: null
+        skipPlaceholderWorkloads: true
+        scheduling:
+          topologySpread: true
+          antiAffinity: preferred
+      autoscaling:
+        enabled: true
+      backup:
+        enabled: false
+        profile: disabled
+      gitOpsDelivery:
+        enabled: true
+        profile: production-argocd
+        controller: argocd
+        reconciliation: automated
+        driftDetection: enforce
+        prune: false
+        selfHeal: true
+      progressiveDelivery:
+        enabled: false
+        profile: production-canary
+        strategy: canary
+        controller: argo-rollouts
+        trafficProvider: traefik
+      scalingPolicy:
+        enabled: false
+        profile: production-hpa
+        mode: hpa
+        metricsSource: prometheus-adapter
+      networkConnectivity:
+        enabled: false
+        profile: production-restricted
+        mode: restricted-networkpolicy
+        ingressClassName: traefik
+      accessGovernance:
+        enabled: false
+        profile: oidc-sso
+        mode: oidc
+      complianceEvidence:
+        enabled: false
+        profile: production-audit-pack
+        mode: audit-pack
+      incidentResponse:
+        enabled: false
+        profile: production-oncall
+        mode: oncall
+      changeManagement:
+        enabled: false
+        profile: production-cab
+        mode: cab
+      disasterRecovery:
+        enabled: false
+        profile: production-dr
+        mode: production
+      observability:
+        profile: production
+      platformCapabilities:
+        enabled: false
+      messaging:
+        kafka:
+          replicas: 3
+          ui:
+            enabled: false
+        redis:
+          replicas: 3
+          sentinel:
+            enabled: true
+      databases:
+        defaultInstances: 3
+requirements:
+  lab:
+  - capacity plan reviewed for small nodes
+  - optional capabilities disabled until baseline is healthy
+  - import batches used for large Compose projects
+  staging:
+  - private registry or preload strategy tested
+  - ingress DNS and TLS route tested
+  - backup and restore rehearsal completed
+  production:
+  - private registry digest pins ready
+  - database target map reviewed
+  - backup restore drill passed
+  - observability and SLO coverage reviewed
+  - release evidence verified
+  - strict database migration enabled

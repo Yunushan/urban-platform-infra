@@ -1,0 +1,94 @@
+defaultProfile: lab
+profiles:
+  lab:
+    description: Public-safe lab database migration controller profile.
+    skipUnavailableSources: true
+    requireAllowSecretMaterial: true
+    useContainerClientWhenLocalToolsMissing: true
+    requireTargetMapBeforeRestore: true
+    requireExtensionPrecheck: true
+    requirePostRestoreValidation: true
+    dumpFormat: custom
+    dumpFlags:
+    - --no-owner
+    - --no-acl
+    restoreFlags:
+    - --clean
+    - --if-exists
+    - --no-owner
+    guardrails:
+    - run database migration only after the private database target map exists
+    - keep skipped unavailable sources acceptable only for lab rehearsals
+    - use MIGRATION_ALLOW_SECRET_MATERIAL=true only on the trusted operator machine
+    - keep dumps under the private directory and outside Git
+  production:
+    description: Production database migration controller profile.
+    skipUnavailableSources: false
+    requireAllowSecretMaterial: true
+    useContainerClientWhenLocalToolsMissing: true
+    requireTargetMapBeforeRestore: true
+    requireExtensionPrecheck: true
+    requirePostRestoreValidation: true
+    dumpFormat: custom
+    dumpFlags:
+    - --no-owner
+    - --no-acl
+    restoreFlags:
+    - --clean
+    - --if-exists
+    - --no-owner
+    guardrails:
+    - every PostgreSQL-family source must be reachable before cutover
+    - every source must have a target map entry or intentionally remain external
+    - run source version and extension prechecks before dump
+    - run restore validation and smoke tests before traffic switch
+engines:
+  postgresql:
+    status: automated
+    sourceTool: pg_dump
+    restoreTool: pg_restore
+  postgis:
+    status: automated
+    sourceTool: pg_dump
+    restoreTool: pg_restore
+    extensionPrecheck: postgis
+  timescaledb:
+    status: automated
+    sourceTool: pg_dump
+    restoreTool: pg_restore
+    extensionPrecheck: timescaledb
+  mysql:
+    status: scaffolded
+    sourceTool: mysqldump
+    restoreTool: mysql
+  mariadb:
+    status: scaffolded
+    sourceTool: mariadb-dump
+    restoreTool: mariadb
+  microsoft-sql-server:
+    status: scaffolded
+    sourceTool: sqlpackage-or-bcp
+    restoreTool: sqlpackage-or-bcp
+  mongodb:
+    status: scaffolded
+    sourceTool: mongodump
+    restoreTool: mongorestore
+  sqlite:
+    status: scaffolded
+    sourceTool: sqlite3 .dump
+    restoreTool: sqlite3
+phases:
+- name: discover
+  automation: import-check and import-migrate service inventory
+- name: target-map
+  automation: private db-targets.yaml initialization
+- name: precheck
+  automation: source version and extension compatibility checks
+- name: dump
+  automation: pg_dump custom-format source export
+- name: restore
+  automation: pg_restore clean restore into mapped target
+- name: validate
+  automation: target connectivity, extension, and application smoke checks
+- name: state
+  automation: migration state fingerprint and retry-safe resume

@@ -1,0 +1,189 @@
+defaultProfile: disabled
+enabledByDefault: false
+profiles:
+  disabled:
+    description: Keep committed chart defaults and do not assemble compliance evidence.
+    enabled: false
+    mode: baseline
+    controlFamilies: []
+    evidence:
+      collectReports: false
+      requirePrivateIndex: false
+      requireReleaseTag: false
+      requireControlMap: false
+      requireRestoreDrill: false
+      requireAccessReview: false
+      requireIncidentDrill: false
+    retention:
+      enabled: false
+      days: 0
+      storageTier: none
+    packaging:
+      enabled: false
+      format: report-only
+      includeChecksums: false
+      includeAttestations: false
+  lab-evidence:
+    description: Public-safe lab evidence summary for migration rehearsals and local validation.
+    enabled: false
+    mode: lab-summary
+    controlFamilies:
+      - migration
+      - image-governance
+      - backup-readiness
+      - access-readiness
+    evidence:
+      collectReports: false
+      requirePrivateIndex: false
+      requireReleaseTag: false
+      requireControlMap: false
+      requireRestoreDrill: false
+      requireAccessReview: false
+      requireIncidentDrill: false
+    retention:
+      enabled: false
+      days: 30
+      storageTier: cold
+    packaging:
+      enabled: false
+      format: markdown
+      includeChecksums: true
+      includeAttestations: false
+  staging-control-review:
+    description: Staging readiness review that maps migration, backup, access, network, and release evidence.
+    enabled: false
+    mode: control-review
+    requireControlMap: true
+    requirePrivateIndex: true
+    requireRestoreDrill: true
+    requireAccessReview: true
+    controlFamilies:
+      - migration
+      - supply-chain
+      - runtime-security
+      - network
+      - backup-restore
+      - access-governance
+      - release-management
+    evidence:
+      collectReports: false
+      requirePrivateIndex: true
+      requireReleaseTag: false
+      requireControlMap: true
+      requireRestoreDrill: true
+      requireAccessReview: true
+      requireIncidentDrill: false
+    retention:
+      enabled: false
+      days: 90
+      storageTier: cold
+    packaging:
+      enabled: false
+      format: markdown-with-checksums
+      includeChecksums: true
+      includeAttestations: false
+  production-audit-pack:
+    description: Production audit-pack readiness for release, restore, access, incident, and control evidence.
+    enabled: false
+    mode: audit-pack
+    requireControlMap: true
+    requirePrivateIndex: true
+    requireReleaseTag: true
+    requireRestoreDrill: true
+    requireAccessReview: true
+    requireIncidentDrill: true
+    controlFamilies:
+      - migration
+      - supply-chain
+      - runtime-security
+      - network
+      - backup-restore
+      - access-governance
+      - incident-response
+      - release-management
+    evidence:
+      collectReports: false
+      requirePrivateIndex: true
+      requireReleaseTag: true
+      requireControlMap: true
+      requireRestoreDrill: true
+      requireAccessReview: true
+      requireIncidentDrill: true
+    retention:
+      enabled: false
+      days: 365
+      storageTier: cold
+    packaging:
+      enabled: false
+      format: audit-pack
+      includeChecksums: true
+      includeAttestations: true
+  regulated-retention:
+    description: Extended-retention evidence readiness for environments with external compliance ownership.
+    enabled: false
+    mode: regulated-retention
+    requireControlMap: true
+    requirePrivateIndex: true
+    requireReleaseTag: true
+    requireRestoreDrill: true
+    requireAccessReview: true
+    requireIncidentDrill: true
+    controlFamilies:
+      - migration
+      - supply-chain
+      - runtime-security
+      - network
+      - backup-restore
+      - access-governance
+      - incident-response
+      - release-management
+      - retention
+    evidence:
+      collectReports: false
+      requirePrivateIndex: true
+      requireReleaseTag: true
+      requireControlMap: true
+      requireRestoreDrill: true
+      requireAccessReview: true
+      requireIncidentDrill: true
+    retention:
+      enabled: false
+      days: 2555
+      storageTier: cold
+    packaging:
+      enabled: false
+      format: audit-pack
+      includeChecksums: true
+      includeAttestations: true
+controller:
+  report: reports/compliance-evidence-plan.md
+  overrides: reports/compliance-evidence-values.yaml
+evidenceSources:
+  - import-check public report
+  - import preflight report
+  - import capacity and batch reports
+  - image promotion and cache reports
+  - backup and restore plan
+  - database migration plan
+  - edge migration plan
+  - runtime hardening plan
+  - GitOps delivery plan
+  - progressive delivery plan
+  - scaling policy plan
+  - network connectivity plan
+  - access governance plan
+  - release evidence verification
+requiredChecks:
+  - private evidence index exists outside Git
+  - control map reviewed by platform owner
+  - release evidence verified for production
+  - backup restore drill evidence reviewed
+  - access review evidence reviewed
+  - incident drill evidence reviewed
+  - retention target reviewed before exporting evidence
+guardrails:
+  - keep compliance evidence disabled by default in committed values
+  - do not commit evidence archives, private reports, node addresses, user names, tenant names, or customer identifiers
+  - do not claim SOC, ISO, PCI, HIPAA, or regulatory certification from generated reports alone
+  - keep private evidence artifacts in approved object storage or a private operator directory
+  - publish only redacted report summaries unless the receiving system is approved for private data

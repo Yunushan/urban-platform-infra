@@ -1,0 +1,181 @@
+defaultProfile: disabled
+enabledByDefault: false
+profiles:
+  disabled:
+    description: Keep committed chart defaults and do not configure incident response automation.
+    enabled: false
+    mode: baseline
+    severityModel: none
+    alerting:
+      enabled: false
+      requireAlertRoutes: false
+      requirePaging: false
+      requireQuietHours: false
+    runbooks:
+      enabled: false
+      requireRunbookIndex: false
+      requireServiceOwnership: false
+      requireRollbackSteps: false
+    communications:
+      enabled: false
+      requireCommsTemplate: false
+      requireStakeholderMap: false
+    drills:
+      enabled: false
+      requireIncidentDrill: false
+      requirePostIncidentReview: false
+    evidence:
+      enabled: false
+      requireTimeline: false
+      requireActionItems: false
+  lab-readiness:
+    description: Public-safe lab readiness review for alerts, runbooks, and recovery ownership.
+    enabled: false
+    mode: readiness
+    severityModel: simple
+    alerting:
+      enabled: false
+      requireAlertRoutes: false
+      requirePaging: false
+      requireQuietHours: false
+    runbooks:
+      enabled: false
+      requireRunbookIndex: true
+      requireServiceOwnership: false
+      requireRollbackSteps: true
+    communications:
+      enabled: false
+      requireCommsTemplate: false
+      requireStakeholderMap: false
+    drills:
+      enabled: false
+      requireIncidentDrill: false
+      requirePostIncidentReview: false
+    evidence:
+      enabled: false
+      requireTimeline: false
+      requireActionItems: false
+  staging-drill:
+    description: Staging drill readiness for escalation, runbooks, rollback, and post-incident review.
+    enabled: false
+    mode: drill
+    requireRunbookIndex: true
+    requireAlertRoutes: true
+    requireIncidentDrill: true
+    requirePostIncidentReview: true
+    severityModel: sev1-sev4
+    alerting:
+      enabled: false
+      requireAlertRoutes: true
+      requirePaging: false
+      requireQuietHours: true
+    runbooks:
+      enabled: false
+      requireRunbookIndex: true
+      requireServiceOwnership: true
+      requireRollbackSteps: true
+    communications:
+      enabled: false
+      requireCommsTemplate: true
+      requireStakeholderMap: false
+    drills:
+      enabled: false
+      requireIncidentDrill: true
+      requirePostIncidentReview: true
+    evidence:
+      enabled: false
+      requireTimeline: true
+      requireActionItems: true
+  production-oncall:
+    description: Production on-call readiness for alert routes, paging, comms, rollback, drills, and evidence.
+    enabled: false
+    mode: oncall
+    requireRunbookIndex: true
+    requireAlertRoutes: true
+    requireEscalationRota: true
+    requirePagerService: true
+    requireCommsTemplate: true
+    requireIncidentDrill: true
+    requirePostIncidentReview: true
+    severityModel: sev1-sev4
+    alerting:
+      enabled: false
+      requireAlertRoutes: true
+      requirePaging: true
+      requireQuietHours: true
+    runbooks:
+      enabled: false
+      requireRunbookIndex: true
+      requireServiceOwnership: true
+      requireRollbackSteps: true
+    communications:
+      enabled: false
+      requireCommsTemplate: true
+      requireStakeholderMap: true
+    drills:
+      enabled: false
+      requireIncidentDrill: true
+      requirePostIncidentReview: true
+    evidence:
+      enabled: false
+      requireTimeline: true
+      requireActionItems: true
+  regulated-incident:
+    description: Regulated incident readiness with external reporting, retention, and legal hold ownership.
+    enabled: false
+    mode: regulated
+    requireRunbookIndex: true
+    requireAlertRoutes: true
+    requireEscalationRota: true
+    requirePagerService: true
+    requireCommsTemplate: true
+    requireIncidentDrill: true
+    requirePostIncidentReview: true
+    requireRegulatoryOwner: true
+    severityModel: sev1-sev4
+    alerting:
+      enabled: false
+      requireAlertRoutes: true
+      requirePaging: true
+      requireQuietHours: true
+    runbooks:
+      enabled: false
+      requireRunbookIndex: true
+      requireServiceOwnership: true
+      requireRollbackSteps: true
+    communications:
+      enabled: false
+      requireCommsTemplate: true
+      requireStakeholderMap: true
+    drills:
+      enabled: false
+      requireIncidentDrill: true
+      requirePostIncidentReview: true
+    evidence:
+      enabled: false
+      requireTimeline: true
+      requireActionItems: true
+controller:
+  report: reports/incident-response-plan.md
+  overrides: reports/incident-response-values.yaml
+supportedIntegrations:
+  - none
+  - prometheus-alertmanager
+  - grafana-oncall
+  - pagerduty
+  - opsgenie
+  - slack
+  - teams
+requiredChecks:
+  - alert route ownership reviewed
+  - service ownership and runbook index reviewed
+  - escalation rota and paging coverage reviewed before production use
+  - rollback and restore paths reviewed
+  - communication template reviewed
+  - incident drill and post-incident review evidence reviewed
+guardrails:
+  - keep incident response automation disabled by default in committed values
+  - do not commit contact names, phone numbers, email addresses, pager service IDs, ticket URLs, or incident timelines
+  - do not page, notify, or open tickets from public-safe planning commands
+  - store private incident evidence only in approved incident-management or evidence systems
+  - keep production paging and regulatory reporting owned by private overlays and approved integrations

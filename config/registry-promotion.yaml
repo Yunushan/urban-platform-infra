@@ -1,0 +1,76 @@
+defaultProfile: disabled
+profiles:
+  disabled:
+    description: Public-safe default. Generate guidance only; do not require or apply registry promotion.
+    enabled: false
+    executionMode: plan
+    imageMode: skip
+    registryRequired: false
+    imagePullSecretRequired: false
+    credentialSource: none
+    requireDigestPins: false
+    requireVulnerabilityScan: false
+    requireSbom: false
+    requireSignatureOrAttestation: false
+    requirePromotionRecord: false
+  lab-preload:
+    description: Lab profile for small or disconnected RKE2 clusters that avoid registry login.
+    enabled: true
+    executionMode: plan
+    imageMode: preload
+    registryRequired: false
+    imagePullSecretRequired: false
+    credentialSource: none
+    requireDigestPins: false
+    requireVulnerabilityScan: false
+    requireSbom: false
+    requireSignatureOrAttestation: false
+    requirePromotionRecord: true
+  production-registry:
+    description: Production registry profile. Requires private registry, pull secret, digest pins, and promotion evidence.
+    enabled: true
+    executionMode: enforce
+    imageMode: registry
+    registryRequired: true
+    imagePullSecretRequired: true
+    credentialSource: external-secret
+    requireDigestPins: true
+    requireVulnerabilityScan: true
+    requireSbom: true
+    requireSignatureOrAttestation: true
+    requirePromotionRecord: true
+  enterprise-signed:
+    description: Enterprise profile for signed digest promotion with external secret-backed registry credentials.
+    enabled: true
+    executionMode: enforce
+    imageMode: registry
+    registryRequired: true
+    imagePullSecretRequired: true
+    credentialSource: external-secret
+    requireDigestPins: true
+    requireVulnerabilityScan: true
+    requireSbom: true
+    requireSignatureOrAttestation: true
+    requirePromotionRecord: true
+    requireAdmissionVerification: true
+controller:
+  publicSafeReport: true
+  report: reports/registry-promotion-controller.md
+  overrides: reports/registry-promotion-values.yaml
+  pullSecretName: registry-credentials
+  credentialSources:
+    - none
+    - existing-login
+    - env
+    - external-secret
+    - vault
+  oneCommandTargets:
+    - registry-promotion-plan
+    - image-promotion-plan
+    - import-auto
+guardrails:
+  - keep the default profile disabled in committed values
+  - use registry promotion only with a real private registry outside Git
+  - source registry credentials from External Secrets, Vault, CI secrets, or existing local login state
+  - pin production image overrides by digest after scan, SBOM, signature, and promotion evidence are ready
+  - use RKE2 preload mode for constrained labs until registry credentials and pull secrets are ready

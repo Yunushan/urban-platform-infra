@@ -1,0 +1,109 @@
+defaultProfile: disabled
+profiles:
+  disabled:
+    description: Default mode. Standard Helm Deployment updates and manual rollback.
+    enabled: false
+    strategy: rolling-update
+    controller: none
+    trafficProvider: native
+    analysisMode: disabled
+    canarySteps: []
+    maxUnavailable: 25%
+    maxSurge: 25%
+    autoPromotion: false
+    automaticRollback: false
+    requireGitOps: false
+    requireMetrics: false
+    requireSlo: false
+    requireRollbackDrill: false
+    requireTrafficSplitting: false
+  lab-canary:
+    description: Lab canary intent for small batches and operator-observed promotion.
+    enabled: true
+    strategy: canary
+    controller: native
+    trafficProvider: native
+    analysisMode: manual
+    canarySteps:
+      - 10
+      - 25
+      - 50
+      - 100
+    maxUnavailable: 0
+    maxSurge: 1
+    autoPromotion: false
+    automaticRollback: false
+    requireGitOps: false
+    requireMetrics: false
+    requireSlo: false
+    requireRollbackDrill: false
+    requireTrafficSplitting: false
+  production-canary:
+    description: Production canary intent with Argo Rollouts or equivalent controller.
+    enabled: true
+    strategy: canary
+    controller: argo-rollouts
+    trafficProvider: traefik
+    analysisMode: automated
+    canarySteps:
+      - 5
+      - 25
+      - 50
+      - 100
+    maxUnavailable: 0
+    maxSurge: 1
+    autoPromotion: false
+    automaticRollback: true
+    requireGitOps: true
+    requireMetrics: true
+    requireSlo: true
+    requireRollbackDrill: true
+    requireTrafficSplitting: true
+  production-blue-green:
+    description: Production blue-green intent with preview service and manual promotion gate.
+    enabled: true
+    strategy: blue-green
+    controller: argo-rollouts
+    trafficProvider: native
+    analysisMode: automated
+    canarySteps: []
+    maxUnavailable: 0
+    maxSurge: 1
+    autoPromotion: false
+    automaticRollback: true
+    requireGitOps: true
+    requireMetrics: true
+    requireSlo: true
+    requireRollbackDrill: true
+    requireTrafficSplitting: false
+controller:
+  publicSafeReport: true
+  report: reports/progressive-delivery-plan.md
+  overrides: reports/progressive-delivery-values.yaml
+  supportedControllers:
+    - none
+    - native
+    - argo-rollouts
+    - flagger
+  supportedStrategies:
+    - rolling-update
+    - canary
+    - blue-green
+  supportedTrafficProviders:
+    - native
+    - traefik
+    - nginx
+    - linkerd
+    - istio
+  requiredChecks:
+    - GitOps or operator rollback owner assigned
+    - registry promotion and digest pins reviewed
+    - runtime hardening plan reviewed
+    - SLO metrics and analysis queries reviewed
+    - smoke tests and rollback drill completed
+guardrails:
+  - keep progressive delivery disabled by default in committed values
+  - keep automatic promotion disabled until analysis metrics and rollback ownership are reviewed
+  - do not enable production traffic shifting without GitOps, registry, runtime, and SLO readiness
+  - keep Helm rollback available as a break-glass path
+  - use lab canary only as a rehearsal signal on constrained clusters

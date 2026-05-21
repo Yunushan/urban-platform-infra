@@ -11,6 +11,8 @@ import os
 import re
 import shlex
 import shutil
+import socket
+import ssl
 import stat
 import subprocess
 import sys
@@ -38,6 +40,111 @@ KUBERNETES_NAMESPACE_RETRY_DELAY_SECONDS = 5
 KUBERNETES_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 CONFIGMAP_FILE_MAX_BYTES = 900 * 1024
 CONFIGMAP_TOTAL_MAX_BYTES = 950 * 1024
+MEMORY_QUANTITY_RE = re.compile(r"^([0-9]+)(Ki|Mi|Gi|Ti)?$")
+CPU_QUANTITY_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(m)?$")
+PRIVATE_IPV4_RE = re.compile(r"\b(?:10|192\.168|172\.(?:1[6-9]|2[0-9]|3[01]))(?:\.[0-9]{1,3}){2}\b")
+STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
+POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
+OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
+DATABASE_KINDS = import_project.DATABASE_KINDS
+OPTIONAL_DATABASE_PORTS = {
+    "mysql": 3306,
+    "mariadb": 3306,
+    "microsoft-sql-server": 1433,
+    "mongodb": 27017,
+}
+SECRET_PROVIDER_CHOICES = {"kubernetes", "external-secrets", "vault", "sops", "sealed-secrets"}
+AUTOMATIC_SECRET_PROVIDERS = {"kubernetes", "external-secrets", "vault"}
+OPTIONAL_DATABASE_TOOLS = {
+    "mysql": {"dump": "mysqldump", "restore": "mysql"},
+    "mariadb": {"dump": "mariadb-dump", "restore": "mariadb"},
+    "microsoft-sql-server": {"dump": "sqlpackage|bcp", "restore": "sqlpackage|bcp"},
+    "mongodb": {"dump": "mongodump", "restore": "mongorestore"},
+    "sqlite": {"dump": "sqlite3 .dump", "restore": "sqlite3"},
+}
+LAB_PROFILE_OVERLAY = {
+    "global": {
+        "defaultReplicas": 1,
+        "replicaOverride": 1,
+        "skipPlaceholderWorkloads": True,
+        "scheduling": {
+            "topologySpread": False,
+            "antiAffinity": "preferred",
+        },
+    },
+    "autoscaling": {"enabled": False},
+    "monitoring": {
+        "enabled": False,
+        "serviceMonitors": {"enabled": False},
+    },
+    "backup": {
+        "enabled": False,
+        "profile": "disabled",
+        "velero": {"enabled": False, "installOperator": False},
+    },
+    "databases": {
+        "defaultInstances": 1,
+        "resources": {
+            "requests": {"cpu": "50m", "memory": "128Mi"},
+            "limits": {"cpu": "500m", "memory": "512Mi"},
+        },
+        "storageOverride": {"size": "1Gi"},
+        "backup": {
+            "enabled": False,
+            "objectStore": {"enabled": False},
+            "schedule": {"enabled": False},
+        },
+    },
+    "messaging": {
+        "kafka": {
+            "replicas": 1,
+            "resources": {
+                "requests": {"cpu": "100m", "memory": "512Mi"},
+                "limits": {"cpu": "1000m", "memory": "1Gi"},
+            },
+            "storage": {"size": "2Gi"},
+            "zookeeper": {
+                "replicas": 1,
+                "resources": {
+                    "requests": {"cpu": "50m", "memory": "256Mi"},
+                    "limits": {"cpu": "500m", "memory": "512Mi"},
+                },
+                "storage": {"size": "1Gi"},
+            },
+            "ui": {"enabled": False},
+        },
+        "redis": {
+            "replicas": 1,
+            "resources": {
+                "requests": {"cpu": "50m", "memory": "128Mi"},
+                "limits": {"cpu": "250m", "memory": "256Mi"},
+            },
+            "sentinel": {"enabled": False},
+            "storage": {"size": "1Gi"},
+        },
+    },
+    "observability": {
+        "profile": "disabled",
+        "stack": {
+            "name": "disabled",
+            "logging": "none",
+            "search": "none",
+            "metrics": "none",
+            "dashboards": "none",
+            "telemetry": "none",
+            "traces": "none",
+        },
+        "grafana": {"enabled": False},
+        "prometheus": {"enabled": False},
+        "opentelemetry": {"enabled": False},
+        "loki": {"enabled": False},
+        "elasticsearch": {"enabled": False},
+        "kibana": {"enabled": False},
+        "logstash": {"enabled": False},
+        "clickhouse": {"enabled": False},
+    },
+    "platformCapabilities": {"enabled": False},
+}
 
 
 def require_yaml() -> None:
@@ -173,15 +280,32 @@ def kubectl_apply_stdin_command(args: argparse.Namespace, *, namespace: str | No
     return kubectl_command(args, command)
 
 
+def command_details(result: subprocess.CompletedProcess[str]) -> str:
+    return "\n".join(part for part in [result.stdout.strip(), result.stderr.strip()] if part)
+
+
+def kubectl_capture(args: argparse.Namespace, command: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(kubectl_command(args, command), text=True, capture_output=True)
+
+
+def kubectl_json(args: argparse.Namespace, command: list[str]) -> dict[str, Any]:
+    result = kubectl_capture(args, [*command, "-o", "json", "--request-timeout=20s"])
+    if result.returncode != 0:
+        raise RuntimeError(command_details(result))
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"kubectl returned invalid JSON for {' '.join(command)}: {exc}") from exc
+
+
 def require_kubernetes_api(args: argparse.Namespace) -> None:
     if not args.execute:
         return
-    command = kubectl_command(args, ["get", "--raw=/readyz", "--request-timeout=10s"])
-    result = subprocess.run(command, text=True, capture_output=True)
+    result = kubectl_capture(args, ["get", "--raw=/readyz", "--request-timeout=10s"])
     if result.returncode == 0:
         ensure_kubernetes_namespace(args)
         return
-    details = "\n".join(part for part in [result.stdout.strip(), result.stderr.strip()] if part)
+    details = command_details(result)
     kubeconfig_note = f" with kubeconfig {args.kubeconfig}" if args.kubeconfig else ""
     raise SystemExit(
         "Kubernetes API is not reachable"
@@ -364,6 +488,22 @@ def run_remote_sudo_shell_status(args: argparse.Namespace, ssh_options: list[str
     return result.returncode
 
 
+def run_remote_sudo_shell_capture(
+    args: argparse.Namespace,
+    ssh_options: list[str],
+    target: str,
+    script: str,
+) -> subprocess.CompletedProcess[str]:
+    password = become_password(args)
+    sudo_command = "sudo -S -p '' sh -lc" if password else "sudo -n sh -lc"
+    return subprocess.run(
+        ["ssh", *ssh_options, target, f"{sudo_command} {shlex.quote(script)}"],
+        input=f"{password}\n" if password else None,
+        text=True,
+        capture_output=True,
+    )
+
+
 def run_remote_sudo_upload(args: argparse.Namespace, ssh_options: list[str], target: str, local_path: Path, remote_path: str) -> None:
     password = become_password(args)
     password_required = False
@@ -420,6 +560,25 @@ def secure_file(path: Path) -> None:
         path.chmod(0o600)
     except PermissionError:
         print(f"Could not chmod {path}; verify permissions manually.")
+
+
+def utc_timestamp() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def file_fingerprint(path: Path) -> str:
+    if not path.exists():
+        return "missing"
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+    except OSError:
+        return "unreadable"
+
+
+def database_targets_path(args: argparse.Namespace) -> Path:
+    if args.db_targets:
+        return Path(args.db_targets).expanduser()
+    return Path(args.private_dir).expanduser() / "db-targets.yaml"
 
 
 def registry_host(registry: str) -> str:
@@ -539,6 +698,25 @@ def kubernetes_service_port_name(port: int) -> str:
     if port in {80, 8080, 5000, 5601, 8123, 9200}:
         return "http"
     return f"tcp-{port}"[:15].rstrip("-")
+
+
+def lab_profile_enabled(args: argparse.Namespace) -> bool:
+    return args.profile == "lab"
+
+
+def imported_workload_resources(args: argparse.Namespace) -> dict[str, Any] | None:
+    if not lab_profile_enabled(args):
+        return None
+    return {
+        "requests": {
+            "cpu": args.lab_workload_cpu_request,
+            "memory": args.lab_workload_memory_request,
+        },
+        "limits": {
+            "cpu": args.lab_workload_cpu_limit,
+            "memory": args.lab_workload_memory_limit,
+        },
+    }
 
 
 def should_generate_kubernetes_workload(args: argparse.Namespace, record: import_project.ServiceRecord, service: dict[str, Any]) -> bool:
@@ -727,6 +905,9 @@ def kubernetes_workload_manifests(
             container["env"] = env
         if secret_entries(service):
             container["envFrom"] = [{"secretRef": {"name": k8s_name(record.name, "import-env"), "optional": True}}]
+        resources = imported_workload_resources(args)
+        if resources:
+            container["resources"] = resources
         config_map_manifests, volumes, volume_mounts = nginx_configmap_mount_manifests(args, record, service, labels)
         if volume_mounts:
             container["volumeMounts"] = volume_mounts
@@ -749,6 +930,7 @@ def kubernetes_workload_manifests(
                         "annotations": {
                             "urban-platform.io/compose-file": record.file,
                             "urban-platform.io/compose-service": record.name,
+                            "urban-platform.io/migration-profile": args.profile,
                         },
                     },
                     "spec": {
@@ -1059,6 +1241,39 @@ def target_for_record(record: import_project.ServiceRecord, available: list[dict
     return available.pop(matching_index)
 
 
+def optional_database_target(record: import_project.ServiceRecord) -> dict[str, Any]:
+    tools = OPTIONAL_DATABASE_TOOLS.get(record.kind, {})
+    entry: dict[str, Any] = {
+        "sourceAlias": k8s_name(record.name),
+        "engine": record.kind,
+        "targetMode": "<external|operator|managed>",
+        "host": "<target-host>",
+        "database": "<target-database>",
+        "username": "<target-user>",
+        "password": "<target-password>",
+        "migration": {
+            "status": "scaffolded",
+            "dumpTool": tools.get("dump", "<engine-dump-tool>"),
+            "restoreTool": tools.get("restore", "<engine-restore-tool>"),
+        },
+    }
+    if record.kind in OPTIONAL_DATABASE_PORTS:
+        entry["port"] = OPTIONAL_DATABASE_PORTS[record.kind]
+    if record.kind == "sqlite":
+        entry.update(
+            {
+                "targetMode": "<single-pod-pvc|externalized-service>",
+                "filePath": "<sqlite-file-path>",
+                "note": "SQLite is not an HA database. Use only for dev/single-pod mode or migrate the application to an external database.",
+            }
+        )
+        entry.pop("host", None)
+        entry.pop("port", None)
+        entry.pop("username", None)
+        entry.pop("password", None)
+    return entry
+
+
 def generated_database_targets(
     service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
     values: dict[str, Any],
@@ -1069,12 +1284,16 @@ def generated_database_targets(
     database_records = [
         record
         for record, _service in service_pairs
-        if record.kind in {"postgresql", "postgis", "timescaledb"}
+        if record.kind in DATABASE_KINDS
     ]
     for index, record in enumerate(database_records):
+        if record.kind in OPTIONAL_DATABASE_KINDS:
+            mapping[record.name] = optional_database_target(record)
+            continue
         target = target_for_record(record, available, index)
         entry = {
             "sourceAlias": k8s_name(record.name),
+            "engine": record.kind,
             "targetService": target.get("name", "<target-service>"),
             "host": target["host"],
             "port": target["port"],
@@ -1135,6 +1354,10 @@ def handled_error_reason(args: argparse.Namespace, finding: import_project.Findi
         return None
     if args.allow_secret_material and "literal secret value" in finding.message:
         return "automated-secret-import"
+    if args.secret_provider in {"external-secrets", "vault"} and "literal secret value" in finding.message:
+        return f"{args.secret_provider}-secret-reference"
+    if args.secret_provider in {"sops", "sealed-secrets"} and "literal secret value" in finding.message:
+        return f"{args.secret_provider}-encrypted-handoff"
     if args.skip_docker_socket_services and "/var/run/docker.sock" in finding.message:
         return "skipped-docker-socket-service"
     return None
@@ -1183,7 +1406,8 @@ def write_operator_action_plan(args: argparse.Namespace, findings: list[import_p
             "",
             "## Notes",
             "",
-            "- Literal secrets are imported into Kubernetes Secrets only when `MIGRATION_ALLOW_SECRET_MATERIAL=true` is set.",
+            "- Literal secrets are imported directly only when `MIGRATION_SECRET_PROVIDER=kubernetes` and `MIGRATION_ALLOW_SECRET_MATERIAL=true` are set.",
+            "- `MIGRATION_SECRET_PROVIDER=external-secrets` or `vault` emits ExternalSecret references instead of plain Secret objects.",
             "- Services that mount `/var/run/docker.sock` are not carried into Kubernetes as Docker-socket integrations.",
             "- The source Compose files are not rewritten by this automation.",
             "",
@@ -1218,6 +1442,963 @@ def print_bundle_files(output: Path) -> None:
         print(f"- {path.relative_to(output)}")
 
 
+def lab_profile_overlay(args: argparse.Namespace) -> dict[str, Any]:
+    overlay = yaml.safe_load(yaml.safe_dump(LAB_PROFILE_OVERLAY, sort_keys=False))
+    overlay["workloads"] = {
+        "importedDefaults": {
+            "replicas": 1,
+            "resources": imported_workload_resources(args),
+        }
+    }
+    return overlay
+
+
+def write_migration_profile_files(args: argparse.Namespace, output: Path) -> None:
+    if lab_profile_enabled(args):
+        overlay_path = output / "lab-profile-values.yaml"
+        overlay = lab_profile_overlay(args)
+        write_file(
+            overlay_path,
+            "# Generated lab-safe import overlay. Review before using with Helm.\n"
+            + yaml.safe_dump(overlay, sort_keys=False),
+        )
+    profile_readme = [
+        "# Import Profile",
+        "",
+        f"- Selected profile: `{args.profile}`",
+        "",
+    ]
+    if lab_profile_enabled(args):
+        profile_readme.extend(
+            [
+                "The lab profile is the default for `import-auto` and `import-migrate`.",
+                "It keeps the imported deployment survivable on constrained clusters by:",
+                "",
+                "- forcing imported Kubernetes workloads to one replica",
+                "- adding small CPU and memory requests/limits to imported workloads",
+                "- keeping autoscaling, heavy observability, backups, and optional platform capabilities disabled",
+                "- constraining platform database, Kafka, ZooKeeper, and Redis defaults through `lab-profile-values.yaml`",
+                "- skipping Docker socket workloads and unavailable database sources unless production mode explicitly opts out",
+                "",
+                "Use `MIGRATION_PROFILE=production` only when cluster capacity, registry, storage, backup, and strict database migration plans are ready.",
+            ]
+        )
+    else:
+        profile_readme.extend(
+            [
+                "The production profile does not inject lab resource limits into imported workloads.",
+                "Use this only when capacity, registry, storage, backup, and strict database migration plans are ready.",
+            ]
+        )
+    write_file(output / "import-profile.md", "\n".join(profile_readme) + "\n")
+
+
+def parse_memory_mi(quantity: str) -> int | None:
+    match = MEMORY_QUANTITY_RE.fullmatch(str(quantity).strip())
+    if not match:
+        return None
+    value = int(match.group(1))
+    unit = match.group(2) or "Mi"
+    if unit == "Ki":
+        return value // 1024
+    if unit == "Mi":
+        return value
+    if unit == "Gi":
+        return value * 1024
+    if unit == "Ti":
+        return value * 1024 * 1024
+    return None
+
+
+def parse_cpu_millicores(quantity: str) -> int | None:
+    match = CPU_QUANTITY_RE.fullmatch(str(quantity).strip())
+    if not match:
+        return None
+    value = float(match.group(1))
+    if match.group(2) == "m":
+        return int(value)
+    return int(value * 1000)
+
+
+def format_cpu(millicores: int | None) -> str:
+    if millicores is None:
+        return "unknown"
+    return f"{millicores}m"
+
+
+def format_memory(mi: int | None) -> str:
+    if mi is None:
+        return "unknown"
+    return f"{mi}Mi"
+
+
+def parse_percentage_limit(value: str) -> float | None:
+    text = str(value).strip().rstrip("%")
+    if not text:
+        return None
+    try:
+        parsed = float(text)
+    except ValueError:
+        return None
+    if parsed > 1:
+        parsed = parsed / 100
+    if parsed <= 0:
+        return None
+    return parsed
+
+
+def preflight_node_label(args: argparse.Namespace, target: str, index: int) -> str:
+    if args.redact_sensitive:
+        return f"rke2-node-{index:03d}"
+    return target
+
+
+def preflight_record(lines: list[str], level: str, message: str) -> None:
+    lines.append(f"- **{level}** {message}")
+
+
+def redact_preflight_text(args: argparse.Namespace, text: str) -> str:
+    if not args.redact_sensitive:
+        return text
+    redacted = PRIVATE_IPV4_RE.sub("<private-ip>", text)
+    if args.kubeconfig:
+        redacted = redacted.replace(args.kubeconfig, "<kubeconfig>")
+    for node in [item.strip() for item in args.rke2_nodes.split(",") if item.strip()]:
+        redacted = redacted.replace(node, "<private-node>")
+    return redacted
+
+
+def write_preflight_report(args: argparse.Namespace, output: Path, lines: list[str]) -> None:
+    content = "\n".join(lines) + "\n"
+    write_file(output / "import-preflight.md", redact_preflight_text(args, content))
+
+
+def write_capacity_report(args: argparse.Namespace, output: Path, lines: list[str]) -> None:
+    content = "\n".join(lines) + "\n"
+    write_file(output / "import-capacity.md", redact_preflight_text(args, content))
+
+
+def resolve_ingress_host(args: argparse.Namespace, values: dict[str, Any]) -> str:
+    host = args.ingress_host or values.get("ingress", {}).get("host") or values.get("global", {}).get("cluster", {}).get("domain", "")
+    host = str(host).strip()
+    if "://" in host:
+        host = host.split("://", 1)[1]
+    host = host.split("/", 1)[0].strip("[]")
+    if ":" in host and not re.fullmatch(r"[0-9a-fA-F:]+", host):
+        host = host.rsplit(":", 1)[0]
+    return host
+
+
+def preflight_check_readyz(args: argparse.Namespace, lines: list[str], errors: list[str]) -> None:
+    result = kubectl_capture(args, ["get", "--raw=/readyz", "--request-timeout=10s"])
+    details = command_details(result)
+    if result.returncode == 0:
+        preflight_record(lines, "OK", "Kubernetes API `/readyz` answered from the operator.")
+        return
+    message = "Kubernetes API `/readyz` is not reachable from the operator."
+    if details:
+        message = f"{message} `{details}`"
+    errors.append(message)
+    preflight_record(lines, "ERROR", message)
+
+
+def preflight_check_nodes(args: argparse.Namespace, lines: list[str], errors: list[str], warnings: list[str]) -> None:
+    try:
+        nodes = kubectl_json(args, ["get", "nodes"])
+    except RuntimeError as exc:
+        message = f"Could not read Kubernetes nodes: {exc}"
+        errors.append(message)
+        preflight_record(lines, "ERROR", message)
+        return
+
+    items = nodes.get("items", [])
+    if not items:
+        message = "Kubernetes returned zero nodes."
+        errors.append(message)
+        preflight_record(lines, "ERROR", message)
+        return
+
+    min_memory_mi = parse_memory_mi(args.preflight_min_node_memory)
+    preflight_record(lines, "OK", f"Kubernetes returned `{len(items)}` node(s).")
+    for index, node in enumerate(items, start=1):
+        node_name = node.get("metadata", {}).get("name", f"node-{index}")
+        display_name = f"node-{index:03d}" if args.redact_sensitive else node_name
+        conditions = {condition.get("type"): condition for condition in node.get("status", {}).get("conditions", [])}
+        ready = conditions.get("Ready", {}).get("status") == "True"
+        if ready:
+            preflight_record(lines, "OK", f"`{display_name}` is Ready.")
+        else:
+            message = f"`{display_name}` is not Ready."
+            errors.append(message)
+            preflight_record(lines, "ERROR", message)
+        for pressure_condition in ["MemoryPressure", "DiskPressure", "PIDPressure", "NetworkUnavailable"]:
+            if conditions.get(pressure_condition, {}).get("status") == "True":
+                message = f"`{display_name}` reports `{pressure_condition}`."
+                errors.append(message)
+                preflight_record(lines, "ERROR", message)
+        memory_quantity = node.get("status", {}).get("capacity", {}).get("memory")
+        memory_mi = parse_memory_mi(memory_quantity or "")
+        if min_memory_mi is not None and memory_mi is not None and memory_mi < min_memory_mi:
+            message = (
+                f"`{display_name}` has `{memory_quantity}` memory, below the configured "
+                f"`{args.preflight_min_node_memory}` preflight floor."
+            )
+            errors.append(message)
+            preflight_record(lines, "ERROR", message)
+        elif memory_mi is not None:
+            preflight_record(lines, "OK", f"`{display_name}` memory capacity is `{memory_quantity}`.")
+        else:
+            message = f"`{display_name}` memory capacity could not be parsed."
+            warnings.append(message)
+            preflight_record(lines, "WARN", message)
+
+
+def preflight_check_storage(args: argparse.Namespace, lines: list[str], errors: list[str]) -> None:
+    try:
+        storage_classes = kubectl_json(args, ["get", "storageclass"])
+    except RuntimeError as exc:
+        message = f"Could not read Kubernetes StorageClasses: {exc}"
+        errors.append(message)
+        preflight_record(lines, "ERROR", message)
+        return
+
+    items = storage_classes.get("items", [])
+    if not items:
+        message = "No Kubernetes StorageClass exists; install CSI or local-path storage before import."
+        errors.append(message)
+        preflight_record(lines, "ERROR", message)
+        return
+    default_names = [
+        item.get("metadata", {}).get("name", "")
+        for item in items
+        if item.get("metadata", {}).get("annotations", {}).get("storageclass.kubernetes.io/is-default-class") == "true"
+    ]
+    default_note = f" Default: `{default_names[0]}`." if default_names else ""
+    preflight_record(lines, "OK", f"Kubernetes has `{len(items)}` StorageClass object(s).{default_note}")
+
+
+def imported_capacity_candidates(
+    args: argparse.Namespace,
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+) -> list[import_project.ServiceRecord]:
+    records: list[import_project.ServiceRecord] = []
+    for record, service in service_pairs:
+        if not should_generate_kubernetes_workload(args, record, service):
+            continue
+        if not image_for_kubernetes_manifest(args, record):
+            continue
+        if not kubernetes_container_ports(record, service):
+            continue
+        records.append(record)
+    return records
+
+
+def import_batch_key(record: import_project.ServiceRecord) -> tuple[str, str]:
+    return (record.file, record.name)
+
+
+def import_batch_size(args: argparse.Namespace, workload_count: int) -> int:
+    configured = int(args.batch_size or 0)
+    if configured > 0:
+        return configured
+    return max(workload_count, 1)
+
+
+def resolve_import_batch(args: argparse.Namespace, total_batches: int) -> int | None:
+    selected = str(args.import_batch or "all").strip().lower()
+    if selected in {"", "all", "0"}:
+        return None
+    if selected == "auto":
+        return 1 if total_batches > 1 else None
+    if not selected.isdigit():
+        raise SystemExit("MIGRATION_IMPORT_BATCH must be `all`, `auto`, or a positive batch number.")
+    batch = int(selected)
+    if batch < 1 or batch > max(total_batches, 1):
+        raise SystemExit(f"MIGRATION_IMPORT_BATCH={batch} is outside the available batch range 1..{max(total_batches, 1)}.")
+    return batch
+
+
+def import_batch_plan(args: argparse.Namespace, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]]) -> dict[str, Any]:
+    records = imported_capacity_candidates(args, service_pairs)
+    batch_size = import_batch_size(args, len(records))
+    total_batches = (len(records) + batch_size - 1) // batch_size if records else 0
+    selected_batch = resolve_import_batch(args, total_batches)
+    entries = [
+        {
+            "record": record,
+            "batch": ((index - 1) // batch_size) + 1 if records else 0,
+            "ordinal": index,
+        }
+        for index, record in enumerate(records, start=1)
+    ]
+    selected_entries = [entry for entry in entries if selected_batch is None or entry["batch"] == selected_batch]
+    return {
+        "batchSize": batch_size,
+        "totalWorkloads": len(records),
+        "totalBatches": total_batches,
+        "selectedBatch": selected_batch,
+        "entries": entries,
+        "selectedEntries": selected_entries,
+    }
+
+
+def selected_import_batch_keys(args: argparse.Namespace, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]]) -> set[tuple[str, str]] | None:
+    plan = import_batch_plan(args, service_pairs)
+    if plan["selectedBatch"] is None:
+        return None
+    return {import_batch_key(entry["record"]) for entry in plan["selectedEntries"]}
+
+
+def filter_service_pairs_for_import_batch(
+    args: argparse.Namespace,
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+) -> list[tuple[import_project.ServiceRecord, dict[str, Any]]]:
+    selected_keys = selected_import_batch_keys(args, service_pairs)
+    if selected_keys is None:
+        return service_pairs
+    return [
+        (record, service)
+        for record, service in service_pairs
+        if import_batch_key(record) in selected_keys
+    ]
+
+
+def migration_state_path(args: argparse.Namespace) -> Path:
+    state_file = args.state_file or str(Path(args.private_dir).expanduser() / "migration-state.yaml")
+    return Path(state_file).expanduser()
+
+
+def read_migration_state(args: argparse.Namespace) -> dict[str, Any]:
+    path = migration_state_path(args)
+    if not path.exists():
+        return {"version": 1, "completed": {}}
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        return {"version": 1, "completed": {}}
+    data.setdefault("version", 1)
+    completed = data.get("completed")
+    if not isinstance(completed, dict):
+        data["completed"] = {}
+    return data
+
+
+def write_migration_state(args: argparse.Namespace, state: dict[str, Any]) -> None:
+    path = migration_state_path(args)
+    secure_directory(path.parent)
+    state["version"] = 1
+    state["updatedAt"] = utc_timestamp()
+    write_file(path, yaml.safe_dump(state, sort_keys=False))
+    secure_file(path)
+
+
+def stage_scope_pairs(
+    args: argparse.Namespace,
+    stage: str,
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+) -> list[tuple[import_project.ServiceRecord, dict[str, Any]]]:
+    if stage in {"secrets", "images", "manifests"}:
+        return filter_service_pairs_for_import_batch(args, service_pairs)
+    if stage == "databases":
+        return [
+            (record, service)
+            for record, service in service_pairs
+            if record.kind in POSTGRES_FAMILY_KINDS
+        ]
+    return service_pairs
+
+
+def stage_scope_records(
+    args: argparse.Namespace,
+    stage: str,
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+) -> list[import_project.ServiceRecord]:
+    return [record for record, _service in stage_scope_pairs(args, stage, service_pairs)]
+
+
+def migration_stage_scope(args: argparse.Namespace, stage: str, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]]) -> dict[str, Any]:
+    plan = import_batch_plan(args, service_pairs)
+    selected_batch = plan["selectedBatch"] if stage in {"secrets", "images", "manifests"} else None
+    scoped_pairs = stage_scope_pairs(args, stage, service_pairs)
+    records = [record for record, _service in scoped_pairs]
+    record_keys = [f"{record.file}::{record.name}::{record.kind}" for record in records]
+    database_target_path = database_targets_path(args)
+    secret_keys = [
+        f"{record.file}::{record.name}::{key}"
+        for record, service in scoped_pairs
+        for key, _value in import_project.environment_entries(service.get("environment"))
+        if SECRET_ENV_RE.search(key)
+    ]
+    manifest_images = [
+        f"{record.file}::{record.name}::{image_for_kubernetes_manifest(args, record) or ''}"
+        for record, _service in scoped_pairs
+        if stage in {"images", "manifests"}
+    ]
+    scope_material = {
+        "stage": stage,
+        "profile": args.profile,
+        "namespace": args.namespace,
+        "selectedBatch": selected_batch if selected_batch is not None else "all",
+        "batchSize": plan["batchSize"] if stage in {"secrets", "images", "manifests"} else "global",
+        "imageMode": args.image_mode if stage in {"images", "manifests"} else "",
+        "imageTag": args.image_tag if stage in {"images", "manifests"} else "",
+        "registry": args.registry if stage in {"images", "manifests"} else "",
+        "ingressHost": args.ingress_host if stage == "manifests" else "",
+        "tlsEnabled": bool(args.tls_cert_file or args.tls_key_file) if stage == "manifests" else False,
+        "databaseTargets": str(database_target_path) if stage == "databases" else "",
+        "databaseTargetsFingerprint": file_fingerprint(database_target_path) if stage == "databases" else "",
+        "skipUnavailableDatabases": args.skip_unavailable_databases if stage == "databases" else "",
+        "secretProvider": args.secret_provider if stage == "secrets" else "",
+        "secretRemotePrefix": args.secret_remote_prefix if stage == "secrets" else "",
+        "secretStoreName": args.secret_store_name if stage == "secrets" else "",
+        "secretStoreKind": args.secret_store_kind if stage == "secrets" else "",
+        "secretKeys": sorted(secret_keys) if stage == "secrets" else [],
+        "manifestImages": sorted(manifest_images) if stage in {"images", "manifests"} else [],
+        "records": record_keys,
+    }
+    digest = hashlib.sha256(json.dumps(scope_material, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+    return {
+        "key": f"{stage}:{digest}",
+        "stage": stage,
+        "digest": digest,
+        "selectedBatch": selected_batch if selected_batch is not None else "all",
+        "totalBatches": plan["totalBatches"],
+        "recordCount": len(records),
+    }
+
+
+def write_migration_state_report(args: argparse.Namespace, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]]) -> None:
+    output = Path(args.output).expanduser()
+    output.mkdir(parents=True, exist_ok=True)
+    state = read_migration_state(args)
+    completed = state.get("completed", {})
+    state_path = "<private-state-file>" if args.redact_sensitive else str(migration_state_path(args))
+    lines = [
+        "# Import Resume State",
+        "",
+        "This report is public-safe when redaction is enabled. The private state file stores stage completion keys used to resume failed imports.",
+        "",
+        f"- Resume enabled: `{str(args.resume).lower()}`",
+        f"- Force rerun: `{str(args.force_rerun).lower()}`",
+        f"- State file: `{state_path}`",
+        "",
+        "## Selected Scope",
+        "",
+        "| Stage | Batch | Records | Status |",
+        "|---|---|---:|---|",
+    ]
+    for stage in ["secrets", "images", "databases", "manifests"]:
+        scope = migration_stage_scope(args, stage, service_pairs)
+        status = "completed" if scope["key"] in completed else "pending"
+        lines.append(f"| `{stage}` | `{scope['selectedBatch']}` | `{scope['recordCount']}` | `{status}` |")
+    lines.extend(
+        [
+            "",
+            "## Controls",
+            "",
+            "- `MIGRATION_RESUME=true` skips completed stateful mutation stages.",
+            "- `MIGRATION_FORCE_RERUN=true` reruns stages even when state says they completed.",
+            "- `MIGRATION_STATE_FILE` can point at another private state file for isolated rehearsals.",
+            "",
+        ]
+    )
+    write_file(output / "import-resume.md", "\n".join(lines))
+
+
+def migration_stage_completed(args: argparse.Namespace, stage: str, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]]) -> bool:
+    if not args.execute or not args.resume or args.force_rerun or stage not in STATEFUL_MIGRATION_STAGES:
+        return False
+    scope = migration_stage_scope(args, stage, service_pairs)
+    state = read_migration_state(args)
+    entry = state.get("completed", {}).get(scope["key"])
+    if not entry:
+        return False
+    print(
+        f"Skipping {stage}: resume state already completed selected batch `{scope['selectedBatch']}` "
+        f"with scope `{scope['digest']}` at {entry.get('completedAt', 'unknown time')}."
+    )
+    write_migration_state_report(args, service_pairs)
+    return True
+
+
+def mark_migration_stage_completed(args: argparse.Namespace, stage: str, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]]) -> None:
+    if not args.execute or stage not in STATEFUL_MIGRATION_STAGES:
+        return
+    scope = migration_stage_scope(args, stage, service_pairs)
+    state = read_migration_state(args)
+    state.setdefault("completed", {})[scope["key"]] = {
+        "stage": stage,
+        "scope": scope["digest"],
+        "profile": args.profile,
+        "namespace": args.namespace,
+        "selectedBatch": scope["selectedBatch"],
+        "recordCount": scope["recordCount"],
+        "completedAt": utc_timestamp(),
+    }
+    write_migration_state(args, state)
+    write_migration_state_report(args, service_pairs)
+    print(f"Migration state recorded for {stage} scope `{scope['digest']}`.")
+
+
+def write_import_batch_plan(
+    args: argparse.Namespace,
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+) -> None:
+    output = Path(args.output).expanduser()
+    output.mkdir(parents=True, exist_ok=True)
+    redactor = import_project.ReportRedactor(args.redact_sensitive)
+    plan = import_batch_plan(args, service_pairs)
+    selected = plan["selectedBatch"]
+    yaml_batches: list[dict[str, Any]] = []
+    md_lines = [
+        "# Import Batches",
+        "",
+        "This report is public-safe when redaction is enabled. It maps imported application workloads into batches so constrained labs can import one slice at a time.",
+        "",
+        f"- Batch size: `{plan['batchSize']}`",
+        f"- Total imported workloads: `{plan['totalWorkloads']}`",
+        f"- Total batches: `{plan['totalBatches']}`",
+        f"- Selected batch: `{selected if selected is not None else 'all'}`",
+        "",
+        "## Batches",
+        "",
+        "| Batch | Workloads | Scope sample |",
+        "|---|---:|---|",
+    ]
+    for batch_number in range(1, plan["totalBatches"] + 1):
+        records = [entry["record"] for entry in plan["entries"] if entry["batch"] == batch_number]
+        sample = ", ".join(
+            f"{redactor.file(record.file)}::{redactor.service(record.name)}"
+            for record in records[:5]
+        )
+        if len(records) > 5:
+            sample = f"{sample}, +{len(records) - 5} more"
+        md_lines.append(f"| `{batch_number}` | `{len(records)}` | `{sample or '-'}` |")
+        yaml_batches.append(
+            {
+                "batch": batch_number,
+                "workloadCount": len(records),
+                "selected": selected == batch_number,
+                "workloads": [
+                    {
+                        "composeFile": redactor.file(record.file),
+                        "service": redactor.service(record.name),
+                        "kind": record.kind,
+                    }
+                    for record in records
+                ],
+            }
+        )
+    next_batch = selected + 1 if selected is not None and selected < plan["totalBatches"] else None
+    md_lines.extend(
+        [
+            "",
+            "## Run Control",
+            "",
+            "- `MIGRATION_IMPORT_BATCH=auto` selects the first batch only when multiple batches exist.",
+            "- `MIGRATION_IMPORT_BATCH=all` disables batching and imports every generated workload.",
+            "- Set `MIGRATION_IMPORT_BATCH=<number>` to run one explicit batch.",
+        ]
+    )
+    if next_batch is not None:
+        md_lines.append(f"- Next batch: run again with `MIGRATION_IMPORT_BATCH={next_batch}`.")
+    yaml_doc = {
+        "profile": args.profile,
+        "batchSize": plan["batchSize"],
+        "totalImportedWorkloads": plan["totalWorkloads"],
+        "totalBatches": plan["totalBatches"],
+        "selectedBatch": selected if selected is not None else "all",
+        "nextBatch": next_batch,
+        "batches": yaml_batches,
+    }
+    write_file(output / "import-batches.yaml", yaml.safe_dump(yaml_doc, sort_keys=False))
+    write_file(output / "import-batches.md", "\n".join(md_lines) + "\n")
+
+
+def preflight_check_imported_capacity(
+    args: argparse.Namespace,
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+    lines: list[str],
+    errors: list[str],
+    warnings: list[str],
+) -> None:
+    output = Path(args.output).expanduser()
+    capacity_lines = [
+        "# Import Capacity Plan",
+        "",
+        "This report is public-safe. It reports counts and resource totals, not private service names, node names, or IP addresses.",
+        "",
+        f"- Profile: `{args.profile}`",
+        f"- Max imported workloads: `{args.preflight_max_imported_workloads}`",
+        f"- Capacity utilization limit: `{args.preflight_capacity_utilization_limit}`",
+        "",
+        "## Imported Workload Estimate",
+        "",
+    ]
+    plan = import_batch_plan(args, service_pairs)
+    records = [entry["record"] for entry in plan["selectedEntries"]]
+    workload_count = len(records)
+    total_workload_count = plan["totalWorkloads"]
+    selected_batch = plan["selectedBatch"]
+    resources = imported_workload_resources(args)
+    request_cpu_m = parse_cpu_millicores(resources["requests"]["cpu"]) if resources else None
+    request_memory_mi = parse_memory_mi(resources["requests"]["memory"]) if resources else None
+    total_cpu_m = request_cpu_m * workload_count if request_cpu_m is not None else None
+    total_memory_mi = request_memory_mi * workload_count if request_memory_mi is not None else None
+    max_workloads = int(args.preflight_max_imported_workloads or 0)
+    utilization_limit = parse_percentage_limit(args.preflight_capacity_utilization_limit)
+
+    capacity_lines.extend(
+        [
+            f"- Generated imported workloads: `{workload_count}`",
+            f"- Total imported workloads across all batches: `{total_workload_count}`",
+            f"- Selected import batch: `{selected_batch if selected_batch is not None else 'all'}`",
+            f"- Per-workload CPU request: `{format_cpu(request_cpu_m)}`",
+            f"- Per-workload memory request: `{format_memory(request_memory_mi)}`",
+            f"- Total imported CPU request: `{format_cpu(total_cpu_m)}`",
+            f"- Total imported memory request: `{format_memory(total_memory_mi)}`",
+            "",
+            "## Cluster Capacity",
+            "",
+        ]
+    )
+
+    if max_workloads > 0 and workload_count > max_workloads:
+        message = (
+            f"Selected imported workload count `{workload_count}` exceeds lab-safe preflight limit "
+            f"`{max_workloads}`. Split the import or raise `MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS` intentionally."
+        )
+        errors.append(message)
+        preflight_record(lines, "ERROR", message)
+        preflight_record(capacity_lines, "ERROR", message)
+    elif max_workloads > 0:
+        message = f"Selected imported workload count `{workload_count}` is within configured limit `{max_workloads}`."
+        preflight_record(lines, "OK", message)
+        preflight_record(capacity_lines, "OK", message)
+
+    if resources is None:
+        message = "Imported workload resource requests are not configured for this profile; capacity fit cannot be estimated."
+        warnings.append(message)
+        preflight_record(lines, "WARN", message)
+        preflight_record(capacity_lines, "WARN", message)
+        capacity_lines.extend(["", "## Result", "", "- Result: `WARN`"])
+        write_capacity_report(args, output, capacity_lines)
+        return
+
+    try:
+        nodes = kubectl_json(args, ["get", "nodes"])
+    except RuntimeError as exc:
+        message = f"Could not estimate imported workload capacity because Kubernetes nodes could not be read: {exc}"
+        errors.append(message)
+        preflight_record(lines, "ERROR", message)
+        preflight_record(capacity_lines, "ERROR", message)
+        capacity_lines.extend(["", "## Result", "", "- Result: `FAIL`"])
+        write_capacity_report(args, output, capacity_lines)
+        return
+
+    allocatable_cpu_m = 0
+    allocatable_memory_mi = 0
+    node_count = 0
+    for node in nodes.get("items", []):
+        allocatable = node.get("status", {}).get("allocatable", {})
+        node_cpu_m = parse_cpu_millicores(allocatable.get("cpu", ""))
+        node_memory_mi = parse_memory_mi(allocatable.get("memory", ""))
+        if node_cpu_m is not None:
+            allocatable_cpu_m += node_cpu_m
+        if node_memory_mi is not None:
+            allocatable_memory_mi += node_memory_mi
+        node_count += 1
+
+    capacity_lines.extend(
+        [
+            f"- Nodes considered: `{node_count}`",
+            f"- Total allocatable CPU: `{format_cpu(allocatable_cpu_m)}`",
+            f"- Total allocatable memory: `{format_memory(allocatable_memory_mi)}`",
+            "",
+            "## Fit Check",
+            "",
+        ]
+    )
+
+    if utilization_limit is None:
+        message = f"Capacity utilization limit `{args.preflight_capacity_utilization_limit}` could not be parsed; skipping ratio gate."
+        warnings.append(message)
+        preflight_record(lines, "WARN", message)
+        preflight_record(capacity_lines, "WARN", message)
+    else:
+        cpu_limit_m = int(allocatable_cpu_m * utilization_limit)
+        memory_limit_mi = int(allocatable_memory_mi * utilization_limit)
+        capacity_lines.extend(
+            [
+                f"- CPU gate at limit: `{format_cpu(cpu_limit_m)}`",
+                f"- Memory gate at limit: `{format_memory(memory_limit_mi)}`",
+            ]
+        )
+        if total_cpu_m is not None and allocatable_cpu_m <= 0:
+            message = "Cluster allocatable CPU could not be parsed; CPU capacity gate is inconclusive."
+            warnings.append(message)
+            preflight_record(lines, "WARN", message)
+            preflight_record(capacity_lines, "WARN", message)
+        elif total_cpu_m is not None and total_cpu_m > cpu_limit_m:
+            message = (
+                f"Imported CPU request `{format_cpu(total_cpu_m)}` exceeds "
+                f"`{args.preflight_capacity_utilization_limit}` of cluster allocatable CPU."
+            )
+            errors.append(message)
+            preflight_record(lines, "ERROR", message)
+            preflight_record(capacity_lines, "ERROR", message)
+        elif total_cpu_m is not None:
+            message = f"Imported CPU request `{format_cpu(total_cpu_m)}` fits the configured cluster CPU gate."
+            preflight_record(lines, "OK", message)
+            preflight_record(capacity_lines, "OK", message)
+
+        if total_memory_mi is not None and allocatable_memory_mi <= 0:
+            message = "Cluster allocatable memory could not be parsed; memory capacity gate is inconclusive."
+            warnings.append(message)
+            preflight_record(lines, "WARN", message)
+            preflight_record(capacity_lines, "WARN", message)
+        elif total_memory_mi is not None and total_memory_mi > memory_limit_mi:
+            message = (
+                f"Imported memory request `{format_memory(total_memory_mi)}` exceeds "
+                f"`{args.preflight_capacity_utilization_limit}` of cluster allocatable memory."
+            )
+            errors.append(message)
+            preflight_record(lines, "ERROR", message)
+            preflight_record(capacity_lines, "ERROR", message)
+        elif total_memory_mi is not None:
+            message = f"Imported memory request `{format_memory(total_memory_mi)}` fits the configured cluster memory gate."
+            preflight_record(lines, "OK", message)
+            preflight_record(capacity_lines, "OK", message)
+
+    capacity_lines.extend(["", "## Result", ""])
+    capacity_lines.append("- Result: `FAIL`" if any("**ERROR**" in line for line in capacity_lines) else "- Result: `PASS`")
+    write_capacity_report(args, output, capacity_lines)
+
+
+def preflight_check_ingress_endpoint(
+    args: argparse.Namespace,
+    values: dict[str, Any],
+    lines: list[str],
+    errors: list[str],
+    warnings: list[str],
+) -> None:
+    host = resolve_ingress_host(args, values)
+    tls_files = [path for path in [args.tls_cert_file, args.tls_key_file] if path]
+    if args.tls_cert_file or args.tls_key_file:
+        missing = [path for path in tls_files if not Path(path).expanduser().exists()]
+        if missing:
+            message = f"Ingress TLS file(s) do not exist: {', '.join(missing)}"
+            errors.append(message)
+            preflight_record(lines, "ERROR", message)
+        elif len(tls_files) == 2:
+            preflight_record(lines, "OK", "Ingress TLS certificate and key files exist.")
+
+    if not host:
+        message = "No ingress host was configured; skipping DNS/TLS endpoint reachability check."
+        warnings.append(message)
+        preflight_record(lines, "WARN", message)
+        return
+
+    try:
+        addresses = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+    except OSError as exc:
+        message = f"Ingress host `{host}` does not resolve from the operator: {exc}"
+        if args.preflight_require_ingress_endpoint:
+            errors.append(message)
+            preflight_record(lines, "ERROR", message)
+        else:
+            warnings.append(message)
+            preflight_record(lines, "WARN", message)
+        return
+    preflight_record(lines, "OK", f"Ingress host `{host}` resolved to `{len(addresses)}` address record(s).")
+
+    try:
+        with socket.create_connection((host, 443), timeout=5) as sock:
+            context = ssl._create_unverified_context()
+            with context.wrap_socket(sock, server_hostname=host):
+                pass
+    except OSError as exc:
+        message = f"Ingress TLS endpoint `{host}:443` is not reachable yet: {exc}"
+        if args.preflight_require_ingress_endpoint:
+            errors.append(message)
+            preflight_record(lines, "ERROR", message)
+        else:
+            warnings.append(message)
+            preflight_record(lines, "WARN", message)
+        return
+    preflight_record(lines, "OK", f"Ingress TLS endpoint `{host}:443` accepted a TLS connection.")
+
+
+def parse_remote_preflight_output(output: str) -> dict[str, Any]:
+    services: dict[str, tuple[str, str]] = {}
+    disks: list[tuple[str, int, str]] = []
+    readyz = "unknown"
+    for line in output.splitlines():
+        if line.startswith("service:"):
+            _prefix, name, state, unit = line.split(":", 3)
+            services[name] = (state, unit)
+        elif line.startswith("disk:"):
+            _prefix, mount, available, used = line.split(":", 3)
+            try:
+                disks.append((mount, int(available), used))
+            except ValueError:
+                continue
+        elif line.startswith("local-readyz:"):
+            readyz = line.split(":", 1)[1]
+    return {"services": services, "disks": disks, "readyz": readyz}
+
+
+def preflight_check_remote_nodes(args: argparse.Namespace, lines: list[str], errors: list[str], warnings: list[str]) -> None:
+    targets, ssh_options = preload_node_targets(args)
+    if not targets:
+        message = "MIGRATION_RKE2_NODES is empty; skipping remote RKE2/HA service checks."
+        warnings.append(message)
+        preflight_record(lines, "WARN", message)
+        return
+
+    min_disk_free_mi = parse_memory_mi(args.preflight_min_node_disk_free)
+    script = r"""
+set +e
+for svc in rke2-server rke2-agent haproxy keepalived; do
+  state="$(systemctl is-active "$svc" 2>/dev/null || true)"
+  unit="$(systemctl list-unit-files "$svc.service" --no-legend 2>/dev/null | awk '{print $1}' || true)"
+  printf 'service:%s:%s:%s\n' "$svc" "${state:-unknown}" "${unit:-missing}"
+done
+for path in /var/lib/rancher/rke2 /var/lib/rancher/rke2/agent/images /; do
+  df -Pm "$path" 2>/dev/null | awk 'NR==2 {print "disk:" $6 ":" $4 ":" $5}'
+done
+if [ -x /var/lib/rancher/rke2/bin/kubectl ] && [ -s /etc/rancher/rke2/rke2.yaml ]; then
+  timeout 8 /var/lib/rancher/rke2/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get --raw=/readyz >/dev/null 2>&1
+  if [ "$?" -eq 0 ]; then
+    echo 'local-readyz:ok'
+  else
+    echo 'local-readyz:fail'
+  fi
+else
+  echo 'local-readyz:missing-kubectl'
+fi
+"""
+    for index, target in enumerate(targets, start=1):
+        display_target = preflight_node_label(args, target, index)
+        result = run_remote_sudo_shell_capture(args, ssh_options, target, script)
+        details = command_details(result)
+        if result.returncode != 0:
+            message = f"Remote preflight failed on `{display_target}`."
+            if details:
+                message = f"{message} `{details}`"
+            errors.append(message)
+            preflight_record(lines, "ERROR", message)
+            continue
+
+        parsed = parse_remote_preflight_output(result.stdout)
+        services = parsed["services"]
+        rke2_server_state = services.get("rke2-server", ("unknown", "missing"))[0]
+        rke2_agent_state = services.get("rke2-agent", ("unknown", "missing"))[0]
+        if rke2_server_state != "active" and rke2_agent_state != "active":
+            message = f"`{display_target}` has neither `rke2-server` nor `rke2-agent` active."
+            errors.append(message)
+            preflight_record(lines, "ERROR", message)
+        else:
+            preflight_record(lines, "OK", f"`{display_target}` has an active RKE2 service.")
+
+        if rke2_server_state == "active" and parsed["readyz"] != "ok":
+            message = f"`{display_target}` runs `rke2-server`, but local `/readyz` is `{parsed['readyz']}`."
+            errors.append(message)
+            preflight_record(lines, "ERROR", message)
+
+        for service_name in ["haproxy", "keepalived"]:
+            state, unit = services.get(service_name, ("unknown", "missing"))
+            if unit == "missing":
+                message = f"`{display_target}` does not have `{service_name}` installed."
+                if args.profile == "production":
+                    errors.append(message)
+                    preflight_record(lines, "ERROR", message)
+                else:
+                    warnings.append(message)
+                    preflight_record(lines, "WARN", message)
+            elif state != "active":
+                message = f"`{display_target}` has `{service_name}` unit `{unit}` but state is `{state}`."
+                errors.append(message)
+                preflight_record(lines, "ERROR", message)
+            else:
+                preflight_record(lines, "OK", f"`{display_target}` `{service_name}` is active.")
+
+        for mount, available_mi, used_percent in parsed["disks"]:
+            if used_percent.rstrip("%").isdigit() and int(used_percent.rstrip("%")) >= 90:
+                message = f"`{display_target}` filesystem `{mount}` is `{used_percent}` used."
+                errors.append(message)
+                preflight_record(lines, "ERROR", message)
+            elif min_disk_free_mi is not None and available_mi < min_disk_free_mi:
+                message = (
+                    f"`{display_target}` filesystem `{mount}` has `{available_mi}Mi` free, "
+                    f"below `{args.preflight_min_node_disk_free}`."
+                )
+                errors.append(message)
+                preflight_record(lines, "ERROR", message)
+            else:
+                preflight_record(lines, "OK", f"`{display_target}` filesystem `{mount}` has `{available_mi}Mi` free.")
+
+
+def stage_preflight(
+    args: argparse.Namespace,
+    values: dict[str, Any],
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+) -> None:
+    output = Path(args.output).expanduser()
+    output.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Import Cluster Preflight",
+        "",
+        f"- Profile: `{args.profile}`",
+        f"- Namespace: `{args.namespace}`",
+        f"- Kubeconfig: `{('<kubeconfig>' if args.redact_sensitive and args.kubeconfig else args.kubeconfig) or 'default'}`",
+        f"- Minimum node memory: `{args.preflight_min_node_memory}`",
+        f"- Minimum node disk free: `{args.preflight_min_node_disk_free}`",
+        f"- Max imported workloads: `{args.preflight_max_imported_workloads}`",
+        f"- Capacity utilization limit: `{args.preflight_capacity_utilization_limit}`",
+        f"- Require ingress endpoint: `{str(args.preflight_require_ingress_endpoint).lower()}`",
+        "",
+        "## Checks",
+        "",
+    ]
+    errors: list[str] = []
+    warnings: list[str] = []
+    if not args.execute:
+        preflight_record(lines, "INFO", "Dry-run mode; preflight checks were not executed.")
+        write_import_batch_plan(args, service_pairs)
+        write_migration_state_report(args, service_pairs)
+        write_preflight_report(args, output, lines)
+        print(f"Import preflight report written to {output / 'import-preflight.md'}")
+        return
+
+    write_import_batch_plan(args, service_pairs)
+    write_migration_state_report(args, service_pairs)
+    preflight_check_readyz(args, lines, errors)
+    preflight_check_nodes(args, lines, errors, warnings)
+    preflight_check_storage(args, lines, errors)
+    preflight_check_imported_capacity(args, service_pairs, lines, errors, warnings)
+    preflight_check_ingress_endpoint(args, values, lines, errors, warnings)
+    preflight_check_remote_nodes(args, lines, errors, warnings)
+
+    lines.extend(["", "## Result", ""])
+    if errors:
+        lines.append(f"- Result: `FAIL`")
+        lines.append(f"- Errors: `{len(errors)}`")
+        lines.append(f"- Warnings: `{len(warnings)}`")
+    else:
+        lines.append("- Result: `PASS`")
+        lines.append(f"- Warnings: `{len(warnings)}`")
+    write_preflight_report(args, output, lines)
+    print(f"Import preflight report written to {output / 'import-preflight.md'}")
+    if errors:
+        preview = redact_preflight_text(args, "\n".join(f"- {message}" for message in errors[:8]))
+        more = f"\n- ... {len(errors) - 8} more error(s)" if len(errors) > 8 else ""
+        raise SystemExit(
+            "Import preflight failed before migration actions were run.\n"
+            f"{preview}{more}\n"
+            f"See {output / 'import-preflight.md'} for the full preflight report."
+        )
+
+
 def stage_prepare(
     args: argparse.Namespace,
     project_path: Path,
@@ -1229,7 +2410,7 @@ def stage_prepare(
     private_dir = Path(args.private_dir).expanduser()
     secure_directory(private_dir)
     secure_directory(Path(args.dump_dir).expanduser())
-    db_targets_path = Path(args.db_targets).expanduser() if args.db_targets else private_dir / "db-targets.yaml"
+    db_targets_path = database_targets_path(args)
     write_database_target_map(db_targets_path, service_pairs, values, args.namespace)
     render_private_report(
         args=args,
@@ -1263,11 +2444,12 @@ def generate_bundle(
         "",
         f"- Project path: `{redactor.project_path(project_path)}`",
         f"- Namespace: `{args.namespace}`",
+        f"- Migration profile: `{args.profile}`",
         f"- Private registry: `{args.registry or 'not configured'}`",
         f"- Image tag: `{args.image_tag}`",
         f"- Private operator directory: `{args.private_dir}`",
         f"- Dump directory: `{args.dump_dir}`",
-        f"- Database target map: `{args.db_targets or str(Path(args.private_dir).expanduser() / 'db-targets.yaml')}`",
+        f"- Database target map: `{database_targets_path(args)}`",
         f"- Image mode: `{args.image_mode}`",
         f"- Auto prepare: `{str(args.auto_prepare).lower()}`",
         f"- Execute mode: `{str(args.execute).lower()}`",
@@ -1275,11 +2457,12 @@ def generate_bundle(
         "",
         "## Automation Entry Points",
         "",
-        "- `run-migration.sh` runs all guarded stages.",
+        "- `run-migration.sh` runs all guarded stages for the selected import batch.",
         "- Automatic preparation creates the private report, DB target map, dump directory, and optional registry login before guarded stages run.",
-        "- `scripts/01-sync-secrets.sh` applies Kubernetes Secrets from Compose secret environment values when explicitly allowed.",
+        "- `scripts/00-cluster-preflight.sh` checks Kubernetes readiness, nodes, storage, imported workload capacity, ingress reachability, and RKE2/HA node services before mutation.",
+        "- `scripts/01-sync-secrets.sh` applies the selected secret provider stage. Use `MIGRATION_SECRET_PROVIDER=kubernetes` for guarded direct Secrets, or `external-secrets`/`vault` for ExternalSecret manifests without secret values.",
         "- `scripts/02-build-and-push-images.sh` builds application images. Use image mode `registry` to push, `preload` to export/copy tar archives to RKE2 nodes, or `skip` for external Compose transition mode.",
-        "- `scripts/03-database-dump-restore.sh` dumps PostgreSQL-family sources and restores only targets defined in the private database target map.",
+        "- `scripts/03-database-dump-restore.sh` dumps PostgreSQL-family sources and restores only targets defined in the private database target map; optional engines are scaffolded in that map until their engine-specific runner is enabled.",
         "- `scripts/04-generate-routing-and-storage.sh` writes imported app Deployment/Service manifests plus Traefik routing candidates.",
         "- `scripts/05-validate.sh` re-runs the compatibility checker.",
         "",
@@ -1289,6 +2472,10 @@ def generate_bundle(
         "- Secret and database stages require `MIGRATION_ALLOW_SECRET_MATERIAL=true` so secret values are read only at execution time.",
         "- Database restore uses the private `MIGRATION_DB_TARGETS` file. The generated map targets CloudNativePG app secrets when platform database instances exist.",
         "- Registry login is used only with image mode `registry`. Image mode `preload` avoids registry login by writing image archives and optionally copying them to RKE2 nodes.",
+        "- The default `lab` migration profile writes `lab-profile-values.yaml`, forces imported workloads to one replica, and adds small resource requests/limits to imported workloads.",
+        "- Lab imports can run in batches. `MIGRATION_IMPORT_BATCH=auto` selects the first batch when the generated workload set is larger than the configured batch size.",
+        "- Resume is enabled by default. Completed secret, image, database, and manifest stages are recorded in the private `MIGRATION_STATE_FILE` and summarized in `import-resume.md`.",
+        "- Use `MIGRATION_PROFILE=production` only after cluster capacity, storage, backups, and strict database migration behavior are ready.",
         "- Generated output must stay in `reports/` or another ignored/private directory.",
         "",
     ]
@@ -1304,6 +2491,8 @@ def generate_bundle(
         database_targets=database_targets,
     )
     write_file(output / "migration-automation.md", "\n".join(plan_lines) + "\n")
+    write_import_batch_plan(args, service_pairs)
+    write_migration_state_report(args, service_pairs)
 
     common = (
         "#!/usr/bin/env bash\n"
@@ -1317,6 +2506,21 @@ def generate_bundle(
         f'MIGRATION_INGRESS_HOST="${{MIGRATION_INGRESS_HOST:-{args.ingress_host}}}"\n'
         f'MIGRATION_TLS_CERT_FILE="${{MIGRATION_TLS_CERT_FILE:-{args.tls_cert_file}}}"\n'
         f'MIGRATION_TLS_KEY_FILE="${{MIGRATION_TLS_KEY_FILE:-{args.tls_key_file}}}"\n'
+        f'MIGRATION_PROFILE="${{MIGRATION_PROFILE:-{args.profile}}}"\n'
+        f'MIGRATION_LAB_WORKLOAD_CPU_REQUEST="${{MIGRATION_LAB_WORKLOAD_CPU_REQUEST:-{args.lab_workload_cpu_request}}}"\n'
+        f'MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST="${{MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST:-{args.lab_workload_memory_request}}}"\n'
+        f'MIGRATION_LAB_WORKLOAD_CPU_LIMIT="${{MIGRATION_LAB_WORKLOAD_CPU_LIMIT:-{args.lab_workload_cpu_limit}}}"\n'
+        f'MIGRATION_LAB_WORKLOAD_MEMORY_LIMIT="${{MIGRATION_LAB_WORKLOAD_MEMORY_LIMIT:-{args.lab_workload_memory_limit}}}"\n'
+        f'MIGRATION_PREFLIGHT_MIN_NODE_MEMORY="${{MIGRATION_PREFLIGHT_MIN_NODE_MEMORY:-{args.preflight_min_node_memory}}}"\n'
+        f'MIGRATION_PREFLIGHT_MIN_NODE_DISK_FREE="${{MIGRATION_PREFLIGHT_MIN_NODE_DISK_FREE:-{args.preflight_min_node_disk_free}}}"\n'
+        f'MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS="${{MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS:-{args.preflight_max_imported_workloads}}}"\n'
+        f'MIGRATION_PREFLIGHT_CAPACITY_UTILIZATION_LIMIT="${{MIGRATION_PREFLIGHT_CAPACITY_UTILIZATION_LIMIT:-{args.preflight_capacity_utilization_limit}}}"\n'
+        f'MIGRATION_PREFLIGHT_REQUIRE_INGRESS_ENDPOINT="${{MIGRATION_PREFLIGHT_REQUIRE_INGRESS_ENDPOINT:-{str(args.preflight_require_ingress_endpoint).lower()}}}"\n'
+        f'MIGRATION_BATCH_SIZE="${{MIGRATION_BATCH_SIZE:-{args.batch_size}}}"\n'
+        f'MIGRATION_IMPORT_BATCH="${{MIGRATION_IMPORT_BATCH:-{args.import_batch}}}"\n'
+        f'MIGRATION_STATE_FILE="${{MIGRATION_STATE_FILE:-{args.state_file}}}"\n'
+        f'MIGRATION_RESUME="${{MIGRATION_RESUME:-{str(args.resume).lower()}}}"\n'
+        f'MIGRATION_FORCE_RERUN="${{MIGRATION_FORCE_RERUN:-{str(args.force_rerun).lower()}}}"\n'
         f'MIGRATION_IMAGE_MODE="${{MIGRATION_IMAGE_MODE:-{args.image_mode}}}"\n'
         f'MIGRATION_IMAGE_OUTPUT_DIR="${{MIGRATION_IMAGE_OUTPUT_DIR:-{args.image_output_dir}}}"\n'
         f'MIGRATION_RKE2_NODES="${{MIGRATION_RKE2_NODES:-{args.rke2_nodes}}}"\n'
@@ -1334,7 +2538,12 @@ def generate_bundle(
         f'MIGRATION_REGISTRY="${{MIGRATION_REGISTRY:-{args.registry}}}"\n'
         f'MIGRATION_IMAGE_TAG="${{MIGRATION_IMAGE_TAG:-{args.image_tag}}}"\n'
         f'MIGRATION_DUMP_DIR="${{MIGRATION_DUMP_DIR:-{args.dump_dir}}}"\n'
-        f'MIGRATION_DB_TARGETS="${{MIGRATION_DB_TARGETS:-{args.db_targets or ""}}}"\n'
+        f'MIGRATION_DB_TARGETS="${{MIGRATION_DB_TARGETS:-{database_targets_path(args)}}}"\n'
+        f'MIGRATION_SECRET_PROVIDER="${{MIGRATION_SECRET_PROVIDER:-{args.secret_provider}}}"\n'
+        f'MIGRATION_SECRET_REMOTE_PREFIX="${{MIGRATION_SECRET_REMOTE_PREFIX:-{args.secret_remote_prefix}}}"\n'
+        f'MIGRATION_SECRET_STORE_NAME="${{MIGRATION_SECRET_STORE_NAME:-{args.secret_store_name}}}"\n'
+        f'MIGRATION_SECRET_STORE_KIND="${{MIGRATION_SECRET_STORE_KIND:-{args.secret_store_kind}}}"\n'
+        f'MIGRATION_SECRET_REFRESH_INTERVAL="${{MIGRATION_SECRET_REFRESH_INTERVAL:-{args.secret_refresh_interval}}}"\n'
         f'MIGRATION_ALLOW_SECRET_MATERIAL="${{MIGRATION_ALLOW_SECRET_MATERIAL:-{str(args.allow_secret_material).lower()}}}"\n'
         'PYTHON="${PYTHON:-python3}"\n'
         'ALLOW_FLAG=""\n'
@@ -1349,12 +2558,30 @@ def generate_bundle(
         'if [ "$MIGRATION_SKIP_DOCKER_SOCKET_SERVICES" = "false" ]; then DOCKER_SOCKET_FLAG="--include-docker-socket-services"; fi\n'
         'DATABASE_FAILURE_FLAG="--skip-unavailable-databases"\n'
         'if [ "$MIGRATION_SKIP_UNAVAILABLE_DATABASES" = "false" ]; then DATABASE_FAILURE_FLAG="--strict-database-migration"; fi\n'
+        'INGRESS_PREFLIGHT_FLAG="--no-preflight-require-ingress-endpoint"\n'
+        'if [ "$MIGRATION_PREFLIGHT_REQUIRE_INGRESS_ENDPOINT" = "true" ]; then INGRESS_PREFLIGHT_FLAG="--preflight-require-ingress-endpoint"; fi\n'
+        'RESUME_FLAG="--resume"\n'
+        'if [ "$MIGRATION_RESUME" = "false" ]; then RESUME_FLAG="--no-resume"; fi\n'
+        'FORCE_RERUN_FLAG=""\n'
+        'if [ "$MIGRATION_FORCE_RERUN" = "true" ]; then FORCE_RERUN_FLAG="--force-rerun"; fi\n'
     )
     callback = (
         '"$PYTHON" "$REPO_ROOT/scripts/migrate_project.py" '
         '--project-path "$PROJECT_PATH" --values "$VALUES" --namespace "$NAMESPACE" '
         '--output "$MIGRATION_OUTPUT" --private-dir "$MIGRATION_PRIVATE_DIR" --kubeconfig "$MIGRATION_KUBECONFIG" --auto-prepare '
         '--ingress-host "$MIGRATION_INGRESS_HOST" --tls-cert-file "$MIGRATION_TLS_CERT_FILE" --tls-key-file "$MIGRATION_TLS_KEY_FILE" '
+        '--profile "$MIGRATION_PROFILE" '
+        '--lab-workload-cpu-request "$MIGRATION_LAB_WORKLOAD_CPU_REQUEST" '
+        '--lab-workload-memory-request "$MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST" '
+        '--lab-workload-cpu-limit "$MIGRATION_LAB_WORKLOAD_CPU_LIMIT" '
+        '--lab-workload-memory-limit "$MIGRATION_LAB_WORKLOAD_MEMORY_LIMIT" '
+        '--preflight-min-node-memory "$MIGRATION_PREFLIGHT_MIN_NODE_MEMORY" '
+        '--preflight-min-node-disk-free "$MIGRATION_PREFLIGHT_MIN_NODE_DISK_FREE" '
+        '--preflight-max-imported-workloads "$MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS" '
+        '--preflight-capacity-utilization-limit "$MIGRATION_PREFLIGHT_CAPACITY_UTILIZATION_LIMIT" '
+        '$INGRESS_PREFLIGHT_FLAG '
+        '--batch-size "$MIGRATION_BATCH_SIZE" --import-batch "$MIGRATION_IMPORT_BATCH" '
+        '--state-file "$MIGRATION_STATE_FILE" $RESUME_FLAG $FORCE_RERUN_FLAG '
         '--image-mode "$MIGRATION_IMAGE_MODE" --image-output-dir "$MIGRATION_IMAGE_OUTPUT_DIR" '
         '--rke2-nodes "$MIGRATION_RKE2_NODES" --rke2-image-dir "$MIGRATION_RKE2_IMAGE_DIR" '
         '--ssh-user "$MIGRATION_SSH_USER" --ssh-key "$MIGRATION_SSH_KEY" '
@@ -1364,6 +2591,9 @@ def generate_bundle(
         '$RKE2_IMPORT_FLAG $CLEANUP_OPERATOR_IMAGES_FLAG $PRUNE_OPERATOR_CACHE_FLAG $DOCKER_SOCKET_FLAG $DATABASE_FAILURE_FLAG '
         '--registry "$MIGRATION_REGISTRY" --image-tag "$MIGRATION_IMAGE_TAG" '
         '--dump-dir "$MIGRATION_DUMP_DIR" --db-targets "$MIGRATION_DB_TARGETS" '
+        '--secret-provider "$MIGRATION_SECRET_PROVIDER" --secret-remote-prefix "$MIGRATION_SECRET_REMOTE_PREFIX" '
+        '--secret-store-name "$MIGRATION_SECRET_STORE_NAME" --secret-store-kind "$MIGRATION_SECRET_STORE_KIND" '
+        '--secret-refresh-interval "$MIGRATION_SECRET_REFRESH_INTERVAL" '
         '--execute $ALLOW_FLAG '
     )
     write_file(
@@ -1372,6 +2602,7 @@ def generate_bundle(
         + 'REPO_ROOT="${REPO_ROOT:-'
         + str(ROOT)
         + '}"\n'
+        + f"{callback}--stage preflight\n"
         + f"{callback}--stage secrets\n"
         + f"{callback}--stage images\n"
         + f"{callback}--stage databases\n"
@@ -1380,6 +2611,7 @@ def generate_bundle(
         executable=True,
     )
     stage_scripts = {
+        "00-cluster-preflight.sh": "preflight",
         "01-sync-secrets.sh": "secrets",
         "02-build-and-push-images.sh": "images",
         "03-database-dump-restore.sh": "databases",
@@ -1396,6 +2628,8 @@ def generate_bundle(
             + f"{callback}--stage {stage}\n",
             executable=True,
         )
+
+    write_migration_profile_files(args, output)
 
     db_target_example = {
         "databaseTargets": {
@@ -1416,29 +2650,124 @@ def generate_bundle(
     print(f"Migration automation bundle written to {output}")
 
 
+def imported_secret_name(record: import_project.ServiceRecord) -> str:
+    return k8s_name(record.name, "import-env")
+
+
+def secret_remote_key(args: argparse.Namespace, secret_name: str) -> str:
+    prefix = str(args.secret_remote_prefix or "").strip("/")
+    return f"{prefix}/{secret_name}" if prefix else secret_name
+
+
+def kubernetes_secret_manifest(args: argparse.Namespace, record: import_project.ServiceRecord, entries: dict[str, str]) -> dict[str, Any]:
+    return {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {
+            "name": imported_secret_name(record),
+            "namespace": args.namespace,
+            "labels": {"app.kubernetes.io/managed-by": "urban-platform-import"},
+        },
+        "type": "Opaque",
+        "stringData": entries,
+    }
+
+
+def external_secret_manifest(args: argparse.Namespace, record: import_project.ServiceRecord, entries: dict[str, str]) -> dict[str, Any]:
+    secret_name = imported_secret_name(record)
+    remote_key = secret_remote_key(args, secret_name)
+    return {
+        "apiVersion": "external-secrets.io/v1",
+        "kind": "ExternalSecret",
+        "metadata": {
+            "name": secret_name,
+            "namespace": args.namespace,
+            "labels": {
+                "app.kubernetes.io/managed-by": "urban-platform-import",
+                "urban-platform.io/secret-delivery": args.secret_provider,
+            },
+        },
+        "spec": {
+            "refreshInterval": args.secret_refresh_interval,
+            "secretStoreRef": {
+                "name": args.secret_store_name,
+                "kind": args.secret_store_kind,
+            },
+            "target": {
+                "name": secret_name,
+                "creationPolicy": "Owner",
+                "template": {"type": "Opaque"},
+            },
+            "data": [
+                {"secretKey": key, "remoteRef": {"key": remote_key, "property": key}}
+                for key in sorted(entries)
+            ],
+        },
+    }
+
+
+def write_secret_provider_report(
+    args: argparse.Namespace,
+    secrets: list[tuple[import_project.ServiceRecord, dict[str, str]]],
+) -> None:
+    output = Path(args.output).expanduser()
+    provider = args.secret_provider
+    remote_prefix = "<remote-prefix>" if args.redact_sensitive and args.secret_remote_prefix else (args.secret_remote_prefix or "-")
+    automatic = provider in AUTOMATIC_SECRET_PROVIDERS
+    lines = [
+        "# Import Secret Provider",
+        "",
+        "This report is public-safe. It summarizes the selected secret delivery adapter without printing secret values.",
+        "",
+        f"- Provider: `{provider}`",
+        f"- Secret-bearing services: `{len(secrets)}`",
+        f"- Automatic apply provider: `{str(automatic).lower()}`",
+        f"- Remote prefix: `{remote_prefix}`",
+        f"- SecretStore name: `{'<secret-store>' if args.redact_sensitive else args.secret_store_name}`",
+        f"- SecretStore kind: `{args.secret_store_kind}`",
+        "",
+        "## Behavior",
+        "",
+    ]
+    if provider == "kubernetes":
+        lines.append("- Direct Kubernetes Secret import is used only when `MIGRATION_ALLOW_SECRET_MATERIAL=true` is set.")
+    elif provider in {"external-secrets", "vault"}:
+        lines.append("- The migration stage applies `ExternalSecret` resources and does not place secret values in generated manifests.")
+        lines.append("- The remote provider must already contain the referenced keys before workloads depend on them.")
+    else:
+        lines.append("- This provider is an encrypted handoff mode. The migration stage does not apply plain Kubernetes Secret objects.")
+        lines.append("- Generate final encrypted artifacts with the selected SOPS or Sealed Secrets workflow before deployment.")
+    write_file(output / "import-secret-provider.md", "\n".join(lines) + "\n")
+
+
 def stage_secrets(args: argparse.Namespace, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]]) -> None:
+    scoped_service_pairs = filter_service_pairs_for_import_batch(args, service_pairs)
+    plan = import_batch_plan(args, service_pairs)
+    if plan["selectedBatch"] is not None:
+        print(f"Import batch {plan['selectedBatch']}/{plan['totalBatches']} selected for service-specific secrets.")
     secrets = []
-    for record, service in service_pairs:
+    for record, service in scoped_service_pairs:
         entries = secret_entries(service)
         if entries:
             secrets.append((record, entries))
     print(f"Secret-bearing services: {len(secrets)}")
+    write_secret_provider_report(args, secrets)
     if not args.execute:
         return
-    if not args.allow_secret_material:
+    if args.secret_provider not in SECRET_PROVIDER_CHOICES:
+        raise SystemExit(f"Unsupported secret provider: {args.secret_provider}")
+    if args.secret_provider not in AUTOMATIC_SECRET_PROVIDERS:
+        raise SystemExit(
+            f"MIGRATION_SECRET_PROVIDER={args.secret_provider} is an encrypted handoff mode. "
+            "Use external-secrets or vault for automatic runtime sync, or kubernetes with explicit secret material approval."
+        )
+    if args.secret_provider == "kubernetes" and not args.allow_secret_material:
         raise SystemExit("Refusing to read/apply secret material without --allow-secret-material.")
     for record, entries in secrets:
-        manifest = {
-            "apiVersion": "v1",
-            "kind": "Secret",
-            "metadata": {
-                "name": k8s_name(record.name, "import-env"),
-                "namespace": args.namespace,
-                "labels": {"app.kubernetes.io/managed-by": "urban-platform-import"},
-            },
-            "type": "Opaque",
-            "stringData": entries,
-        }
+        if args.secret_provider == "kubernetes":
+            manifest = kubernetes_secret_manifest(args, record, entries)
+        else:
+            manifest = external_secret_manifest(args, record, entries)
         run_command(
             kubectl_apply_stdin_command(args, namespace=args.namespace),
             stdin=yaml.safe_dump(manifest, sort_keys=False),
@@ -1446,8 +2775,12 @@ def stage_secrets(args: argparse.Namespace, service_pairs: list[tuple[import_pro
 
 
 def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]]) -> None:
+    scoped_service_pairs = filter_service_pairs_for_import_batch(args, service_pairs)
+    plan = import_batch_plan(args, service_pairs)
+    if plan["selectedBatch"] is not None:
+        print(f"Import batch {plan['selectedBatch']}/{plan['totalBatches']} selected for image migration.")
     candidates = []
-    for record, service in service_pairs:
+    for record, service in scoped_service_pairs:
         if args.skip_docker_socket_services and service_has_docker_socket(service):
             print(f"Skipping Docker-socket service image candidate: {record.file}::{record.name}")
             continue
@@ -1567,15 +2900,27 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
 
 
 def stage_databases(args: argparse.Namespace, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]]) -> None:
-    db_targets_path = args.db_targets or str(Path(args.private_dir).expanduser() / "db-targets.yaml")
+    db_targets_path = str(database_targets_path(args))
     targets = read_database_targets(db_targets_path)
     dump_dir = Path(args.dump_dir).expanduser()
     candidates = [
         (record, service)
         for record, service in service_pairs
-        if record.kind in {"postgresql", "postgis", "timescaledb"}
+        if record.kind in POSTGRES_FAMILY_KINDS
+    ]
+    optional_candidates = [
+        record
+        for record, _service in service_pairs
+        if record.kind in OPTIONAL_DATABASE_KINDS
     ]
     print(f"PostgreSQL-family migration candidates: {len(candidates)}")
+    print(f"Optional database target scaffolds: {len(optional_candidates)}")
+    if optional_candidates:
+        print(
+            "Optional database engines are scaffolded in the private target map; "
+            "engine-specific automated dump/restore is not enabled until a matching operator, "
+            "managed service, or external target profile is declared."
+        )
     if not args.execute:
         return
     if not args.allow_secret_material:
@@ -1830,12 +3175,16 @@ def ensure_ingress_tls_secret(args: argparse.Namespace, values: dict[str, Any], 
 
 def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]], values: dict[str, Any]) -> None:
     output = Path(args.output).expanduser()
-    workload_manifests = kubernetes_workload_manifests(args, service_pairs)
+    scoped_service_pairs = filter_service_pairs_for_import_batch(args, service_pairs)
+    plan = import_batch_plan(args, service_pairs)
+    if plan["selectedBatch"] is not None:
+        print(f"Import batch {plan['selectedBatch']}/{plan['totalBatches']} selected for workload manifests.")
+    workload_manifests = kubernetes_workload_manifests(args, scoped_service_pairs)
     ingress_manifests: list[dict[str, Any]] = []
     host = ingress_host(args, values)
     tls_enabled = bool(values.get("ingress", {}).get("tls", {}).get("enabled", True))
     tls_secret_name = ingress_tls_secret_name(values)
-    for record, service in service_pairs:
+    for record, service in scoped_service_pairs:
         if record.kind == "nginx" and import_project.has_edge_publish(record.ports):
             name = kubernetes_workload_name(record)
             rule: dict[str, Any] = {
@@ -1935,6 +3284,7 @@ def stage_validate(args: argparse.Namespace) -> None:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate or execute guarded project migration automation.")
+    image_modes = ["registry", "preload", "skip"]
     parser.add_argument("--project-path", required=True)
     parser.add_argument("--values", default=str(DEFAULT_VALUES))
     parser.add_argument("--image-policy", default=str(import_project.DEFAULT_IMAGE_POLICY))
@@ -1947,7 +3297,28 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--ingress-controller", choices=["traefik", "nginx"], default="traefik")
     parser.add_argument("--webserver", choices=["nginx", "apache-httpd", "apache-tomcat", "traefik"], default="nginx")
     parser.add_argument("--database", default="postgresql")
-    parser.add_argument("--image-mode", choices=["registry", "preload", "skip"], default="registry")
+    parser.add_argument("--profile", choices=["lab", "production"], default=os.environ.get("MIGRATION_PROFILE", "lab"))
+    parser.add_argument("--lab-workload-cpu-request", default=os.environ.get("MIGRATION_LAB_WORKLOAD_CPU_REQUEST", "25m"))
+    parser.add_argument("--lab-workload-memory-request", default=os.environ.get("MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST", "64Mi"))
+    parser.add_argument("--lab-workload-cpu-limit", default=os.environ.get("MIGRATION_LAB_WORKLOAD_CPU_LIMIT", "250m"))
+    parser.add_argument("--lab-workload-memory-limit", default=os.environ.get("MIGRATION_LAB_WORKLOAD_MEMORY_LIMIT", "256Mi"))
+    parser.add_argument("--preflight-min-node-memory", default=os.environ.get("MIGRATION_PREFLIGHT_MIN_NODE_MEMORY", "3500Mi"))
+    parser.add_argument("--preflight-min-node-disk-free", default=os.environ.get("MIGRATION_PREFLIGHT_MIN_NODE_DISK_FREE", "2048Mi"))
+    parser.add_argument(
+        "--preflight-max-imported-workloads",
+        type=int,
+        default=int(os.environ["MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS"]) if os.environ.get("MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS") else None,
+    )
+    parser.add_argument("--preflight-capacity-utilization-limit", default=os.environ.get("MIGRATION_PREFLIGHT_CAPACITY_UTILIZATION_LIMIT", ""))
+    parser.add_argument("--preflight-require-ingress-endpoint", dest="preflight_require_ingress_endpoint", action="store_true", default=None)
+    parser.add_argument("--no-preflight-require-ingress-endpoint", dest="preflight_require_ingress_endpoint", action="store_false")
+    parser.add_argument("--batch-size", type=int, default=int(os.environ["MIGRATION_BATCH_SIZE"]) if os.environ.get("MIGRATION_BATCH_SIZE") else None)
+    parser.add_argument("--import-batch", default=os.environ.get("MIGRATION_IMPORT_BATCH", ""))
+    parser.add_argument("--state-file", default=os.environ.get("MIGRATION_STATE_FILE", ""))
+    parser.add_argument("--resume", dest="resume", action="store_true", default=None)
+    parser.add_argument("--no-resume", dest="resume", action="store_false")
+    parser.add_argument("--force-rerun", action="store_true", default=os.environ.get("MIGRATION_FORCE_RERUN", "").lower() == "true")
+    parser.add_argument("--image-mode", choices=image_modes, default=os.environ.get("MIGRATION_IMAGE_MODE"))
     parser.add_argument("--image-output-dir", default="/var/lib/urban-platform/private/images")
     parser.add_argument("--rke2-nodes", default="")
     parser.add_argument("--rke2-image-dir", default="/var/lib/rancher/rke2/agent/images")
@@ -1964,19 +3335,45 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--no-prune-operator-cache", dest="prune_operator_cache", action="store_false")
     parser.add_argument("--skip-docker-socket-services", dest="skip_docker_socket_services", action="store_true", default=True)
     parser.add_argument("--include-docker-socket-services", dest="skip_docker_socket_services", action="store_false")
-    parser.add_argument("--skip-unavailable-databases", dest="skip_unavailable_databases", action="store_true", default=True)
+    parser.add_argument("--skip-unavailable-databases", dest="skip_unavailable_databases", action="store_true", default=None)
     parser.add_argument("--strict-database-migration", dest="skip_unavailable_databases", action="store_false")
     parser.add_argument("--registry", default="")
     parser.add_argument("--image-tag", default="imported-0.1.0")
     parser.add_argument("--private-dir", default=str(DEFAULT_PRIVATE_DIR))
     parser.add_argument("--dump-dir", default="/var/lib/urban-platform/private/db-dumps")
     parser.add_argument("--db-targets", default="")
-    parser.add_argument("--stage", choices=["prepare", "bundle", "secrets", "images", "databases", "manifests", "validate", "all"], default="bundle")
+    parser.add_argument("--secret-provider", choices=sorted(SECRET_PROVIDER_CHOICES), default="kubernetes")
+    parser.add_argument("--secret-remote-prefix", default="example/urban-platform/import")
+    parser.add_argument("--secret-store-name", default="vault")
+    parser.add_argument("--secret-store-kind", choices=["SecretStore", "ClusterSecretStore"], default="ClusterSecretStore")
+    parser.add_argument("--secret-refresh-interval", default="1h")
+    parser.add_argument("--stage", choices=["prepare", "bundle", "preflight", "secrets", "images", "databases", "manifests", "validate", "all"], default="bundle")
     parser.add_argument("--auto-prepare", action="store_true")
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--allow-secret-material", action="store_true")
     parser.add_argument("--redact-sensitive", action="store_true")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.image_mode is None:
+        args.image_mode = "preload" if lab_profile_enabled(args) else "registry"
+    elif args.image_mode not in image_modes:
+        parser.error(f"argument --image-mode: invalid choice: {args.image_mode!r} (choose from {', '.join(image_modes)})")
+    if args.preflight_require_ingress_endpoint is None:
+        args.preflight_require_ingress_endpoint = args.profile == "production"
+    if args.preflight_max_imported_workloads is None:
+        args.preflight_max_imported_workloads = 40 if args.profile == "lab" else 0
+    if not args.preflight_capacity_utilization_limit:
+        args.preflight_capacity_utilization_limit = "0.70" if args.profile == "lab" else "0.85"
+    if args.batch_size is None:
+        args.batch_size = args.preflight_max_imported_workloads if args.profile == "lab" else 0
+    if not args.import_batch:
+        args.import_batch = "auto" if args.profile == "lab" else "all"
+    if args.resume is None:
+        args.resume = os.environ.get("MIGRATION_RESUME", "true").lower() != "false"
+    if not args.state_file:
+        args.state_file = str(Path(args.private_dir).expanduser() / "migration-state.yaml")
+    if args.skip_unavailable_databases is None:
+        args.skip_unavailable_databases = args.profile != "production"
+    return args
 
 
 def main(argv: list[str]) -> int:
@@ -1993,16 +3390,26 @@ def main(argv: list[str]) -> int:
         print_bundle_files(Path(args.output).expanduser())
         if args.stage == "bundle" and args.execute:
             print("Execute mode was set, but stage `bundle` only writes automation files. Use --stage all or a specific --stage to run actions.")
+    if args.stage in {"preflight", "all"}:
+        stage_preflight(args, values, service_pairs)
     if args.stage in {"secrets", "databases", "manifests", "all"}:
         require_kubernetes_api(args)
     if args.stage in {"secrets", "all"}:
-        stage_secrets(args, service_pairs)
+        if not migration_stage_completed(args, "secrets", service_pairs):
+            stage_secrets(args, service_pairs)
+            mark_migration_stage_completed(args, "secrets", service_pairs)
     if args.stage in {"images", "all"}:
-        stage_images(args, project_path, service_pairs)
+        if not migration_stage_completed(args, "images", service_pairs):
+            stage_images(args, project_path, service_pairs)
+            mark_migration_stage_completed(args, "images", service_pairs)
     if args.stage in {"databases", "all"}:
-        stage_databases(args, service_pairs)
+        if not migration_stage_completed(args, "databases", service_pairs):
+            stage_databases(args, service_pairs)
+            mark_migration_stage_completed(args, "databases", service_pairs)
     if args.stage in {"manifests", "all"}:
-        stage_manifests(args, service_pairs, values)
+        if not migration_stage_completed(args, "manifests", service_pairs):
+            stage_manifests(args, service_pairs, values)
+            mark_migration_stage_completed(args, "manifests", service_pairs)
     if args.stage in {"validate", "all"}:
         stage_validate(args)
     return 0

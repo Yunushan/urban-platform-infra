@@ -13,6 +13,12 @@ Image governance has four rules:
 
 The default placeholder application images now use the sanitized `0.1.0` tag. Third-party runtime images are pinned in `config/image-policy.yaml`, `config/services.catalog.yaml`, Docker Compose, and Helm values.
 
+The local Article 7 planner is `scripts/images/promotion_plan.py`. It generates
+`reports/image-promotion-plan.md`, a public-safe checklist of image references
+that still need private-registry promotion, digest pins, vulnerability scan
+evidence, SBOM evidence, and signature or attestation evidence before
+production use.
+
 ## Production Promotion
 
 Production image flow:
@@ -45,6 +51,7 @@ Run:
 
 ```bash
 make image-policy
+make image-promotion-plan IMAGE_PROMOTION_REGISTRY=private-registry.example.invalid/platform
 ```
 
 This validates:
@@ -54,6 +61,36 @@ This validates:
 - Placeholder app images stay on sanitized `0.1.0` until replaced by private images.
 - Runtime images are approved in `config/image-policy.yaml`.
 - Docker Compose and config catalogs do not drift from the policy.
+
+The promotion plan is report-only. It does not log in to a registry, push
+images, pull image layers, read kubeconfigs, or inspect private inventories.
+
+## Article 16 Registry Promotion Controller
+
+The optional registry promotion controller extends the Article 7 report with a
+profile-driven production readiness contract. Its config is
+`config/registry-promotion.yaml`, its planner is
+`scripts/images/registry_promotion_controller.py`, and its default profile is
+`disabled`.
+
+Run:
+
+```bash
+make registry-promotion-plan \
+  REGISTRY_PROMOTION_PROFILE=production-registry \
+  REGISTRY_PROMOTION_REGISTRY=private-registry.example.invalid/platform \
+  IMPORT_REDACT=true
+```
+
+This writes `reports/registry-promotion-controller.md` and
+`reports/registry-promotion-values.yaml`. The controller still does not log in,
+push, pull, or inspect private layers. It prepares the private-registry intent,
+image pull secret contract, digest-pin requirement, and evidence checklist so
+`make import-auto` or an external CI promotion pipeline can perform the actual
+image movement.
+
+Use `REGISTRY_PROMOTION_PROFILE=lab-preload` for small RKE2 labs where registry
+login is intentionally avoided.
 
 ## Current Pinned Runtime Images
 

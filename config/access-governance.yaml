@@ -1,0 +1,168 @@
+defaultProfile: disabled
+enabledByDefault: false
+profiles:
+  disabled:
+    description: Keep committed chart defaults and do not render additional RBAC, OIDC, or tenant isolation automation.
+    enabled: false
+    mode: baseline
+    rbac:
+      enabled: false
+      strategy: existing-serviceaccount
+      requireLeastPrivilege: false
+      serviceAccountTokenAutomount: false
+    identity:
+      enabled: false
+      provider: none
+      requireMfa: false
+      requireGroupMapping: false
+    audit:
+      enabled: false
+      mode: platform-default
+      requireAuditPolicy: false
+    breakGlass:
+      enabled: false
+      requireTimeBoxedAccess: true
+      requireReview: false
+    tenantIsolation:
+      enabled: false
+      mode: single-namespace
+      requireNamespaceContract: false
+  lab-audit:
+    description: Public-safe access review for lab and migration rehearsal clusters.
+    enabled: false
+    mode: audit
+    rbac:
+      enabled: false
+      strategy: report-only
+      requireLeastPrivilege: true
+      serviceAccountTokenAutomount: false
+    identity:
+      enabled: false
+      provider: none
+      requireMfa: false
+      requireGroupMapping: false
+    audit:
+      enabled: false
+      mode: report-only
+      requireAuditPolicy: false
+    breakGlass:
+      enabled: false
+      requireTimeBoxedAccess: true
+      requireReview: true
+    tenantIsolation:
+      enabled: false
+      mode: single-namespace
+      requireNamespaceContract: false
+  production-rbac:
+    description: Production least-privilege RBAC, service-account, audit, and break-glass readiness.
+    enabled: false
+    mode: least-privilege
+    requireRbacInventory: true
+    requireAuditEvidence: true
+    requireBreakGlassReview: true
+    rbac:
+      enabled: false
+      strategy: least-privilege-overlays
+      requireLeastPrivilege: true
+      serviceAccountTokenAutomount: false
+    identity:
+      enabled: false
+      provider: external-oidc
+      requireMfa: true
+      requireGroupMapping: true
+    audit:
+      enabled: false
+      mode: kubernetes-audit-policy
+      requireAuditPolicy: true
+    breakGlass:
+      enabled: false
+      requireTimeBoxedAccess: true
+      requireReview: true
+    tenantIsolation:
+      enabled: false
+      mode: namespace-boundary
+      requireNamespaceContract: true
+  oidc-sso:
+    description: OIDC or Keycloak-backed operator access readiness with group-to-role mapping.
+    enabled: false
+    mode: oidc
+    requireRbacInventory: true
+    requireIdentityProvider: true
+    requireGroupMapping: true
+    requireAuditEvidence: true
+    requireBreakGlassReview: true
+    rbac:
+      enabled: false
+      strategy: identity-group-overlays
+      requireLeastPrivilege: true
+      serviceAccountTokenAutomount: false
+    identity:
+      enabled: false
+      provider: external-oidc
+      requireMfa: true
+      requireGroupMapping: true
+    audit:
+      enabled: false
+      mode: kubernetes-audit-policy
+      requireAuditPolicy: true
+    breakGlass:
+      enabled: false
+      requireTimeBoxedAccess: true
+      requireReview: true
+    tenantIsolation:
+      enabled: false
+      mode: namespace-boundary
+      requireNamespaceContract: true
+  multi-tenant:
+    description: Tenant namespace, RBAC, secret, network, quota, and audit boundary readiness.
+    enabled: false
+    mode: tenant-isolation
+    requireRbacInventory: true
+    requireIdentityProvider: true
+    requireGroupMapping: true
+    requireAuditEvidence: true
+    requireBreakGlassReview: true
+    requireTenantModel: true
+    rbac:
+      enabled: false
+      strategy: per-tenant-rolebindings
+      requireLeastPrivilege: true
+      serviceAccountTokenAutomount: false
+    identity:
+      enabled: false
+      provider: external-oidc
+      requireMfa: true
+      requireGroupMapping: true
+    audit:
+      enabled: false
+      mode: tenant-aware-audit-policy
+      requireAuditPolicy: true
+    breakGlass:
+      enabled: false
+      requireTimeBoxedAccess: true
+      requireReview: true
+    tenantIsolation:
+      enabled: false
+      mode: per-tenant-namespace
+      requireNamespaceContract: true
+controller:
+  report: reports/access-governance-plan.md
+  overrides: reports/access-governance-values.yaml
+supportedIdentityProviders:
+  - none
+  - external-oidc
+  - keycloak
+  - dex
+  - cloud-iam
+requiredChecks:
+  - RBAC inventory reviewed
+  - service account token automount reviewed
+  - namespace ownership and quota boundaries reviewed
+  - OIDC or SSO group mapping reviewed before production use
+  - Kubernetes audit policy and retention reviewed
+  - time-boxed break-glass process reviewed
+guardrails:
+  - keep access governance disabled by default in committed values
+  - do not print user names, group names, email addresses, tenant names, or identity provider URLs in public reports
+  - do not grant cluster-admin through generated public overlays
+  - keep break-glass credentials outside Git and require post-use review

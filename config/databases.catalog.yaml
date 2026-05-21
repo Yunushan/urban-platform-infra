@@ -39,12 +39,56 @@ profiles:
   mysql:
     status: optional
     haProvider: operator|managed
+    aliases:
+    - mysql
+    - vitess
+    ports:
+    - 3306
+    migration:
+      mode: scaffolded
+      dumpTools:
+      - mysqldump
+      restoreTools:
+      - mysql
+      targetModes:
+      - external
+      - operator
+      - managed
   mariadb:
     status: optional
     haProvider: operator|managed
+    aliases:
+    - mariadb
+    ports:
+    - 3306
+    migration:
+      mode: scaffolded
+      dumpTools:
+      - mariadb-dump
+      restoreTools:
+      - mariadb
+      targetModes:
+      - external
+      - operator
+      - managed
   mongodb:
     status: optional
     haProvider: operator|managed
+    aliases:
+    - mongodb
+    - mongo
+    ports:
+    - 27017
+    migration:
+      mode: scaffolded
+      dumpTools:
+      - mongodump
+      restoreTools:
+      - mongorestore
+      targetModes:
+      - external
+      - operator
+      - managed
   cassandra:
     status: optional
     haProvider: cass-operator
@@ -81,6 +125,24 @@ profiles:
   microsoft-sql-server:
     status: optional
     haProvider: operator|managed
+    aliases:
+    - microsoft-sql-server
+    - mssql
+    - sqlserver
+    ports:
+    - 1433
+    migration:
+      mode: scaffolded
+      dumpTools:
+      - sqlpackage
+      - bcp
+      restoreTools:
+      - sqlpackage
+      - bcp
+      targetModes:
+      - external
+      - operator
+      - managed
   neo4j:
     status: optional
     haProvider: neo4j-helm
@@ -90,6 +152,17 @@ profiles:
   sqlite:
     status: optional-dev-only
     haProvider: not-ha
+    aliases:
+    - sqlite
+    migration:
+      mode: scaffolded
+      dumpTools:
+      - sqlite3
+      restoreTools:
+      - sqlite3
+      targetModes:
+      - single-pod-pvc
+      - externalized-service
   tarantool:
     status: optional
     haProvider: operator|raw

@@ -45,6 +45,16 @@ POSTGRES_COMPATIBLE_SELECTIONS = {
     "cloudnative-pg",
     "cnpg",
 }
+POSTGRES_FAMILY_KINDS = {"postgresql", "postgis", "timescaledb"}
+OPTIONAL_DATABASE_KINDS = {"mysql", "mariadb", "microsoft-sql-server", "mongodb", "sqlite"}
+DATABASE_KINDS = POSTGRES_FAMILY_KINDS | OPTIONAL_DATABASE_KINDS
+DATABASE_PROFILE_ALIASES = {
+    "mysql": {"mysql", "vitess"},
+    "mariadb": {"mariadb"},
+    "microsoft-sql-server": {"microsoft-sql-server", "mssql", "sql-server", "sqlserver"},
+    "mongodb": {"mongodb", "mongo"},
+    "sqlite": {"sqlite"},
+}
 PUBLIC_RUNTIME_KINDS = {
     "apache-httpd",
     "apache-tomcat",
@@ -52,10 +62,15 @@ PUBLIC_RUNTIME_KINDS = {
     "kafka",
     "kibana",
     "logstash",
+    "mariadb",
+    "microsoft-sql-server",
+    "mongodb",
+    "mysql",
     "nginx",
     "postgis",
     "postgresql",
     "redis",
+    "sqlite",
     "timescaledb",
     "traefik",
     "zookeeper",
@@ -67,6 +82,7 @@ SECRET_KEY_RE = re.compile(
 VARIABLE_VALUE_RE = re.compile(r"^(?:\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*)$")
 ABSOLUTE_PATH_RE = re.compile(r"(?<![\w.-])/(?:home|root|srv|opt|etc|var/lib|mnt|media|data)/[^`\s,)]*")
 RELATIVE_PATH_RE = re.compile(r"(?<![\w.-])(?:\.\./|\./)[^`\s,)]*")
+SQLITE_FILE_RE = re.compile(r"\.(?:sqlite|sqlite3|db)(?:$|[.:?])", re.IGNORECASE)
 
 
 @dataclass
@@ -249,6 +265,12 @@ def image_kind(image: ImageRef | None) -> str:
         return "mysql"
     if repository == "mariadb" or base == "mariadb":
         return "mariadb"
+    if repository in {"mongo", "mongodb/mongodb-community-server"} or base in {"mongo", "mongod"}:
+        return "mongodb"
+    if repository in {"mcr.microsoft.com/mssql/server", "mcr.microsoft.com/azure-sql-edge"}:
+        return "microsoft-sql-server"
+    if "mssql" in repository or "sqlserver" in repository:
+        return "microsoft-sql-server"
     if repository == "redis" or base == "redis":
         return "redis"
     if "kafka" in repository:
@@ -355,6 +377,29 @@ def environment_entries(environment: Any) -> list[tuple[str, str | None]]:
                 entries.append((text, None))
         return entries
     return []
+
+
+def selected_database_matches_kind(kind: str, selected_database: str) -> bool:
+    selected = selected_database.lower().replace("_", "-")
+    if kind in POSTGRES_FAMILY_KINDS:
+        return selected in POSTGRES_COMPATIBLE_SELECTIONS
+    return selected in DATABASE_PROFILE_ALIASES.get(kind, {kind})
+
+
+def service_uses_sqlite_files(service: dict[str, Any]) -> bool:
+    for key, value in environment_entries(service.get("environment")):
+        key_text = key.lower()
+        value_text = value or ""
+        if "sqlite" in key_text or SQLITE_FILE_RE.search(value_text):
+            return True
+    for mount in service.get("volumes") or []:
+        if isinstance(mount, dict):
+            fields = [mount.get("source"), mount.get("target")]
+        else:
+            fields = str(mount).split(":")[:2]
+        if any(SQLITE_FILE_RE.search(str(field or "")) for field in fields):
+            return True
+    return False
 
 
 def add_finding(
@@ -483,8 +528,8 @@ def analyze_service(
                 "Prefer `nginxinc/nginx-unprivileged:1.31.0` for the platform gateway, or document why this backend is separate.",
             )
 
-    if record.kind in {"postgresql", "postgis", "timescaledb"} and image is not None:
-        if selected_database not in POSTGRES_COMPATIBLE_SELECTIONS:
+    if record.kind in POSTGRES_FAMILY_KINDS and image is not None:
+        if not selected_database_matches_kind(record.kind, selected_database):
             add_finding(
                 findings,
                 "WARN",
@@ -531,14 +576,34 @@ def analyze_service(
                 "Update the database catalog/operator support before selecting this image.",
             )
 
-    if record.kind in {"mysql", "mariadb"} and selected_database in POSTGRES_COMPATIBLE_SELECTIONS:
+    if record.kind in OPTIONAL_DATABASE_KINDS:
+        if selected_database_matches_kind(record.kind, selected_database):
+            add_finding(
+                findings,
+                "INFO",
+                record.file,
+                record.name,
+                f"Service uses optional database engine `{record.kind}` matching selected profile `{selected_database}`.",
+                "Map it to an operator-backed, managed, or external database target before workload cutover.",
+            )
+        else:
+            add_finding(
+                findings,
+                "WARN",
+                record.file,
+                record.name,
+                f"Service uses optional database engine `{record.kind}` while selected database profile is `{selected_database}`.",
+                "Choose the matching optional database profile or define an external target in the private database target map.",
+            )
+
+    if record.kind not in DATABASE_KINDS and service_uses_sqlite_files(service):
         add_finding(
             findings,
-            "WARN",
+            "INFO",
             record.file,
             record.name,
-            f"Service uses `{record.kind}` while the selected database path is PostgreSQL/CloudNativePG.",
-            "Choose the matching optional database profile/operator or plan an application data migration.",
+            "Service appears to mount or reference SQLite database files.",
+            "Keep SQLite only for dev/single-pod mode, or externalize the data store before HA migration.",
         )
 
     for key, value in environment_entries(service.get("environment")):
@@ -672,6 +737,15 @@ def compact_scope(records: list[ServiceRecord], redactor: ReportRedactor, limit:
     return ", ".join(rendered)
 
 
+def compact_kind_counts(records: list[ServiceRecord]) -> str:
+    counts: dict[str, int] = {}
+    for record in unique_records(records):
+        counts[record.kind] = counts.get(record.kind, 0) + 1
+    if not counts:
+        return "none detected"
+    return ", ".join(f"`{kind}`: `{count}`" for kind, count in sorted(counts.items()))
+
+
 def render_migration_plan(
     lines: list[str],
     service_records: list[ServiceRecord],
@@ -690,9 +764,8 @@ def render_migration_plan(
     no_tag = count_findings(findings, "has no explicit tag")
     mutable_tags = count_findings(findings, "uses mutable tag")
     runtime_drift = count_runtime_drift(findings)
-    database_records = [
-        record for record in service_records if record.kind in {"postgresql", "postgis", "timescaledb"}
-    ]
+    database_records = [record for record in service_records if record.kind in POSTGRES_FAMILY_KINDS]
+    optional_database_records = [record for record in service_records if record.kind in OPTIONAL_DATABASE_KINDS]
     ingress_records = [
         record for record in service_records
         if has_edge_publish(record.ports) or (selected_ingress == "traefik" and record.kind in {"nginx", "traefik"})
@@ -715,12 +788,14 @@ def render_migration_plan(
             "",
             f"- Selected database profile: `{selected_database}`.",
             f"- PostgreSQL-family services detected: `{len(unique_records(database_records))}`.",
+            f"- Optional database services detected: `{len(unique_records(optional_database_records))}` ({compact_kind_counts(optional_database_records)}).",
             f"- Target database images from selected values: `{', '.join(database_targets) if database_targets else 'not detected'}`.",
             f"- Scope sample: {compact_scope(database_records, redactor)}.",
             "- Do not reuse old PostgreSQL major-version data directories as Kubernetes volumes. Use logical dump/restore when moving PostgreSQL 16-family data to PostgreSQL 18-family targets.",
             "- Precheck each source with `SELECT version();` and `SELECT extname, extversion FROM pg_extension ORDER BY 1;`.",
             "- Migration rehearsal pattern: `pg_dump --format=custom --no-owner --no-acl --file=<database>.dump <source>` then `pg_restore --clean --if-exists --no-owner --dbname=<target> <database>.dump`.",
             "- For PostGIS and TimescaleDB, create/upgrade extensions on the target before restore, then run application smoke tests before switching traffic.",
+            "- MySQL, MariaDB, Microsoft SQL Server, MongoDB, and SQLite are optional target profiles. The importer generates private target-map scaffolds for them, while engine-specific dump/restore runners should be enabled only after the matching operator, managed service, or external endpoint is declared.",
             "",
             "### 3. Edge Routing And Webserver",
             "",

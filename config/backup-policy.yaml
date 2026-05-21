@@ -1,0 +1,94 @@
+defaultProfile: disabled
+enabledByDefault: false
+profiles:
+  disabled:
+    description: Public-safe default. Backup automation is documented but does not run.
+    enabled: false
+    rpo: not-configured
+    rto: not-configured
+  lab:
+    description: Small-cluster rehearsal profile. Use only after explicit operator opt-in.
+    enabled: false
+    rpo: 24h
+    rto: best-effort
+  production:
+    description: Enterprise profile for durable off-cluster backups and restore drills.
+    enabled: false
+    rpo: 15m
+    rto: 4h
+layers:
+  rke2Etcd:
+    enabled: false
+    targetTier: cold
+    schedule: operator-managed
+    retention: 7
+    restoreDrill: quarterly
+  cloudnativePg:
+    enabled: false
+    targetTier: cold
+    retentionPolicy: 30d
+    objectStoreSecretRef: environment-owned
+    restoreDrill: monthly
+  velero:
+    enabled: false
+    installOperator: false
+    targetTier: cold
+    scope: namespace-and-persistent-volume-metadata
+    restoreDrill: quarterly
+  imageArchives:
+    enabled: false
+    targetTier: cold
+    retention: 7d
+    scope: imported-image-preload-archives
+  urbackup:
+    enabled: false
+    installInCluster: false
+    targetTier: external
+    scope: host-vm-file-and-legacy-compose-backups
+    role: external-infrastructure-backup
+    restoreDrill: quarterly
+  restic:
+    enabled: false
+    installInCluster: false
+    targetTier: cold
+    scope: operator-private-artifacts-and-file-level-backups
+    role: encrypted-file-backup
+    restoreDrill: quarterly
+  kopia:
+    enabled: false
+    installInCluster: false
+    targetTier: cold
+    scope: operator-private-artifacts-and-repository-backed-backups
+    role: encrypted-file-backup-alternative
+    restoreDrill: quarterly
+  borg:
+    enabled: false
+    installInCluster: false
+    targetTier: cold
+    scope: operator-private-artifacts-and-linux-repository-backups
+    role: encrypted-file-backup-alternative
+    restoreDrill: quarterly
+  secrets:
+    enabled: false
+    sourceOfTruth: external-secrets-sops-sealed-secrets-or-vault
+    backupPlaintext: false
+targets:
+  hot:
+    purpose: active-stateful-pvcs
+    enabled: false
+  warm:
+    purpose: compressed-history-and-medium-retention-data
+    enabled: false
+  cold:
+    purpose: backups-dumps-snapshots-release-evidence
+    enabled: false
+    provider: s3-compatible
+    immutable: recommended
+    encryption: required
+validation:
+  requiredBeforeEnable:
+  - object-store-bucket-created-outside-chart
+  - credentials-delivered-by-secret-manager
+  - restore-drill-runbook-reviewed
+  - retention-approved-by-data-owner
+  - network-egress-to-backup-target-allowed

@@ -1,0 +1,52 @@
+defaultProfile: three-node-4g
+profiles:
+  three-node-4g:
+    description: Public-safe lab sizing profile for three 4-core/4 GiB RKE2 nodes.
+    nodes: 3
+    cpuPerNode: 4
+    memoryPerNode: 4Gi
+    capacityUtilizationLimit: 0.70
+    maxPods: 80
+    maxDatabases: 3
+    importedBatchSize: 40
+    keepPlaceholderWorkloadsSkipped: true
+    disableAutoscaling: true
+    disableObservability: true
+    disableBackups: true
+    disableOptionalCapabilities: true
+    disableKafkaUi: true
+    disableZabbixAgent: true
+    progressiveWaves:
+    - name: foundation
+      description: namespace, storage class, operators, and kubeconfig checks
+    - name: edge
+      description: Traefik ingress, web gateway, and one root workload
+    - name: core-data
+      description: first database subset, Kafka, ZooKeeper, and Redis
+    - name: imported-batch
+      description: imported application workloads in batches
+    - name: optional-observability
+      description: Prometheus/Grafana or logging stack only after capacity is proven
+    guardrails:
+    - keep global.replicaOverride at 1
+    - keep global.skipPlaceholderWorkloads true
+    - keep observability, backups, and optional capabilities disabled
+    - deploy only a small database subset first
+    - use import batches for large Compose projects
+    - review capacity before enabling HA replicas
+  single-node-4g:
+    description: Minimal smoke-test profile for one 4-core/4 GiB node.
+    nodes: 1
+    cpuPerNode: 4
+    memoryPerNode: 4Gi
+    capacityUtilizationLimit: 0.60
+    maxPods: 35
+    maxDatabases: 1
+    importedBatchSize: 10
+    keepPlaceholderWorkloadsSkipped: true
+    disableAutoscaling: true
+    disableObservability: true
+    disableBackups: true
+    disableOptionalCapabilities: true
+    disableKafkaUi: true
+    disableZabbixAgent: true

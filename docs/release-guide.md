@@ -19,7 +19,7 @@ make deploy-dry-run
 
 ```bash
 make release-evidence
-sha256sum -c dist/SHA256SUMS
+make verify-release-evidence RELEASE_TAG=v0.1.0
 ```
 
 ## Tag Release
@@ -36,6 +36,7 @@ GitHub Actions packages the Helm chart on tags matching `v*.*.*`, renders the de
 ## Verify Release Evidence
 
 ```bash
+make verify-release-evidence RELEASE_TAG=v0.1.0
 sha256sum -c dist/SHA256SUMS
 gh attestation verify dist/urban-platform-infra-0.1.0.tgz --repo OWNER/REPO
 ```

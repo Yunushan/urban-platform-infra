@@ -78,6 +78,28 @@ DEPLOY_ENABLE_KIBANA ?= false
 DEPLOY_ENABLE_LOGSTASH ?= false
 DEPLOY_ENABLE_LOKI ?= false
 DEPLOY_ENABLE_CLICKHOUSE ?= false
+DEPLOY_ENABLE_VELERO ?= false
+DEPLOY_ENABLE_MINIO ?= false
+DEPLOY_ENABLE_RABBITMQ ?= false
+DEPLOY_ENABLE_KEYCLOAK ?= false
+DEPLOY_ENABLE_EMQX ?= false
+DEPLOY_ENABLE_NATS ?= false
+DEPLOY_ENABLE_VAULT ?= false
+DEPLOY_ENABLE_KYVERNO ?= false
+DEPLOY_ENABLE_TEMPORAL ?= false
+DEPLOY_ENABLE_ARGO_WORKFLOWS ?= false
+DEPLOY_ENABLE_LINKERD ?= false
+DEPLOY_ENABLE_ISTIO ?= false
+VELERO_PROVIDER ?= aws
+VELERO_BUCKET ?=
+VELERO_PREFIX ?= urban-platform
+VELERO_REGION ?= minio
+VELERO_S3_URL ?=
+VELERO_S3_FORCE_PATH_STYLE ?= true
+VELERO_USE_SECRET ?= false
+VELERO_EXISTING_SECRET ?=
+VELERO_SNAPSHOTS_ENABLED ?= false
+VELERO_NODE_AGENT_ENABLED ?= false
 DEPLOY_EDGE_OBSERVABILITY_PORTS ?= false
 DEPLOY_OBSERVABILITY_SERVICE_TYPE ?= NodePort
 DEPLOY_KIBANA_NODE_PORT ?= 30561
@@ -116,11 +138,26 @@ MIGRATION_CLUSTER_DOMAIN ?=
 MIGRATION_INGRESS_HOST ?= $(MIGRATION_CLUSTER_DOMAIN)
 MIGRATION_TLS_CERT_FILE ?=
 MIGRATION_TLS_KEY_FILE ?=
+MIGRATION_PROFILE ?= lab
+MIGRATION_LAB_WORKLOAD_CPU_REQUEST ?= 25m
+MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST ?= 64Mi
+MIGRATION_LAB_WORKLOAD_CPU_LIMIT ?= 250m
+MIGRATION_LAB_WORKLOAD_MEMORY_LIMIT ?= 256Mi
+MIGRATION_PREFLIGHT_MIN_NODE_MEMORY ?= 3500Mi
+MIGRATION_PREFLIGHT_MIN_NODE_DISK_FREE ?= 2048Mi
+MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS ?= $(if $(filter production,$(MIGRATION_PROFILE)),0,40)
+MIGRATION_PREFLIGHT_CAPACITY_UTILIZATION_LIMIT ?= $(if $(filter production,$(MIGRATION_PROFILE)),0.85,0.70)
+MIGRATION_PREFLIGHT_REQUIRE_INGRESS_ENDPOINT ?= $(if $(filter production,$(MIGRATION_PROFILE)),true,false)
+MIGRATION_BATCH_SIZE ?= $(if $(filter production,$(MIGRATION_PROFILE)),0,$(MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS))
+MIGRATION_IMPORT_BATCH ?= $(if $(filter production,$(MIGRATION_PROFILE)),all,auto)
+MIGRATION_STATE_FILE ?= $(MIGRATION_PRIVATE_DIR)/migration-state.yaml
+MIGRATION_RESUME ?= true
+MIGRATION_FORCE_RERUN ?= false
 MIGRATION_RKE2_VERSION ?=
 MIGRATION_AUTO_REPAIR_CLUSTER ?= auto
 MIGRATION_KEEPALIVED_AUTH_PASS ?=
 MIGRATION_KEEPALIVED_INTERFACE ?=
-MIGRATION_IMAGE_MODE ?= registry
+MIGRATION_IMAGE_MODE ?= $(if $(filter lab,$(MIGRATION_PROFILE)),preload,registry)
 MIGRATION_IMAGE_OUTPUT_DIR ?= $(MIGRATION_PRIVATE_DIR)/images
 MIGRATION_RKE2_NODES ?=
 MIGRATION_RKE2_IMAGE_DIR ?= /var/lib/rancher/rke2/agent/images
@@ -128,7 +165,12 @@ MIGRATION_RKE2_IMPORT_IMAGES ?= true
 MIGRATION_CLEANUP_OPERATOR_IMAGES ?= true
 MIGRATION_PRUNE_OPERATOR_CACHE ?= true
 MIGRATION_SKIP_DOCKER_SOCKET_SERVICES ?= true
-MIGRATION_SKIP_UNAVAILABLE_DATABASES ?= true
+MIGRATION_SKIP_UNAVAILABLE_DATABASES ?= $(if $(filter production,$(MIGRATION_PROFILE)),false,true)
+MIGRATION_SECRET_PROVIDER ?= kubernetes
+MIGRATION_SECRET_REMOTE_PREFIX ?= example/urban-platform/import
+MIGRATION_SECRET_STORE_NAME ?= vault
+MIGRATION_SECRET_STORE_KIND ?= ClusterSecretStore
+MIGRATION_SECRET_REFRESH_INTERVAL ?= 1h
 MIGRATION_SSH_USER ?= root
 MIGRATION_SSH_KEY ?=
 MIGRATION_BECOME_PASSWORD_FILE ?=
@@ -140,8 +182,165 @@ MIGRATION_IMAGE_TAG ?= imported-0.1.0
 MIGRATION_NAMESPACE ?= $(NAMESPACE)
 MIGRATION_DUMP_DIR ?= $(MIGRATION_PRIVATE_DIR)/db-dumps
 MIGRATION_DB_TARGETS ?= $(MIGRATION_PRIVATE_DIR)/db-targets.yaml
+BACKUP_POLICY ?= config/backup-policy.yaml
+BACKUP_OUTPUT ?= reports/backup-plan.md
+OBSERVABILITY_CONFIG ?= config/observability.yaml
+SLO_CONFIG ?= config/slo.yaml
+OBSERVABILITY_PLAN_PROFILE ?= $(MIGRATION_PROFILE)
+OBSERVABILITY_PLAN_OUTPUT ?= reports/observability-plan.md
+CLUSTER_DOCTOR_OUTPUT ?= reports/cluster-doctor.md
+CLUSTER_DOCTOR_NODES ?= $(MIGRATION_RKE2_NODES)
+CLUSTER_DOCTOR_CLUSTER_VIP ?= $(if $(MIGRATION_CLUSTER_VIP),$(MIGRATION_CLUSTER_VIP),$(DEPLOY_CLUSTER_VIP))
+CLUSTER_DOCTOR_API_PORT ?= $(if $(MIGRATION_KUBERNETES_API_VIP_PORT),$(MIGRATION_KUBERNETES_API_VIP_PORT),7443)
+CLUSTER_DOCTOR_SSH_USER ?= $(MIGRATION_SSH_USER)
+CLUSTER_DOCTOR_SSH_KEY ?= $(MIGRATION_SSH_KEY)
+CLUSTER_DOCTOR_REPAIR ?= false
+CLUSTER_DOCTOR_REDACT ?= true
+LAB_CAPACITY_CONFIG ?= config/lab-capacity.yaml
+LAB_DEPLOY_PROFILE ?=
+LAB_DEPLOY_NODE_COUNT ?= 0
+LAB_DEPLOY_NODE_CPU ?=
+LAB_DEPLOY_NODE_MEMORY ?=
+LAB_DEPLOY_UTILIZATION_LIMIT ?= 0
+LAB_DEPLOY_MAX_PODS ?= 0
+LAB_DEPLOY_MAX_DATABASES ?= -1
+LAB_DEPLOY_BATCH_SIZE ?= 0
+LAB_DEPLOY_OUTPUT ?= reports/lab-deploy-plan.md
+LAB_DEPLOY_VALUES ?= reports/lab-deploy-values.yaml
+IMAGE_CACHE_CONFIG ?= config/image-cache.yaml
+IMAGE_CACHE_PROFILE ?=
+IMAGE_CACHE_OUTPUT ?= reports/image-cache-plan.md
+DB_MIGRATION_CONFIG ?= config/database-migration.yaml
+DB_MIGRATION_PROFILE ?= $(MIGRATION_PROFILE)
+DB_MIGRATION_OUTPUT ?= reports/database-migration-plan.md
+EDGE_MIGRATION_CONFIG ?= config/edge-migration.yaml
+EDGE_MIGRATION_PROFILE ?=
+EDGE_MIGRATION_OUTPUT ?= reports/edge-migration-plan.md
+ENV_PROFILE_CONFIG ?= config/environment-profiles.yaml
+ENV_PROFILE ?= $(MIGRATION_PROFILE)
+ENV_PROFILE_OUTPUT ?= reports/environment-profile-plan.md
+ENV_PROFILE_VALUES ?= reports/environment-profile-values.yaml
+RELEASE_TAG ?= $(shell git describe --tags --exact-match 2>/dev/null)
+RELEASE_VERIFY_REPORT ?= reports/release-evidence-verification.md
+IMAGE_PROMOTION_REGISTRY ?= private-registry.example.invalid/platform
+IMAGE_PROMOTION_PROFILE ?= production
+IMAGE_PROMOTION_REPORT ?= reports/image-promotion-plan.md
+REGISTRY_PROMOTION_CONFIG ?= config/registry-promotion.yaml
+REGISTRY_PROMOTION_PROFILE ?=
+REGISTRY_PROMOTION_REGISTRY ?= $(IMAGE_PROMOTION_REGISTRY)
+REGISTRY_PROMOTION_CREDENTIAL_SOURCE ?=
+REGISTRY_PROMOTION_IMAGE_PULL_SECRET ?= registry-credentials
+REGISTRY_PROMOTION_OUTPUT ?= reports/registry-promotion-controller.md
+REGISTRY_PROMOTION_VALUES ?= reports/registry-promotion-values.yaml
+RUNTIME_HARDENING_CONFIG ?= config/runtime-hardening.yaml
+RUNTIME_HARDENING_PROFILE ?=
+RUNTIME_HARDENING_OUTPUT ?= reports/runtime-hardening-plan.md
+RUNTIME_HARDENING_VALUES ?= reports/runtime-hardening-values.yaml
+GITOPS_DELIVERY_CONFIG ?= config/gitops-delivery.yaml
+GITOPS_DELIVERY_PROFILE ?=
+GITOPS_DELIVERY_REPO_URL ?=
+GITOPS_DELIVERY_TARGET_REVISION ?= main
+GITOPS_DELIVERY_VALUES_PATH ?=
+GITOPS_DELIVERY_OUTPUT ?= reports/gitops-delivery-plan.md
+GITOPS_DELIVERY_VALUES ?= reports/gitops-delivery-values.yaml
+PROGRESSIVE_DELIVERY_CONFIG ?= config/progressive-delivery.yaml
+PROGRESSIVE_DELIVERY_PROFILE ?=
+PROGRESSIVE_DELIVERY_GITOPS_PROFILE ?= $(GITOPS_DELIVERY_PROFILE)
+PROGRESSIVE_DELIVERY_RUNTIME_PROFILE ?= $(RUNTIME_HARDENING_PROFILE)
+PROGRESSIVE_DELIVERY_SLO_SOURCE ?=
+PROGRESSIVE_DELIVERY_ROLLBACK_DRILL ?= false
+PROGRESSIVE_DELIVERY_OUTPUT ?= reports/progressive-delivery-plan.md
+PROGRESSIVE_DELIVERY_VALUES ?= reports/progressive-delivery-values.yaml
+SCALING_POLICY_CONFIG ?= config/scaling-policy.yaml
+SCALING_POLICY_PROFILE ?=
+SCALING_POLICY_METRICS_SOURCE ?=
+SCALING_POLICY_EVENT_SOURCE ?=
+SCALING_POLICY_CAPACITY_REPORT ?=
+SCALING_POLICY_LOAD_TEST_EVIDENCE ?= false
+SCALING_POLICY_OUTPUT ?= reports/scaling-policy-plan.md
+SCALING_POLICY_VALUES ?= reports/scaling-policy-values.yaml
+NETWORK_CONNECTIVITY_CONFIG ?= config/network-connectivity.yaml
+NETWORK_CONNECTIVITY_PROFILE ?=
+NETWORK_CONNECTIVITY_TRAFFIC_INVENTORY ?=
+NETWORK_CONNECTIVITY_EGRESS_CONTRACT ?=
+NETWORK_CONNECTIVITY_DNS_TLS_EVIDENCE ?= false
+NETWORK_CONNECTIVITY_MESH_READINESS ?= false
+NETWORK_CONNECTIVITY_OUTPUT ?= reports/network-connectivity-plan.md
+NETWORK_CONNECTIVITY_VALUES ?= reports/network-connectivity-values.yaml
+ACCESS_GOVERNANCE_CONFIG ?= config/access-governance.yaml
+ACCESS_GOVERNANCE_PROFILE ?=
+ACCESS_GOVERNANCE_IDENTITY_PROVIDER ?=
+ACCESS_GOVERNANCE_GROUP_MAPPING ?=
+ACCESS_GOVERNANCE_TENANT_MODEL ?=
+ACCESS_GOVERNANCE_RBAC_INVENTORY ?=
+ACCESS_GOVERNANCE_AUDIT_EVIDENCE ?= false
+ACCESS_GOVERNANCE_BREAK_GLASS_REVIEW ?= false
+ACCESS_GOVERNANCE_OUTPUT ?= reports/access-governance-plan.md
+ACCESS_GOVERNANCE_VALUES ?= reports/access-governance-values.yaml
+COMPLIANCE_EVIDENCE_CONFIG ?= config/compliance-evidence.yaml
+COMPLIANCE_EVIDENCE_PROFILE ?=
+COMPLIANCE_EVIDENCE_RELEASE_TAG ?= $(RELEASE_TAG)
+COMPLIANCE_EVIDENCE_ROOT ?=
+COMPLIANCE_EVIDENCE_CONTROL_MAP ?=
+COMPLIANCE_EVIDENCE_PRIVATE_INDEX ?=
+COMPLIANCE_EVIDENCE_ATTESTATION_SOURCE ?=
+COMPLIANCE_EVIDENCE_RESTORE_DRILL ?= false
+COMPLIANCE_EVIDENCE_ACCESS_REVIEW ?= false
+COMPLIANCE_EVIDENCE_INCIDENT_DRILL ?= false
+COMPLIANCE_EVIDENCE_OUTPUT ?= reports/compliance-evidence-plan.md
+COMPLIANCE_EVIDENCE_VALUES ?= reports/compliance-evidence-values.yaml
+INCIDENT_RESPONSE_CONFIG ?= config/incident-response.yaml
+INCIDENT_RESPONSE_PROFILE ?=
+INCIDENT_RESPONSE_ALERT_ROUTE_SOURCE ?=
+INCIDENT_RESPONSE_ESCALATION_ROTA ?=
+INCIDENT_RESPONSE_PAGER_SERVICE ?=
+INCIDENT_RESPONSE_RUNBOOK_SOURCE ?=
+INCIDENT_RESPONSE_SERVICE_OWNER_MAP ?=
+INCIDENT_RESPONSE_COMMS_TEMPLATE ?=
+INCIDENT_RESPONSE_STAKEHOLDER_MAP ?=
+INCIDENT_RESPONSE_REGULATORY_OWNER ?=
+INCIDENT_RESPONSE_INCIDENT_DRILL ?= false
+INCIDENT_RESPONSE_POST_INCIDENT_REVIEW ?= false
+INCIDENT_RESPONSE_OUTPUT ?= reports/incident-response-plan.md
+INCIDENT_RESPONSE_VALUES ?= reports/incident-response-values.yaml
+CHANGE_MANAGEMENT_CONFIG ?= config/change-management.yaml
+CHANGE_MANAGEMENT_PROFILE ?=
+CHANGE_MANAGEMENT_TICKET ?=
+CHANGE_MANAGEMENT_APPROVAL_EVIDENCE ?=
+CHANGE_MANAGEMENT_RISK_ASSESSMENT ?=
+CHANGE_MANAGEMENT_IMPACT_ASSESSMENT ?=
+CHANGE_MANAGEMENT_WINDOW ?=
+CHANGE_MANAGEMENT_ROLLBACK_PLAN ?=
+CHANGE_MANAGEMENT_SMOKE_TEST_PLAN ?=
+CHANGE_MANAGEMENT_FREEZE_CHECK ?= false
+CHANGE_MANAGEMENT_STAKEHOLDER_NOTICE ?= false
+CHANGE_MANAGEMENT_POST_CHANGE_REVIEW ?= false
+CHANGE_MANAGEMENT_REGULATORY_EVIDENCE ?= false
+CHANGE_MANAGEMENT_OUTPUT ?= reports/change-management-plan.md
+CHANGE_MANAGEMENT_VALUES ?= reports/change-management-values.yaml
+DISASTER_RECOVERY_CONFIG ?= config/disaster-recovery.yaml
+DISASTER_RECOVERY_PROFILE ?=
+DISASTER_RECOVERY_RTO_RPO ?=
+DISASTER_RECOVERY_DEPENDENCY_MAP ?=
+DISASTER_RECOVERY_CRITICALITY_MAP ?=
+DISASTER_RECOVERY_BACKUP_REPLICATION ?=
+DISASTER_RECOVERY_DATA_REPLICATION ?=
+DISASTER_RECOVERY_CROSS_ZONE_EVIDENCE ?=
+DISASTER_RECOVERY_DATABASE_RESTORE_EVIDENCE ?=
+DISASTER_RECOVERY_ETCD_RESTORE_EVIDENCE ?=
+DISASTER_RECOVERY_NAMESPACE_RESTORE_EVIDENCE ?=
+DISASTER_RECOVERY_APPLICATION_SMOKE_TEST ?=
+DISASTER_RECOVERY_RUNBOOK_SOURCE ?=
+DISASTER_RECOVERY_COMMS_PLAN ?=
+DISASTER_RECOVERY_MANUAL_WORKAROUND ?=
+DISASTER_RECOVERY_SUPPLIER_CONTACTS ?=
+DISASTER_RECOVERY_DRILL_EVIDENCE ?=
+DISASTER_RECOVERY_RTO_EVIDENCE ?=
+DISASTER_RECOVERY_POST_DRILL_REVIEW ?= false
+DISASTER_RECOVERY_OUTPUT ?= reports/disaster-recovery-plan.md
+DISASTER_RECOVERY_VALUES ?= reports/disaster-recovery-values.yaml
 
-.PHONY: help validate image-policy lint configure import-check import-plan import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig configure-edge-ports install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace recover-helm-release deploy deploy-auto deploy-dry-run package-chart release-evidence status observability-status docker-up docker-down docker-status policy clean
+.PHONY: help validate image-policy image-promotion-plan registry-promotion-plan runtime-hardening-plan gitops-delivery-plan progressive-delivery-plan scaling-policy-plan network-connectivity-plan access-governance-plan compliance-evidence-plan incident-response-plan change-management-plan disaster-recovery-plan lint configure backup-plan observability-plan cluster-doctor cluster-repair lab-deploy-plan image-cache-plan database-migration-plan edge-migration-plan environment-profile-plan import-check import-plan import-preflight import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig configure-edge-ports install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace recover-helm-release deploy deploy-auto deploy-dry-run package-chart release-evidence verify-release-evidence status observability-status docker-up docker-down docker-status policy clean
 
 HELM_DEPLOY_SET_ARGS = \
 	--set namespace.create=false \
@@ -207,12 +406,95 @@ validate: python-deps ## Validate YAML, Helm chart structure, scripts, and confi
 image-policy: ## Validate image tag, digest, and approved runtime-image policy.
 	$(PYTHON) scripts/images/validate-images.py
 
+image-promotion-plan: ## Generate a public-safe production image promotion evidence plan.
+	mkdir -p reports
+	$(PYTHON) scripts/images/promotion_plan.py --values "$(VALUES)" --policy config/image-policy.yaml --registry "$(IMAGE_PROMOTION_REGISTRY)" --profile "$(IMAGE_PROMOTION_PROFILE)" --output "$(IMAGE_PROMOTION_REPORT)"
+
+registry-promotion-plan: ## Generate a public-safe registry promotion controller plan and Helm override template.
+	mkdir -p reports
+	$(PYTHON) scripts/images/registry_promotion_controller.py --config "$(REGISTRY_PROMOTION_CONFIG)" --values "$(VALUES)" --policy config/image-policy.yaml --profile "$(REGISTRY_PROMOTION_PROFILE)" --registry "$(REGISTRY_PROMOTION_REGISTRY)" --credential-source "$(REGISTRY_PROMOTION_CREDENTIAL_SOURCE)" --image-pull-secret "$(REGISTRY_PROMOTION_IMAGE_PULL_SECRET)" --output "$(REGISTRY_PROMOTION_OUTPUT)" --overrides "$(REGISTRY_PROMOTION_VALUES)" $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
+runtime-hardening-plan: ## Generate a public-safe runtime hardening and admission policy plan.
+	mkdir -p reports
+	$(PYTHON) scripts/runtime_hardening_plan.py --config "$(RUNTIME_HARDENING_CONFIG)" --values "$(VALUES)" --profile "$(RUNTIME_HARDENING_PROFILE)" --output "$(RUNTIME_HARDENING_OUTPUT)" --overrides "$(RUNTIME_HARDENING_VALUES)" $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
+gitops-delivery-plan: ## Generate a public-safe GitOps delivery and drift-control plan.
+	mkdir -p reports
+	$(PYTHON) scripts/gitops_delivery_plan.py --config "$(GITOPS_DELIVERY_CONFIG)" --profile "$(GITOPS_DELIVERY_PROFILE)" --repo-url "$(GITOPS_DELIVERY_REPO_URL)" --target-revision "$(GITOPS_DELIVERY_TARGET_REVISION)" --values-path "$(GITOPS_DELIVERY_VALUES_PATH)" --output "$(GITOPS_DELIVERY_OUTPUT)" --overrides "$(GITOPS_DELIVERY_VALUES)" $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
+progressive-delivery-plan: ## Generate a public-safe progressive delivery and rollback plan.
+	mkdir -p reports
+	$(PYTHON) scripts/progressive_delivery_plan.py --config "$(PROGRESSIVE_DELIVERY_CONFIG)" --profile "$(PROGRESSIVE_DELIVERY_PROFILE)" --gitops-profile "$(PROGRESSIVE_DELIVERY_GITOPS_PROFILE)" --runtime-profile "$(PROGRESSIVE_DELIVERY_RUNTIME_PROFILE)" --slo-source "$(PROGRESSIVE_DELIVERY_SLO_SOURCE)" --output "$(PROGRESSIVE_DELIVERY_OUTPUT)" --overrides "$(PROGRESSIVE_DELIVERY_VALUES)" $(if $(filter true,$(PROGRESSIVE_DELIVERY_ROLLBACK_DRILL)),--rollback-drill,) $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
+scaling-policy-plan: ## Generate a public-safe scaling policy and capacity automation plan.
+	mkdir -p reports
+	$(PYTHON) scripts/scaling_policy_plan.py --config "$(SCALING_POLICY_CONFIG)" --profile "$(SCALING_POLICY_PROFILE)" --metrics-source "$(SCALING_POLICY_METRICS_SOURCE)" --event-source "$(SCALING_POLICY_EVENT_SOURCE)" --capacity-report "$(SCALING_POLICY_CAPACITY_REPORT)" --output "$(SCALING_POLICY_OUTPUT)" --overrides "$(SCALING_POLICY_VALUES)" $(if $(filter true,$(SCALING_POLICY_LOAD_TEST_EVIDENCE)),--load-test-evidence,) $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
+network-connectivity-plan: ## Generate a public-safe network connectivity, egress, and service mesh plan.
+	mkdir -p reports
+	$(PYTHON) scripts/network_connectivity_plan.py --config "$(NETWORK_CONNECTIVITY_CONFIG)" --profile "$(NETWORK_CONNECTIVITY_PROFILE)" --traffic-inventory "$(NETWORK_CONNECTIVITY_TRAFFIC_INVENTORY)" --egress-contract "$(NETWORK_CONNECTIVITY_EGRESS_CONTRACT)" --output "$(NETWORK_CONNECTIVITY_OUTPUT)" --overrides "$(NETWORK_CONNECTIVITY_VALUES)" $(if $(filter true,$(NETWORK_CONNECTIVITY_DNS_TLS_EVIDENCE)),--dns-tls-evidence,) $(if $(filter true,$(NETWORK_CONNECTIVITY_MESH_READINESS)),--mesh-readiness,) $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
+access-governance-plan: ## Generate a public-safe access governance, RBAC, and tenant isolation plan.
+	mkdir -p reports
+	$(PYTHON) scripts/access_governance_plan.py --config "$(ACCESS_GOVERNANCE_CONFIG)" --profile "$(ACCESS_GOVERNANCE_PROFILE)" --identity-provider "$(ACCESS_GOVERNANCE_IDENTITY_PROVIDER)" --group-mapping "$(ACCESS_GOVERNANCE_GROUP_MAPPING)" --tenant-model "$(ACCESS_GOVERNANCE_TENANT_MODEL)" --rbac-inventory "$(ACCESS_GOVERNANCE_RBAC_INVENTORY)" --output "$(ACCESS_GOVERNANCE_OUTPUT)" --overrides "$(ACCESS_GOVERNANCE_VALUES)" $(if $(filter true,$(ACCESS_GOVERNANCE_AUDIT_EVIDENCE)),--audit-evidence,) $(if $(filter true,$(ACCESS_GOVERNANCE_BREAK_GLASS_REVIEW)),--break-glass-review,) $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
+compliance-evidence-plan: ## Generate a public-safe compliance evidence and audit-pack readiness plan.
+	mkdir -p reports
+	$(PYTHON) scripts/compliance_evidence_plan.py --config "$(COMPLIANCE_EVIDENCE_CONFIG)" --profile "$(COMPLIANCE_EVIDENCE_PROFILE)" --release-tag "$(COMPLIANCE_EVIDENCE_RELEASE_TAG)" --evidence-root "$(COMPLIANCE_EVIDENCE_ROOT)" --control-map "$(COMPLIANCE_EVIDENCE_CONTROL_MAP)" --private-evidence-index "$(COMPLIANCE_EVIDENCE_PRIVATE_INDEX)" --attestation-source "$(COMPLIANCE_EVIDENCE_ATTESTATION_SOURCE)" --output "$(COMPLIANCE_EVIDENCE_OUTPUT)" --overrides "$(COMPLIANCE_EVIDENCE_VALUES)" $(if $(filter true,$(COMPLIANCE_EVIDENCE_RESTORE_DRILL)),--restore-drill-evidence,) $(if $(filter true,$(COMPLIANCE_EVIDENCE_ACCESS_REVIEW)),--access-review-evidence,) $(if $(filter true,$(COMPLIANCE_EVIDENCE_INCIDENT_DRILL)),--incident-drill-evidence,) $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
+incident-response-plan: ## Generate a public-safe incident response and operational readiness plan.
+	mkdir -p reports
+	$(PYTHON) scripts/incident_response_plan.py --config "$(INCIDENT_RESPONSE_CONFIG)" --profile "$(INCIDENT_RESPONSE_PROFILE)" --alert-route-source "$(INCIDENT_RESPONSE_ALERT_ROUTE_SOURCE)" --escalation-rota "$(INCIDENT_RESPONSE_ESCALATION_ROTA)" --pager-service "$(INCIDENT_RESPONSE_PAGER_SERVICE)" --runbook-source "$(INCIDENT_RESPONSE_RUNBOOK_SOURCE)" --service-owner-map "$(INCIDENT_RESPONSE_SERVICE_OWNER_MAP)" --comms-template "$(INCIDENT_RESPONSE_COMMS_TEMPLATE)" --stakeholder-map "$(INCIDENT_RESPONSE_STAKEHOLDER_MAP)" --regulatory-owner "$(INCIDENT_RESPONSE_REGULATORY_OWNER)" --output "$(INCIDENT_RESPONSE_OUTPUT)" --overrides "$(INCIDENT_RESPONSE_VALUES)" $(if $(filter true,$(INCIDENT_RESPONSE_INCIDENT_DRILL)),--incident-drill,) $(if $(filter true,$(INCIDENT_RESPONSE_POST_INCIDENT_REVIEW)),--post-incident-review,) $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
+change-management-plan: ## Generate a public-safe change management and maintenance-window plan.
+	mkdir -p reports
+	$(PYTHON) scripts/change_management_plan.py --config "$(CHANGE_MANAGEMENT_CONFIG)" --profile "$(CHANGE_MANAGEMENT_PROFILE)" --change-ticket "$(CHANGE_MANAGEMENT_TICKET)" --approval-evidence "$(CHANGE_MANAGEMENT_APPROVAL_EVIDENCE)" --risk-assessment "$(CHANGE_MANAGEMENT_RISK_ASSESSMENT)" --impact-assessment "$(CHANGE_MANAGEMENT_IMPACT_ASSESSMENT)" --maintenance-window "$(CHANGE_MANAGEMENT_WINDOW)" --rollback-plan "$(CHANGE_MANAGEMENT_ROLLBACK_PLAN)" --smoke-test-plan "$(CHANGE_MANAGEMENT_SMOKE_TEST_PLAN)" --output "$(CHANGE_MANAGEMENT_OUTPUT)" --overrides "$(CHANGE_MANAGEMENT_VALUES)" $(if $(filter true,$(CHANGE_MANAGEMENT_FREEZE_CHECK)),--freeze-check,) $(if $(filter true,$(CHANGE_MANAGEMENT_STAKEHOLDER_NOTICE)),--stakeholder-notice,) $(if $(filter true,$(CHANGE_MANAGEMENT_POST_CHANGE_REVIEW)),--post-change-review,) $(if $(filter true,$(CHANGE_MANAGEMENT_REGULATORY_EVIDENCE)),--regulatory-evidence,) $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
+disaster-recovery-plan: ## Generate a public-safe disaster recovery and business continuity plan.
+	mkdir -p reports
+	$(PYTHON) scripts/disaster_recovery_plan.py --config "$(DISASTER_RECOVERY_CONFIG)" --profile "$(DISASTER_RECOVERY_PROFILE)" --rto-rpo "$(DISASTER_RECOVERY_RTO_RPO)" --dependency-map "$(DISASTER_RECOVERY_DEPENDENCY_MAP)" --criticality-map "$(DISASTER_RECOVERY_CRITICALITY_MAP)" --backup-replication "$(DISASTER_RECOVERY_BACKUP_REPLICATION)" --data-replication "$(DISASTER_RECOVERY_DATA_REPLICATION)" --cross-zone-evidence "$(DISASTER_RECOVERY_CROSS_ZONE_EVIDENCE)" --database-restore-evidence "$(DISASTER_RECOVERY_DATABASE_RESTORE_EVIDENCE)" --etcd-restore-evidence "$(DISASTER_RECOVERY_ETCD_RESTORE_EVIDENCE)" --namespace-restore-evidence "$(DISASTER_RECOVERY_NAMESPACE_RESTORE_EVIDENCE)" --application-smoke-test "$(DISASTER_RECOVERY_APPLICATION_SMOKE_TEST)" --runbook-source "$(DISASTER_RECOVERY_RUNBOOK_SOURCE)" --comms-plan "$(DISASTER_RECOVERY_COMMS_PLAN)" --manual-workaround "$(DISASTER_RECOVERY_MANUAL_WORKAROUND)" --supplier-contacts "$(DISASTER_RECOVERY_SUPPLIER_CONTACTS)" --drill-evidence "$(DISASTER_RECOVERY_DRILL_EVIDENCE)" --rto-evidence "$(DISASTER_RECOVERY_RTO_EVIDENCE)" --output "$(DISASTER_RECOVERY_OUTPUT)" --overrides "$(DISASTER_RECOVERY_VALUES)" $(if $(filter true,$(DISASTER_RECOVERY_POST_DRILL_REVIEW)),--post-drill-review,) $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
 lint: ## Run local static checks that mirror the CI static gate.
 	yamllint .
 	shellcheck $$(git ls-files '*.sh')
 
 configure: ## Update selected runtime defaults in Helm values.
 	$(PYTHON) scripts/configure.py --engine $(ENGINE) --ingress-controller $(INGRESS) --webserver $(WEB) --database $(DB) --observability $(OBS) --values $(VALUES)
+
+backup-plan: python-deps ## Generate a public-safe backup/restore plan without enabling or applying backups.
+	mkdir -p reports
+	$(PYTHON) scripts/backup_plan.py --values "$(VALUES)" --policy "$(BACKUP_POLICY)" --output "$(BACKUP_OUTPUT)"
+
+observability-plan: ## Generate a public-safe observability and SLO readiness plan.
+	mkdir -p reports
+	$(PYTHON) scripts/observability_plan.py --values "$(VALUES)" --observability-config "$(OBSERVABILITY_CONFIG)" --slo-config "$(SLO_CONFIG)" --profile "$(OBSERVABILITY_PLAN_PROFILE)" --output "$(OBSERVABILITY_PLAN_OUTPUT)"
+
+cluster-doctor: ## Diagnose RKE2 API/VIP/kubeconfig health and write a public-safe report.
+	mkdir -p reports
+	$(PYTHON) scripts/cluster_doctor.py --nodes "$(CLUSTER_DOCTOR_NODES)" --cluster-vip "$(CLUSTER_DOCTOR_CLUSTER_VIP)" --api-port "$(CLUSTER_DOCTOR_API_PORT)" --ssh-user "$(CLUSTER_DOCTOR_SSH_USER)" --ssh-key "$(CLUSTER_DOCTOR_SSH_KEY)" --kubeconfig "$(OPERATOR_KUBECONFIG)" --inventory "$(INVENTORY)" --environment "$(ENV)" --engine "$(ENGINE)" --output "$(CLUSTER_DOCTOR_OUTPUT)" $(if $(filter true,$(CLUSTER_DOCTOR_REPAIR)),--repair,) $(if $(filter true,$(CLUSTER_DOCTOR_REDACT)),--redact-sensitive,)
+
+cluster-repair: CLUSTER_DOCTOR_REPAIR = true
+cluster-repair: cluster-doctor ## Run cluster doctor and explicitly invoke guarded kubeconfig/RKE2 repair.
+
+lab-deploy-plan: ## Generate a public-safe lab capacity plan and first-wave values overlay.
+	mkdir -p reports
+	$(PYTHON) scripts/lab_deploy_plan.py --values "$(VALUES)" --capacity "$(LAB_CAPACITY_CONFIG)" --profile "$(LAB_DEPLOY_PROFILE)" --node-count "$(LAB_DEPLOY_NODE_COUNT)" --node-cpu "$(LAB_DEPLOY_NODE_CPU)" --node-memory "$(LAB_DEPLOY_NODE_MEMORY)" --utilization-limit "$(LAB_DEPLOY_UTILIZATION_LIMIT)" --max-pods "$(LAB_DEPLOY_MAX_PODS)" --max-databases "$(LAB_DEPLOY_MAX_DATABASES)" --batch-size "$(LAB_DEPLOY_BATCH_SIZE)" --output "$(LAB_DEPLOY_OUTPUT)" --overrides "$(LAB_DEPLOY_VALUES)"
+
+image-cache-plan: ## Generate a public-safe image cache, preload, and cleanup plan.
+	mkdir -p reports
+	$(PYTHON) scripts/image_cache_plan.py --config "$(IMAGE_CACHE_CONFIG)" --profile "$(IMAGE_CACHE_PROFILE)" --output "$(IMAGE_CACHE_OUTPUT)" --image-mode "$(MIGRATION_IMAGE_MODE)" --private-dir "$(MIGRATION_PRIVATE_DIR)" --image-output-dir "$(MIGRATION_IMAGE_OUTPUT_DIR)" --rke2-image-dir "$(MIGRATION_RKE2_IMAGE_DIR)" --rke2-nodes "$(MIGRATION_RKE2_NODES)" --registry "$(MIGRATION_REGISTRY)" --container-tool "$(MIGRATION_CONTAINER_TOOL)" --image-tag "$(MIGRATION_IMAGE_TAG)" --cleanup-operator-images "$(MIGRATION_CLEANUP_OPERATOR_IMAGES)" --prune-operator-cache "$(MIGRATION_PRUNE_OPERATOR_CACHE)" --rke2-import-images "$(MIGRATION_RKE2_IMPORT_IMAGES)" $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
+database-migration-plan: ## Generate a public-safe database dump/restore controller plan.
+	mkdir -p reports
+	$(PYTHON) scripts/database_migration_controller.py --config "$(DB_MIGRATION_CONFIG)" --values "$(VALUES)" --profile "$(DB_MIGRATION_PROFILE)" --output "$(DB_MIGRATION_OUTPUT)" --namespace "$(MIGRATION_NAMESPACE)" --dump-dir "$(MIGRATION_DUMP_DIR)" --db-targets "$(MIGRATION_DB_TARGETS)" --postgres-client-image "$(MIGRATION_POSTGRES_CLIENT_IMAGE)" --skip-unavailable-databases "$(MIGRATION_SKIP_UNAVAILABLE_DATABASES)" --allow-secret-material "$(MIGRATION_ALLOW_SECRET_MATERIAL)" $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
+edge-migration-plan: ## Generate a public-safe ingress and edge migration plan.
+	mkdir -p reports
+	$(PYTHON) scripts/edge_migration_plan.py --config "$(EDGE_MIGRATION_CONFIG)" --values "$(VALUES)" --profile "$(EDGE_MIGRATION_PROFILE)" --output "$(EDGE_MIGRATION_OUTPUT)" --namespace "$(MIGRATION_NAMESPACE)" --ingress-class "$(INGRESS)" --webserver "$(WEB)" --ingress-host "$(MIGRATION_INGRESS_HOST)" --tls-cert-file "$(MIGRATION_TLS_CERT_FILE)" --tls-key-file "$(MIGRATION_TLS_KEY_FILE)" --allowed-cidrs "$(DEPLOY_ALLOWED_CIDRS)" $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
+environment-profile-plan: ## Generate a public-safe environment profile plan and Helm values overlay.
+	mkdir -p reports
+	$(PYTHON) scripts/environment_profile_plan.py --config "$(ENV_PROFILE_CONFIG)" --topologies config/deployment-topologies.yaml --profile "$(ENV_PROFILE)" --output "$(ENV_PROFILE_OUTPUT)" --overrides "$(ENV_PROFILE_VALUES)" $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
 
 import-check: python-deps ## Check an external Compose project before importing or migrating it.
 	@if [ -z "$(PROJECT_PATH)" ]; then \
@@ -225,12 +507,22 @@ import-plan: MIGRATION_STAGE = prepare
 import-plan: ## Generate private import diagnostics and action plan without applying changes.
 	$(MAKE) import-migrate MIGRATION_STAGE=prepare MIGRATION_EXECUTE=false
 
+import-preflight: MIGRATION_STAGE = preflight
+import-preflight: MIGRATION_EXECUTE = true
+import-preflight: ## Run cluster health preflight before import actions.
+	@if [ -z "$(PROJECT_PATH)" ]; then \
+		echo "Set PROJECT_PATH=/path/to/compose-project, for example: make import-preflight PROJECT_PATH=/path/to/compose-project"; \
+		exit 2; \
+	fi
+	$(MAKE) operator-kubeconfig
+	$(MAKE) import-migrate MIGRATION_STAGE=preflight MIGRATION_EXECUTE=true
+
 import-migrate: python-deps ## Generate or execute guarded migration automation for an external Compose project.
 	@if [ -z "$(PROJECT_PATH)" ]; then \
 		echo "Set PROJECT_PATH=/path/to/compose-project, for example: make import-migrate PROJECT_PATH=/path/to/compose-project"; \
 		exit 2; \
 	fi
-	$(PYTHON) scripts/migrate_project.py --project-path "$(PROJECT_PATH)" --values "$(VALUES)" --output "$(MIGRATION_OUTPUT)" --private-dir "$(MIGRATION_PRIVATE_DIR)" --namespace "$(MIGRATION_NAMESPACE)" --kubeconfig "$(MIGRATION_KUBECONFIG)" --ingress-host "$(MIGRATION_INGRESS_HOST)" --tls-cert-file "$(MIGRATION_TLS_CERT_FILE)" --tls-key-file "$(MIGRATION_TLS_KEY_FILE)" --ingress-controller "$(INGRESS)" --webserver "$(WEB)" --database "$(DB)" --image-mode "$(MIGRATION_IMAGE_MODE)" --image-output-dir "$(MIGRATION_IMAGE_OUTPUT_DIR)" --rke2-nodes "$(MIGRATION_RKE2_NODES)" --rke2-image-dir "$(MIGRATION_RKE2_IMAGE_DIR)" --ssh-user "$(MIGRATION_SSH_USER)" --ssh-key "$(MIGRATION_SSH_KEY)" --become-password-file "$(MIGRATION_BECOME_PASSWORD_FILE)" --container-tool "$(MIGRATION_CONTAINER_TOOL)" --postgres-client-image "$(MIGRATION_POSTGRES_CLIENT_IMAGE)" --registry "$(MIGRATION_REGISTRY)" --image-tag "$(MIGRATION_IMAGE_TAG)" --dump-dir "$(MIGRATION_DUMP_DIR)" --db-targets "$(MIGRATION_DB_TARGETS)" --stage "$(MIGRATION_STAGE)" $(if $(filter true,$(MIGRATION_AUTO_PREPARE)),--auto-prepare,) $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,) $(if $(filter true,$(MIGRATION_EXECUTE)),--execute,) $(if $(filter true,$(MIGRATION_ALLOW_SECRET_MATERIAL)),--allow-secret-material,) $(if $(filter false,$(MIGRATION_RKE2_IMPORT_IMAGES)),--no-rke2-import-images,--rke2-import-images) $(if $(filter false,$(MIGRATION_CLEANUP_OPERATOR_IMAGES)),--no-cleanup-operator-images,--cleanup-operator-images) $(if $(filter false,$(MIGRATION_PRUNE_OPERATOR_CACHE)),--no-prune-operator-cache,--prune-operator-cache) $(if $(filter false,$(MIGRATION_SKIP_DOCKER_SOCKET_SERVICES)),--include-docker-socket-services,--skip-docker-socket-services) $(if $(filter false,$(MIGRATION_SKIP_UNAVAILABLE_DATABASES)),--strict-database-migration,--skip-unavailable-databases)
+	$(PYTHON) scripts/migrate_project.py --project-path "$(PROJECT_PATH)" --values "$(VALUES)" --output "$(MIGRATION_OUTPUT)" --private-dir "$(MIGRATION_PRIVATE_DIR)" --namespace "$(MIGRATION_NAMESPACE)" --kubeconfig "$(MIGRATION_KUBECONFIG)" --ingress-host "$(MIGRATION_INGRESS_HOST)" --tls-cert-file "$(MIGRATION_TLS_CERT_FILE)" --tls-key-file "$(MIGRATION_TLS_KEY_FILE)" --ingress-controller "$(INGRESS)" --webserver "$(WEB)" --database "$(DB)" --profile "$(MIGRATION_PROFILE)" --lab-workload-cpu-request "$(MIGRATION_LAB_WORKLOAD_CPU_REQUEST)" --lab-workload-memory-request "$(MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST)" --lab-workload-cpu-limit "$(MIGRATION_LAB_WORKLOAD_CPU_LIMIT)" --lab-workload-memory-limit "$(MIGRATION_LAB_WORKLOAD_MEMORY_LIMIT)" --preflight-min-node-memory "$(MIGRATION_PREFLIGHT_MIN_NODE_MEMORY)" --preflight-min-node-disk-free "$(MIGRATION_PREFLIGHT_MIN_NODE_DISK_FREE)" --preflight-max-imported-workloads "$(MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS)" --preflight-capacity-utilization-limit "$(MIGRATION_PREFLIGHT_CAPACITY_UTILIZATION_LIMIT)" --batch-size "$(MIGRATION_BATCH_SIZE)" --import-batch "$(MIGRATION_IMPORT_BATCH)" --state-file "$(MIGRATION_STATE_FILE)" --image-mode "$(MIGRATION_IMAGE_MODE)" --image-output-dir "$(MIGRATION_IMAGE_OUTPUT_DIR)" --rke2-nodes "$(MIGRATION_RKE2_NODES)" --rke2-image-dir "$(MIGRATION_RKE2_IMAGE_DIR)" --ssh-user "$(MIGRATION_SSH_USER)" --ssh-key "$(MIGRATION_SSH_KEY)" --become-password-file "$(MIGRATION_BECOME_PASSWORD_FILE)" --container-tool "$(MIGRATION_CONTAINER_TOOL)" --postgres-client-image "$(MIGRATION_POSTGRES_CLIENT_IMAGE)" --registry "$(MIGRATION_REGISTRY)" --image-tag "$(MIGRATION_IMAGE_TAG)" --dump-dir "$(MIGRATION_DUMP_DIR)" --db-targets "$(MIGRATION_DB_TARGETS)" --secret-provider "$(MIGRATION_SECRET_PROVIDER)" --secret-remote-prefix "$(MIGRATION_SECRET_REMOTE_PREFIX)" --secret-store-name "$(MIGRATION_SECRET_STORE_NAME)" --secret-store-kind "$(MIGRATION_SECRET_STORE_KIND)" --secret-refresh-interval "$(MIGRATION_SECRET_REFRESH_INTERVAL)" --stage "$(MIGRATION_STAGE)" $(if $(filter true,$(MIGRATION_PREFLIGHT_REQUIRE_INGRESS_ENDPOINT)),--preflight-require-ingress-endpoint,--no-preflight-require-ingress-endpoint) $(if $(filter false,$(MIGRATION_RESUME)),--no-resume,--resume) $(if $(filter true,$(MIGRATION_FORCE_RERUN)),--force-rerun,) $(if $(filter true,$(MIGRATION_AUTO_PREPARE)),--auto-prepare,) $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,) $(if $(filter true,$(MIGRATION_EXECUTE)),--execute,) $(if $(filter true,$(MIGRATION_ALLOW_SECRET_MATERIAL)),--allow-secret-material,) $(if $(filter false,$(MIGRATION_RKE2_IMPORT_IMAGES)),--no-rke2-import-images,--rke2-import-images) $(if $(filter false,$(MIGRATION_CLEANUP_OPERATOR_IMAGES)),--no-cleanup-operator-images,--cleanup-operator-images) $(if $(filter false,$(MIGRATION_PRUNE_OPERATOR_CACHE)),--no-prune-operator-cache,--prune-operator-cache) $(if $(filter false,$(MIGRATION_SKIP_DOCKER_SOCKET_SERVICES)),--include-docker-socket-services,--skip-docker-socket-services) $(if $(filter false,$(MIGRATION_SKIP_UNAVAILABLE_DATABASES)),--strict-database-migration,--skip-unavailable-databases)
 
 import-auto: MIGRATION_AUTO_REPAIR_CLUSTER = true
 import-auto: operator-kubeconfig ## Run the full import migration workflow with preparation, execution, and validation.
@@ -309,7 +601,7 @@ wait-operator-crds: ## Wait until CRDs required by the default platform chart ex
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl -n cnpg-system rollout status deployment/cloudnative-pg --timeout=$(OPERATOR_CRD_TIMEOUT)
 
 install-operators: install-helmfile operator-kubeconfig ensure-storageclass ## Install optional operators/charts needed for HA data and observability profiles.
-	KUBECONFIG=$(OPERATOR_KUBECONFIG) OPERATOR_KUBECONFIG=$(OPERATOR_KUBECONFIG) HELMFILE=$(HELMFILE) HELMFILE_CONFIG=$(HELMFILE_CONFIG) HELMFILE_SYNC_RETRIES=$(HELMFILE_SYNC_RETRIES) HELMFILE_SYNC_RETRY_DELAY=$(HELMFILE_SYNC_RETRY_DELAY) KUBECONFIG_SCRIPT=$(KUBECONFIG_SCRIPT) ENV=$(ENV) ENGINE=$(ENGINE) INVENTORY=$(INVENTORY) ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) ANSIBLE_PLAYBOOK=$(ANSIBLE_PLAYBOOK) ANSIBLE_ARGS="$(ANSIBLE_ARGS)" MIGRATION_RKE2_NODES="$(MIGRATION_RKE2_NODES)" MIGRATION_SSH_USER="$(MIGRATION_SSH_USER)" MIGRATION_SSH_KEY="$(MIGRATION_SSH_KEY)" MIGRATION_BECOME_PASSWORD_FILE="$(MIGRATION_BECOME_PASSWORD_FILE)" MIGRATION_BECOME_PASSWORD_PROMPT="$(MIGRATION_BECOME_PASSWORD_PROMPT)" MIGRATION_CLUSTER_VIP="$(if $(MIGRATION_CLUSTER_VIP),$(MIGRATION_CLUSTER_VIP),$(DEPLOY_CLUSTER_VIP))" MIGRATION_KUBERNETES_API_VIP_PORT="$(MIGRATION_KUBERNETES_API_VIP_PORT)" MIGRATION_CLUSTER_DOMAIN="$(MIGRATION_CLUSTER_DOMAIN)" MIGRATION_RKE2_VERSION="$(MIGRATION_RKE2_VERSION)" MIGRATION_KEEPALIVED_AUTH_PASS="$(MIGRATION_KEEPALIVED_AUTH_PASS)" MIGRATION_KEEPALIVED_INTERFACE="$(MIGRATION_KEEPALIVED_INTERFACE)" INSTALL_ECK="$(DEPLOY_ENABLE_ECK)" INSTALL_PROMETHEUS="$(DEPLOY_ENABLE_PROMETHEUS)" GRAFANA_ENABLED="$(DEPLOY_ENABLE_GRAFANA)" INSTALL_OPENTELEMETRY="$(DEPLOY_ENABLE_OPENTELEMETRY)" INSTALL_LOKI="$(DEPLOY_ENABLE_LOKI)" INSTALL_CLICKHOUSE="$(DEPLOY_ENABLE_CLICKHOUSE)" GRAFANA_SERVICE_TYPE="$(DEPLOY_OBSERVABILITY_SERVICE_TYPE)" GRAFANA_NODE_PORT="$(DEPLOY_GRAFANA_NODE_PORT)" LOKI_SERVICE_TYPE="$(DEPLOY_OBSERVABILITY_SERVICE_TYPE)" LOKI_NODE_PORT="$(DEPLOY_LOKI_NODE_PORT)" CLICKHOUSE_SERVICE_TYPE="$(DEPLOY_OBSERVABILITY_SERVICE_TYPE)" CLICKHOUSE_HTTP_NODE_PORT="$(DEPLOY_CLICKHOUSE_HTTP_NODE_PORT)" CLICKHOUSE_TCP_NODE_PORT="$(DEPLOY_CLICKHOUSE_TCP_NODE_PORT)" bash $(HELMFILE_SYNC_SCRIPT)
+	KUBECONFIG=$(OPERATOR_KUBECONFIG) OPERATOR_KUBECONFIG=$(OPERATOR_KUBECONFIG) HELMFILE=$(HELMFILE) HELMFILE_CONFIG=$(HELMFILE_CONFIG) HELMFILE_SYNC_RETRIES=$(HELMFILE_SYNC_RETRIES) HELMFILE_SYNC_RETRY_DELAY=$(HELMFILE_SYNC_RETRY_DELAY) KUBECONFIG_SCRIPT=$(KUBECONFIG_SCRIPT) ENV=$(ENV) ENGINE=$(ENGINE) INVENTORY=$(INVENTORY) ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) ANSIBLE_PLAYBOOK=$(ANSIBLE_PLAYBOOK) ANSIBLE_ARGS="$(ANSIBLE_ARGS)" MIGRATION_RKE2_NODES="$(MIGRATION_RKE2_NODES)" MIGRATION_SSH_USER="$(MIGRATION_SSH_USER)" MIGRATION_SSH_KEY="$(MIGRATION_SSH_KEY)" MIGRATION_BECOME_PASSWORD_FILE="$(MIGRATION_BECOME_PASSWORD_FILE)" MIGRATION_BECOME_PASSWORD_PROMPT="$(MIGRATION_BECOME_PASSWORD_PROMPT)" MIGRATION_CLUSTER_VIP="$(if $(MIGRATION_CLUSTER_VIP),$(MIGRATION_CLUSTER_VIP),$(DEPLOY_CLUSTER_VIP))" MIGRATION_KUBERNETES_API_VIP_PORT="$(MIGRATION_KUBERNETES_API_VIP_PORT)" MIGRATION_CLUSTER_DOMAIN="$(MIGRATION_CLUSTER_DOMAIN)" MIGRATION_RKE2_VERSION="$(MIGRATION_RKE2_VERSION)" MIGRATION_KEEPALIVED_AUTH_PASS="$(MIGRATION_KEEPALIVED_AUTH_PASS)" MIGRATION_KEEPALIVED_INTERFACE="$(MIGRATION_KEEPALIVED_INTERFACE)" INSTALL_ECK="$(DEPLOY_ENABLE_ECK)" INSTALL_PROMETHEUS="$(DEPLOY_ENABLE_PROMETHEUS)" GRAFANA_ENABLED="$(DEPLOY_ENABLE_GRAFANA)" INSTALL_OPENTELEMETRY="$(DEPLOY_ENABLE_OPENTELEMETRY)" INSTALL_LOKI="$(DEPLOY_ENABLE_LOKI)" INSTALL_CLICKHOUSE="$(DEPLOY_ENABLE_CLICKHOUSE)" INSTALL_VELERO="$(DEPLOY_ENABLE_VELERO)" INSTALL_MINIO="$(DEPLOY_ENABLE_MINIO)" INSTALL_RABBITMQ="$(DEPLOY_ENABLE_RABBITMQ)" INSTALL_KEYCLOAK="$(DEPLOY_ENABLE_KEYCLOAK)" INSTALL_EMQX="$(DEPLOY_ENABLE_EMQX)" INSTALL_NATS="$(DEPLOY_ENABLE_NATS)" INSTALL_VAULT="$(DEPLOY_ENABLE_VAULT)" INSTALL_KYVERNO="$(DEPLOY_ENABLE_KYVERNO)" INSTALL_TEMPORAL="$(DEPLOY_ENABLE_TEMPORAL)" INSTALL_ARGO_WORKFLOWS="$(DEPLOY_ENABLE_ARGO_WORKFLOWS)" INSTALL_LINKERD="$(DEPLOY_ENABLE_LINKERD)" INSTALL_ISTIO="$(DEPLOY_ENABLE_ISTIO)" VELERO_PROVIDER="$(VELERO_PROVIDER)" VELERO_BUCKET="$(VELERO_BUCKET)" VELERO_PREFIX="$(VELERO_PREFIX)" VELERO_REGION="$(VELERO_REGION)" VELERO_S3_URL="$(VELERO_S3_URL)" VELERO_S3_FORCE_PATH_STYLE="$(VELERO_S3_FORCE_PATH_STYLE)" VELERO_USE_SECRET="$(VELERO_USE_SECRET)" VELERO_EXISTING_SECRET="$(VELERO_EXISTING_SECRET)" VELERO_SNAPSHOTS_ENABLED="$(VELERO_SNAPSHOTS_ENABLED)" VELERO_NODE_AGENT_ENABLED="$(VELERO_NODE_AGENT_ENABLED)" GRAFANA_SERVICE_TYPE="$(DEPLOY_OBSERVABILITY_SERVICE_TYPE)" GRAFANA_NODE_PORT="$(DEPLOY_GRAFANA_NODE_PORT)" LOKI_SERVICE_TYPE="$(DEPLOY_OBSERVABILITY_SERVICE_TYPE)" LOKI_NODE_PORT="$(DEPLOY_LOKI_NODE_PORT)" CLICKHOUSE_SERVICE_TYPE="$(DEPLOY_OBSERVABILITY_SERVICE_TYPE)" CLICKHOUSE_HTTP_NODE_PORT="$(DEPLOY_CLICKHOUSE_HTTP_NODE_PORT)" CLICKHOUSE_TCP_NODE_PORT="$(DEPLOY_CLICKHOUSE_TCP_NODE_PORT)" bash $(HELMFILE_SYNC_SCRIPT)
 	$(MAKE) wait-operator-crds OPERATOR_CRD_TIMEOUT=$(OPERATOR_CRD_TIMEOUT) OPERATOR_KUBECONFIG=$(OPERATOR_KUBECONFIG) DEPLOY_ENABLE_ECK=$(DEPLOY_ENABLE_ECK)
 
 ensure-namespace: ## Create and label the target namespace before deploying the platform chart.
@@ -337,6 +629,10 @@ package-chart: install-helm ## Package the Helm chart into dist/.
 release-evidence: package-chart ## Generate rendered manifest, SPDX SBOM, and checksums for a release.
 	$(HELM) template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f $(VALUES) > dist/rendered.yaml
 	$(PYTHON) scripts/release/generate_sbom.py --chart helm/urban-platform-infra --dist dist --rendered dist/rendered.yaml --sbom dist/urban-platform-infra.spdx.json --checksums dist/SHA256SUMS
+	$(PYTHON) scripts/release/verify_release_evidence.py --chart helm/urban-platform-infra --policy config/supply-chain-policy.yaml --tag "$(RELEASE_TAG)" --report "$(RELEASE_VERIFY_REPORT)"
+
+verify-release-evidence: ## Verify existing release evidence without rebuilding artifacts.
+	$(PYTHON) scripts/release/verify_release_evidence.py --chart helm/urban-platform-infra --policy config/supply-chain-policy.yaml --tag "$(RELEASE_TAG)" --report "$(RELEASE_VERIFY_REPORT)"
 
 deploy: install-operators ensure-namespace recover-helm-release ## Deploy/upgrade the HA application platform.
 	@if [ "$(DEPLOY_CONFIGURE_EDGE_PORTS)" = "true" ]; then \

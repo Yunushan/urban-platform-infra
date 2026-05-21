@@ -1,0 +1,183 @@
+defaultProfile: disabled
+enabledByDefault: false
+profiles:
+  disabled:
+    description: Keep committed chart defaults and do not configure change-management automation.
+    enabled: false
+    mode: baseline
+    approvalModel: none
+    changeControl:
+      enabled: false
+      requireChangeTicket: false
+      requireApprovals: false
+      requireRiskAssessment: false
+      requireImpactAssessment: false
+    maintenanceWindow:
+      enabled: false
+      requireWindow: false
+      requireFreezeCheck: false
+      requireStakeholderNotice: false
+    rollout:
+      enabled: false
+      requireRollbackPlan: false
+      requireSmokeTests: false
+      requirePostChangeReview: false
+    evidence:
+      enabled: false
+      requireChangeRecord: false
+      requireDeploymentEvidence: false
+      requireApprovalEvidence: false
+  lab-change:
+    description: Public-safe lab change readiness for repeatable deploy and rollback checks.
+    enabled: false
+    mode: lab
+    approvalModel: operator-self-review
+    changeControl:
+      enabled: false
+      requireChangeTicket: false
+      requireApprovals: false
+      requireRiskAssessment: false
+      requireImpactAssessment: false
+    maintenanceWindow:
+      enabled: false
+      requireWindow: false
+      requireFreezeCheck: false
+      requireStakeholderNotice: false
+    rollout:
+      enabled: false
+      requireRollbackPlan: true
+      requireSmokeTests: true
+      requirePostChangeReview: false
+    evidence:
+      enabled: false
+      requireChangeRecord: false
+      requireDeploymentEvidence: true
+      requireApprovalEvidence: false
+  staging-approval:
+    description: Staging change review for tickets, impact, maintenance windows, smoke tests, and review.
+    enabled: false
+    mode: approval
+    requireChangeTicket: true
+    requireRiskAssessment: true
+    requireImpactAssessment: true
+    requireMaintenanceWindow: true
+    requireRollbackPlan: true
+    approvalModel: peer-review
+    changeControl:
+      enabled: false
+      requireChangeTicket: true
+      requireApprovals: true
+      requireRiskAssessment: true
+      requireImpactAssessment: true
+    maintenanceWindow:
+      enabled: false
+      requireWindow: true
+      requireFreezeCheck: true
+      requireStakeholderNotice: false
+    rollout:
+      enabled: false
+      requireRollbackPlan: true
+      requireSmokeTests: true
+      requirePostChangeReview: true
+    evidence:
+      enabled: false
+      requireChangeRecord: true
+      requireDeploymentEvidence: true
+      requireApprovalEvidence: true
+  production-cab:
+    description: Production CAB-style readiness for approved windows, freeze checks, rollout evidence, and rollback ownership.
+    enabled: false
+    mode: cab
+    requireChangeTicket: true
+    requireApprovals: true
+    requireRiskAssessment: true
+    requireImpactAssessment: true
+    requireMaintenanceWindow: true
+    requireFreezeCheck: true
+    requireStakeholderNotice: true
+    requireRollbackPlan: true
+    requireSmokeTests: true
+    requirePostChangeReview: true
+    approvalModel: change-advisory-board
+    changeControl:
+      enabled: false
+      requireChangeTicket: true
+      requireApprovals: true
+      requireRiskAssessment: true
+      requireImpactAssessment: true
+    maintenanceWindow:
+      enabled: false
+      requireWindow: true
+      requireFreezeCheck: true
+      requireStakeholderNotice: true
+    rollout:
+      enabled: false
+      requireRollbackPlan: true
+      requireSmokeTests: true
+      requirePostChangeReview: true
+    evidence:
+      enabled: false
+      requireChangeRecord: true
+      requireDeploymentEvidence: true
+      requireApprovalEvidence: true
+  regulated-change:
+    description: Regulated change readiness with approvals, evidence, legal hold, and external audit ownership.
+    enabled: false
+    mode: regulated
+    requireChangeTicket: true
+    requireApprovals: true
+    requireRiskAssessment: true
+    requireImpactAssessment: true
+    requireMaintenanceWindow: true
+    requireFreezeCheck: true
+    requireStakeholderNotice: true
+    requireRollbackPlan: true
+    requireSmokeTests: true
+    requirePostChangeReview: true
+    requireRegulatoryEvidence: true
+    approvalModel: regulated-cab
+    changeControl:
+      enabled: false
+      requireChangeTicket: true
+      requireApprovals: true
+      requireRiskAssessment: true
+      requireImpactAssessment: true
+    maintenanceWindow:
+      enabled: false
+      requireWindow: true
+      requireFreezeCheck: true
+      requireStakeholderNotice: true
+    rollout:
+      enabled: false
+      requireRollbackPlan: true
+      requireSmokeTests: true
+      requirePostChangeReview: true
+    evidence:
+      enabled: false
+      requireChangeRecord: true
+      requireDeploymentEvidence: true
+      requireApprovalEvidence: true
+controller:
+  report: reports/change-management-plan.md
+  overrides: reports/change-management-values.yaml
+supportedSystems:
+  - none
+  - jira
+  - gitlab-issues
+  - github-issues
+  - servicenow
+  - freshservice
+  - opsgenie
+requiredChecks:
+  - change ticket or release record reviewed
+  - risk and impact assessment reviewed
+  - maintenance window and freeze calendar reviewed
+  - rollback and smoke-test plan reviewed
+  - approval evidence reviewed before production use
+  - post-change review owner identified
+guardrails:
+  - keep change management automation disabled by default in committed values
+  - do not commit ticket URLs, approver names, calendar details, customer impact notes, or maintenance-window specifics
+  - do not open, update, approve, or close change tickets from public-safe planning commands
+  - store private change evidence only in approved change-management or evidence systems
+  - keep production CAB and regulated approval workflows owned by private overlays and approved integrations

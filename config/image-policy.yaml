@@ -7,6 +7,21 @@ policy:
     - latest-pg18
   requireDigestsForProduction: true
   defaultApplicationTag: 0.1.0
+  imagePromotion:
+    planGenerator: scripts/images/promotion_plan.py
+    report: reports/image-promotion-plan.md
+    controllerConfig: config/registry-promotion.yaml
+    controllerGenerator: scripts/images/registry_promotion_controller.py
+    controllerReport: reports/registry-promotion-controller.md
+    controllerOverrides: reports/registry-promotion-values.yaml
+    defaultControllerProfile: disabled
+    requirePrivateRegistry: true
+    requireDigestPins: true
+    requireVulnerabilityScan: true
+    requireSbom: true
+    requireSignatureOrAttestation: true
+    requirePromotionRecord: true
+    publicSafeReport: true
   approvedRuntimeImages:
     - repository: nginxinc/nginx-unprivileged
       tag: '1.31.0'

@@ -30,18 +30,82 @@ REQUIRED = [
     'helm/urban-platform-infra/templates/databases-cnpg-imagecatalogs.yaml',
     'config/services.catalog.yaml', 'config/cluster-profiles.yaml',
     'config/deployment-topologies.yaml', 'config/secrets.contract.yaml',
+    'config/secret-provider-adapters.yaml',
+    'config/storage-tiers.yaml',
+    'config/backup-policy.yaml',
+    'config/platform-capabilities.yaml',
+    'config/import-profiles.yaml',
+    'config/lab-capacity.yaml',
+    'config/image-cache.yaml',
+    'config/registry-promotion.yaml',
+    'config/runtime-hardening.yaml',
+    'config/gitops-delivery.yaml',
+    'config/progressive-delivery.yaml',
+    'config/scaling-policy.yaml',
+    'config/network-connectivity.yaml',
+    'config/access-governance.yaml',
+    'config/compliance-evidence.yaml',
+    'config/incident-response.yaml',
+    'config/change-management.yaml',
+    'config/disaster-recovery.yaml',
+    'config/database-migration.yaml',
+    'config/edge-migration.yaml',
+    'config/environment-profiles.yaml',
     'config/supply-chain-policy.yaml', 'config/image-policy.yaml', 'config/slo.yaml',
-    'scripts/images/validate-images.py', 'scripts/release/generate_sbom.py',
+    'scripts/images/validate-images.py', 'scripts/images/promotion_plan.py',
+    'scripts/images/registry_promotion_controller.py',
+    'scripts/runtime_hardening_plan.py',
+    'scripts/gitops_delivery_plan.py',
+    'scripts/progressive_delivery_plan.py',
+    'scripts/scaling_policy_plan.py',
+    'scripts/network_connectivity_plan.py',
+    'scripts/access_governance_plan.py',
+    'scripts/compliance_evidence_plan.py',
+    'scripts/incident_response_plan.py',
+    'scripts/change_management_plan.py',
+    'scripts/disaster_recovery_plan.py',
+    'scripts/release/generate_sbom.py',
+    'scripts/release/verify_release_evidence.py',
+    'scripts/backup_plan.py',
+    'scripts/observability_plan.py',
+    'scripts/cluster_doctor.py',
+    'scripts/lab_deploy_plan.py',
+    'scripts/image_cache_plan.py',
+    'scripts/database_migration_controller.py',
+    'scripts/edge_migration_plan.py',
+    'scripts/environment_profile_plan.py',
     'scripts/import_project.py',
     'scripts/migrate_project.py',
     'scripts/tools/install-helm.sh', 'scripts/tools/install-helmfile.sh',
     'scripts/tools/helmfile-sync-retry.sh',
     'scripts/tools/install-local-path-storage.sh', 'scripts/tools/recover-helm-release.sh',
     'scripts/tools/ensure-kubeconfig.sh',
-    'tests/policy/basic_policy.py', 'docs/bootstrap-safety.md', 'docs/secrets-management.md',
+    'tests/policy/basic_policy.py', 'docs/hld.md', 'docs/lld.md',
+    'docs/bootstrap-safety.md', 'docs/secrets-management.md',
+    'docs/secret-provider-adapters.md',
     'docs/supply-chain.md', 'docs/image-governance.md', 'docs/observability-slo.md',
-    'docs/deployment-topologies.md', 'docs/runbooks.md', 'docs/release-guide.md',
+    'docs/deployment-topologies.md', 'docs/storage-tiers.md',
+    'docs/runbooks.md', 'docs/release-guide.md',
     'docs/project-import.md',
+    'docs/cluster-doctor.md',
+    'docs/lab-capacity.md',
+    'docs/image-cache-preload.md',
+    'docs/registry-promotion-controller.md',
+    'docs/runtime-hardening-admission.md',
+    'docs/gitops-delivery.md',
+    'docs/progressive-delivery.md',
+    'docs/scaling-policy.md',
+    'docs/network-connectivity.md',
+    'docs/access-governance.md',
+    'docs/compliance-evidence.md',
+    'docs/incident-response.md',
+    'docs/change-management.md',
+    'docs/disaster-recovery.md',
+    'docs/database-migration-controller.md',
+    'docs/edge-migration.md',
+    'docs/environment-profiles.md',
+    'docs/backup-restore.md',
+    'docs/platform-capabilities.md',
     'helm/urban-platform-infra/topologies/single-node.yaml',
     'helm/urban-platform-infra/topologies/two-node-lab.yaml',
     'helm/urban-platform-infra/topologies/three-node-ha.yaml',
@@ -167,6 +231,218 @@ if values['webserver']['provider'] != 'nginx':
     errors.append('Default webserver must be nginx')
 if values.get('secretManagement', {}).get('enabled') is not False:
     errors.append('Secret management chart rendering must be disabled by default')
+secret_provider_adapters = values.get('secretManagement', {}).get('providerAdapters', {})
+for secret_provider_name in ['kubernetesDirect', 'externalSecrets', 'vault', 'sops', 'sealedSecrets']:
+    adapter_values = secret_provider_adapters.get(secret_provider_name, {})
+    if adapter_values.get('enabled') is not False:
+        errors.append(f'Secret provider adapter must be disabled by default: {secret_provider_name}')
+    if secret_provider_name != 'kubernetesDirect' and adapter_values.get('rendersPlainKubernetesSecrets') is not False:
+        errors.append(f'Secret provider adapter must not render plain Kubernetes Secrets: {secret_provider_name}')
+image_promotion_controller_values = values.get('imagePromotionController', {})
+if image_promotion_controller_values.get('enabled') is not False:
+    errors.append('Image promotion controller must be disabled by default')
+if image_promotion_controller_values.get('profile') != 'disabled':
+    errors.append('Image promotion controller profile must default to disabled')
+if image_promotion_controller_values.get('requireDigestPins') is not True:
+    errors.append('Image promotion controller must require digest pins in production intent')
+if image_promotion_controller_values.get('reports', {}).get('controller') != 'reports/registry-promotion-controller.md':
+    errors.append('Image promotion controller must point at the public-safe controller report')
+runtime_hardening_values = values.get('runtimeHardening', {})
+if runtime_hardening_values.get('enabled') is not False:
+    errors.append('Runtime hardening must be disabled by default')
+if runtime_hardening_values.get('profile') != 'disabled':
+    errors.append('Runtime hardening profile must default to disabled')
+if runtime_hardening_values.get('policyEngine') != 'none':
+    errors.append('Runtime hardening policy engine must default to none')
+if runtime_hardening_values.get('workloadSecurity', {}).get('requireReadOnlyRootFilesystem') is not False:
+    errors.append('Runtime hardening must not require read-only root filesystems by default')
+if runtime_hardening_values.get('reports', {}).get('plan') != 'reports/runtime-hardening-plan.md':
+    errors.append('Runtime hardening must point at the public-safe plan report')
+gitops_delivery_values = values.get('gitOpsDelivery', {})
+if gitops_delivery_values.get('enabled') is not False:
+    errors.append('GitOps delivery must be disabled by default')
+if gitops_delivery_values.get('profile') != 'operator-managed':
+    errors.append('GitOps delivery profile must default to operator-managed')
+if gitops_delivery_values.get('controller') != 'none':
+    errors.append('GitOps delivery controller must default to none')
+if gitops_delivery_values.get('driftDetection') != 'report-only':
+    errors.append('GitOps delivery drift detection must default to report-only')
+if gitops_delivery_values.get('prune') is not False:
+    errors.append('GitOps delivery pruning must be disabled by default')
+if gitops_delivery_values.get('reports', {}).get('plan') != 'reports/gitops-delivery-plan.md':
+    errors.append('GitOps delivery must point at the public-safe plan report')
+progressive_delivery_values = values.get('progressiveDelivery', {})
+if progressive_delivery_values.get('enabled') is not False:
+    errors.append('Progressive delivery must be disabled by default')
+if progressive_delivery_values.get('profile') != 'disabled':
+    errors.append('Progressive delivery profile must default to disabled')
+if progressive_delivery_values.get('strategy') != 'rolling-update':
+    errors.append('Progressive delivery strategy must default to rolling-update')
+if progressive_delivery_values.get('controller') != 'none':
+    errors.append('Progressive delivery controller must default to none')
+if progressive_delivery_values.get('analysis', {}).get('mode') != 'disabled':
+    errors.append('Progressive delivery analysis mode must default to disabled')
+if progressive_delivery_values.get('reports', {}).get('plan') != 'reports/progressive-delivery-plan.md':
+    errors.append('Progressive delivery must point at the public-safe plan report')
+scaling_policy_values = values.get('scalingPolicy', {})
+if scaling_policy_values.get('enabled') is not False:
+    errors.append('Scaling policy must be disabled by default')
+if scaling_policy_values.get('profile') != 'disabled':
+    errors.append('Scaling policy profile must default to disabled')
+if scaling_policy_values.get('mode') != 'disabled':
+    errors.append('Scaling policy mode must default to disabled')
+if scaling_policy_values.get('metricsSource') != 'none':
+    errors.append('Scaling policy metrics source must default to none')
+if scaling_policy_values.get('hpa', {}).get('enabled') is not False:
+    errors.append('Scaling policy HPA must be disabled by default')
+if scaling_policy_values.get('vpa', {}).get('enabled') is not False:
+    errors.append('Scaling policy VPA must be disabled by default')
+if scaling_policy_values.get('keda', {}).get('enabled') is not False:
+    errors.append('Scaling policy KEDA must be disabled by default')
+if scaling_policy_values.get('clusterAutoscaler', {}).get('enabled') is not False:
+    errors.append('Scaling policy cluster autoscaler must be disabled by default')
+if scaling_policy_values.get('reports', {}).get('plan') != 'reports/scaling-policy-plan.md':
+    errors.append('Scaling policy must point at the public-safe plan report')
+network_connectivity_values = values.get('networkConnectivity', {})
+if network_connectivity_values.get('enabled') is not False:
+    errors.append('Network connectivity must be disabled by default')
+if network_connectivity_values.get('profile') != 'disabled':
+    errors.append('Network connectivity profile must default to disabled')
+if network_connectivity_values.get('mode') != 'baseline':
+    errors.append('Network connectivity mode must default to baseline')
+if network_connectivity_values.get('ingressClassName') != 'traefik':
+    errors.append('Network connectivity ingress class must default to traefik')
+if network_connectivity_values.get('networkPolicy', {}).get('enabled') is not True:
+    errors.append('Network connectivity must preserve NetworkPolicy enabled intent by default')
+if network_connectivity_values.get('serviceMesh', {}).get('enabled') is not False:
+    errors.append('Network connectivity service mesh must be disabled by default')
+if network_connectivity_values.get('serviceMesh', {}).get('provider') != 'none':
+    errors.append('Network connectivity service mesh provider must default to none')
+if network_connectivity_values.get('egress', {}).get('requireExplicitCidrs') is not False:
+    errors.append('Network connectivity explicit CIDR requirement must be disabled by default')
+if network_connectivity_values.get('reports', {}).get('plan') != 'reports/network-connectivity-plan.md':
+    errors.append('Network connectivity must point at the public-safe plan report')
+access_governance_values = values.get('accessGovernance', {})
+if access_governance_values.get('enabled') is not False:
+    errors.append('Access governance must be disabled by default')
+if access_governance_values.get('profile') != 'disabled':
+    errors.append('Access governance profile must default to disabled')
+if access_governance_values.get('mode') != 'baseline':
+    errors.append('Access governance mode must default to baseline')
+if access_governance_values.get('rbac', {}).get('enabled') is not False:
+    errors.append('Access governance RBAC automation must be disabled by default')
+if access_governance_values.get('rbac', {}).get('serviceAccountTokenAutomount') is not False:
+    errors.append('Access governance service account token automount must default to false')
+if access_governance_values.get('identity', {}).get('enabled') is not False:
+    errors.append('Access governance identity automation must be disabled by default')
+if access_governance_values.get('identity', {}).get('provider') != 'none':
+    errors.append('Access governance identity provider must default to none')
+if access_governance_values.get('audit', {}).get('enabled') is not False:
+    errors.append('Access governance audit automation must be disabled by default')
+if access_governance_values.get('tenantIsolation', {}).get('enabled') is not False:
+    errors.append('Access governance tenant isolation must be disabled by default')
+if access_governance_values.get('reports', {}).get('plan') != 'reports/access-governance-plan.md':
+    errors.append('Access governance must point at the public-safe plan report')
+compliance_evidence_values = values.get('complianceEvidence', {})
+if compliance_evidence_values.get('enabled') is not False:
+    errors.append('Compliance evidence must be disabled by default')
+if compliance_evidence_values.get('profile') != 'disabled':
+    errors.append('Compliance evidence profile must default to disabled')
+if compliance_evidence_values.get('mode') != 'baseline':
+    errors.append('Compliance evidence mode must default to baseline')
+if compliance_evidence_values.get('evidence', {}).get('collectReports') is not False:
+    errors.append('Compliance evidence collection must be disabled by default')
+if compliance_evidence_values.get('evidence', {}).get('requirePrivateIndex') is not False:
+    errors.append('Compliance evidence private index requirement must default to false')
+if compliance_evidence_values.get('retention', {}).get('enabled') is not False:
+    errors.append('Compliance evidence retention must be disabled by default')
+if compliance_evidence_values.get('packaging', {}).get('enabled') is not False:
+    errors.append('Compliance evidence packaging must be disabled by default')
+if compliance_evidence_values.get('reports', {}).get('plan') != 'reports/compliance-evidence-plan.md':
+    errors.append('Compliance evidence must point at the public-safe plan report')
+incident_response_values = values.get('incidentResponse', {})
+if incident_response_values.get('enabled') is not False:
+    errors.append('Incident response must be disabled by default')
+if incident_response_values.get('profile') != 'disabled':
+    errors.append('Incident response profile must default to disabled')
+if incident_response_values.get('mode') != 'baseline':
+    errors.append('Incident response mode must default to baseline')
+if incident_response_values.get('severityModel') != 'none':
+    errors.append('Incident response severity model must default to none')
+if incident_response_values.get('alerting', {}).get('enabled') is not False:
+    errors.append('Incident response alerting automation must be disabled by default')
+if incident_response_values.get('alerting', {}).get('requirePaging') is not False:
+    errors.append('Incident response paging requirement must default to false')
+if incident_response_values.get('runbooks', {}).get('enabled') is not False:
+    errors.append('Incident response runbook automation must be disabled by default')
+if incident_response_values.get('communications', {}).get('enabled') is not False:
+    errors.append('Incident response communications automation must be disabled by default')
+if incident_response_values.get('drills', {}).get('enabled') is not False:
+    errors.append('Incident response drill automation must be disabled by default')
+if incident_response_values.get('reports', {}).get('plan') != 'reports/incident-response-plan.md':
+    errors.append('Incident response must point at the public-safe plan report')
+change_management_values = values.get('changeManagement', {})
+if change_management_values.get('enabled') is not False:
+    errors.append('Change management must be disabled by default')
+if change_management_values.get('profile') != 'disabled':
+    errors.append('Change management profile must default to disabled')
+if change_management_values.get('mode') != 'baseline':
+    errors.append('Change management mode must default to baseline')
+if change_management_values.get('approvalModel') != 'none':
+    errors.append('Change management approval model must default to none')
+if change_management_values.get('changeControl', {}).get('enabled') is not False:
+    errors.append('Change management control automation must be disabled by default')
+if change_management_values.get('changeControl', {}).get('requireChangeTicket') is not False:
+    errors.append('Change management ticket requirement must default to false')
+if change_management_values.get('maintenanceWindow', {}).get('enabled') is not False:
+    errors.append('Change management maintenance window automation must be disabled by default')
+if change_management_values.get('rollout', {}).get('enabled') is not False:
+    errors.append('Change management rollout gates must be disabled by default')
+if change_management_values.get('evidence', {}).get('enabled') is not False:
+    errors.append('Change management evidence collection must be disabled by default')
+if change_management_values.get('reports', {}).get('plan') != 'reports/change-management-plan.md':
+    errors.append('Change management must point at the public-safe plan report')
+disaster_recovery_values = values.get('disasterRecovery', {})
+if disaster_recovery_values.get('enabled') is not False:
+    errors.append('Disaster recovery must be disabled by default')
+if disaster_recovery_values.get('profile') != 'disabled':
+    errors.append('Disaster recovery profile must default to disabled')
+if disaster_recovery_values.get('mode') != 'baseline':
+    errors.append('Disaster recovery mode must default to baseline')
+if disaster_recovery_values.get('failoverModel') != 'none':
+    errors.append('Disaster recovery failover model must default to none')
+if disaster_recovery_values.get('recoveryObjectives', {}).get('enabled') is not False:
+    errors.append('Disaster recovery objective automation must be disabled by default')
+if disaster_recovery_values.get('replication', {}).get('enabled') is not False:
+    errors.append('Disaster recovery replication automation must be disabled by default')
+if disaster_recovery_values.get('restoreDrills', {}).get('enabled') is not False:
+    errors.append('Disaster recovery drill automation must be disabled by default')
+if disaster_recovery_values.get('continuity', {}).get('enabled') is not False:
+    errors.append('Disaster recovery continuity automation must be disabled by default')
+if disaster_recovery_values.get('evidence', {}).get('enabled') is not False:
+    errors.append('Disaster recovery evidence collection must be disabled by default')
+if disaster_recovery_values.get('reports', {}).get('plan') != 'reports/disaster-recovery-plan.md':
+    errors.append('Disaster recovery must point at the public-safe plan report')
+backup_values = values.get('backup', {})
+if backup_values.get('enabled') is not False:
+    errors.append('Global backup automation must be disabled by default')
+if backup_values.get('profile') != 'disabled':
+    errors.append('Default backup profile must be disabled')
+if backup_values.get('velero', {}).get('enabled') is not False:
+    errors.append('Velero backups must be disabled by default')
+if backup_values.get('velero', {}).get('installOperator') is not False:
+    errors.append('Velero operator installation must be disabled by default')
+if backup_values.get('rke2Etcd', {}).get('enabled') is not False:
+    errors.append('RKE2 etcd backup automation must be disabled by default')
+if backup_values.get('imageArchives', {}).get('enabled') is not False:
+    errors.append('Image archive backup retention must be disabled by default')
+external_backup_providers = backup_values.get('externalProviders', {})
+for external_backup_provider in ['urbackup', 'restic', 'kopia', 'borg']:
+    provider_values = external_backup_providers.get(external_backup_provider, {})
+    if provider_values.get('enabled') is not False:
+        errors.append(f'External backup provider must be disabled by default: {external_backup_provider}')
+    if provider_values.get('installInCluster') is True:
+        errors.append(f'External backup provider must not install in-cluster by default: {external_backup_provider}')
 ingress_values = values.get('ingress', {})
 if ingress_values.get('tls', {}).get('enabled') is not True:
     errors.append('Ingress TLS must be enabled by default so HTTPS is available')
@@ -200,6 +476,38 @@ if timescaledb_values.get('postgresUID') != 70 or timescaledb_values.get('postgr
 database_values = values.get('databases', {})
 if database_values.get('postgresUID') != 999 or database_values.get('postgresGID') != 999:
     errors.append('CNPG database defaults must run Docker Hub Postgres-family images as UID/GID 999')
+database_backup_values = database_values.get('backup', {})
+if database_backup_values.get('enabled') is not False:
+    errors.append('CloudNativePG backup rendering must be disabled by default')
+if database_backup_values.get('objectStore', {}).get('enabled') is not False:
+    errors.append('CloudNativePG object-store backups must be disabled by default')
+if database_backup_values.get('schedule', {}).get('enabled') is not False:
+    errors.append('CloudNativePG scheduled backups must be disabled by default')
+platform_capability_values = values.get('platformCapabilities', {})
+if platform_capability_values.get('enabled') is not False:
+    errors.append('Optional platform capabilities must be disabled by default')
+platform_capability_checks = {
+    'minio': platform_capability_values.get('objectStorage', {}).get('minio', {}),
+    'mqtt': platform_capability_values.get('messaging', {}).get('mqtt', {}),
+    'emqx': platform_capability_values.get('messaging', {}).get('mqtt', {}).get('emqx', {}),
+    'mosquitto': platform_capability_values.get('messaging', {}).get('mqtt', {}).get('mosquitto', {}),
+    'rabbitmq': platform_capability_values.get('messaging', {}).get('rabbitmq', {}),
+    'nats': platform_capability_values.get('messaging', {}).get('nats', {}),
+    'schemaRegistry': platform_capability_values.get('kafkaEcosystem', {}).get('schemaRegistry', {}),
+    'kafkaConnect': platform_capability_values.get('kafkaEcosystem', {}).get('kafkaConnect', {}),
+    'debezium': platform_capability_values.get('kafkaEcosystem', {}).get('debezium', {}),
+    'keycloak': platform_capability_values.get('identity', {}).get('keycloak', {}),
+    'vault': platform_capability_values.get('secrets', {}).get('vault', {}),
+    'kyverno': platform_capability_values.get('policy', {}).get('kyverno', {}),
+    'temporal': platform_capability_values.get('workflows', {}).get('temporal', {}),
+    'argoWorkflows': platform_capability_values.get('workflows', {}).get('argoWorkflows', {}),
+    'serviceMesh': platform_capability_values.get('serviceMesh', {}),
+    'linkerd': platform_capability_values.get('serviceMesh', {}).get('linkerd', {}),
+    'istio': platform_capability_values.get('serviceMesh', {}).get('istio', {}),
+}
+for capability_name, capability_values in platform_capability_checks.items():
+    if capability_values.get('enabled') is not False:
+        errors.append(f'Optional platform capability must be disabled by default: {capability_name}')
 observability_values = values.get('observability', {})
 if observability_values.get('profile') != 'disabled' or observability_values.get('stack', {}).get('name') != 'disabled':
     errors.append('Default observability stack must be disabled for the low-resource lab profile')
@@ -661,6 +969,9 @@ for cnpg_cluster_token in ['imageCatalogRef:', 'imageName:', '$db.imageCatalogRe
 for cnpg_cluster_token in ['postgresUID:', 'postgresGID:', '$db.postgresUID', '$db.postgresGID']:
     if cnpg_cluster_token not in cnpg_cluster_template_text:
         errors.append(f'CNPG cluster template missing Postgres image UID/GID token: {cnpg_cluster_token}')
+for cnpg_cluster_token in ['barmanObjectStore:', 'retentionPolicy:', 'kind: ScheduledBackup', '$backupReady']:
+    if cnpg_cluster_token not in cnpg_cluster_template_text:
+        errors.append(f'CNPG cluster template missing disabled backup support token: {cnpg_cluster_token}')
 cnpg_catalog_template_text = (
     ROOT / 'helm/urban-platform-infra/templates/databases-cnpg-imagecatalogs.yaml'
 ).read_text(encoding='utf-8')
@@ -701,6 +1012,22 @@ for makefile_helm_token in [
     'MIGRATION_PRIVATE_DIR ?=',
     'MIGRATION_FALLBACK_INVENTORY ?=',
     'MIGRATION_CLUSTER_DOMAIN ?=',
+    'MIGRATION_PROFILE ?= lab',
+    'MIGRATION_LAB_WORKLOAD_CPU_REQUEST ?=',
+    'MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST ?=',
+    'MIGRATION_LAB_WORKLOAD_CPU_LIMIT ?=',
+    'MIGRATION_LAB_WORKLOAD_MEMORY_LIMIT ?=',
+    'MIGRATION_PREFLIGHT_MIN_NODE_MEMORY ?=',
+    'MIGRATION_PREFLIGHT_MIN_NODE_DISK_FREE ?=',
+    'MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS ?=',
+    'MIGRATION_PREFLIGHT_CAPACITY_UTILIZATION_LIMIT ?=',
+    'MIGRATION_PREFLIGHT_REQUIRE_INGRESS_ENDPOINT ?=',
+    'MIGRATION_BATCH_SIZE ?=',
+    'MIGRATION_IMPORT_BATCH ?=',
+    'MIGRATION_STATE_FILE ?=',
+    'MIGRATION_RESUME ?= true',
+    'MIGRATION_FORCE_RERUN ?= false',
+    'MIGRATION_IMAGE_MODE ?= $(if $(filter lab,$(MIGRATION_PROFILE)),preload,registry)',
     'MIGRATION_RKE2_VERSION ?=',
     'MIGRATION_AUTO_REPAIR_CLUSTER ?=',
     'MIGRATION_BECOME_PASSWORD_PROMPT ?=',
@@ -708,13 +1035,193 @@ for makefile_helm_token in [
     'MIGRATION_KEEPALIVED_INTERFACE ?=',
     'MIGRATION_IMAGE_MODE ?=',
     'MIGRATION_RKE2_NODES ?=',
+    'MIGRATION_SKIP_UNAVAILABLE_DATABASES ?= $(if $(filter production,$(MIGRATION_PROFILE)),false,true)',
+    'MIGRATION_SECRET_PROVIDER ?=',
+    'MIGRATION_SECRET_REMOTE_PREFIX ?=',
+    'MIGRATION_SECRET_STORE_NAME ?=',
+    'MIGRATION_SECRET_STORE_KIND ?=',
+    'MIGRATION_SECRET_REFRESH_INTERVAL ?=',
+    'REGISTRY_PROMOTION_CONFIG ?=',
+    'REGISTRY_PROMOTION_PROFILE ?=',
+    'REGISTRY_PROMOTION_REGISTRY ?=',
+    'REGISTRY_PROMOTION_OUTPUT ?=',
+    'REGISTRY_PROMOTION_VALUES ?=',
+    'registry-promotion-plan:',
+    'scripts/images/registry_promotion_controller.py',
+    '--config "$(REGISTRY_PROMOTION_CONFIG)"',
+    '--overrides "$(REGISTRY_PROMOTION_VALUES)"',
+    'RUNTIME_HARDENING_CONFIG ?=',
+    'RUNTIME_HARDENING_PROFILE ?=',
+    'RUNTIME_HARDENING_OUTPUT ?=',
+    'RUNTIME_HARDENING_VALUES ?=',
+    'runtime-hardening-plan:',
+    'scripts/runtime_hardening_plan.py',
+    '--config "$(RUNTIME_HARDENING_CONFIG)"',
+    '--overrides "$(RUNTIME_HARDENING_VALUES)"',
+    'GITOPS_DELIVERY_CONFIG ?=',
+    'GITOPS_DELIVERY_PROFILE ?=',
+    'GITOPS_DELIVERY_REPO_URL ?=',
+    'GITOPS_DELIVERY_TARGET_REVISION ?=',
+    'GITOPS_DELIVERY_VALUES_PATH ?=',
+    'GITOPS_DELIVERY_OUTPUT ?=',
+    'GITOPS_DELIVERY_VALUES ?=',
+    'gitops-delivery-plan:',
+    'scripts/gitops_delivery_plan.py',
+    '--config "$(GITOPS_DELIVERY_CONFIG)"',
+    '--profile "$(GITOPS_DELIVERY_PROFILE)"',
+    '--repo-url "$(GITOPS_DELIVERY_REPO_URL)"',
+    '--overrides "$(GITOPS_DELIVERY_VALUES)"',
+    'PROGRESSIVE_DELIVERY_CONFIG ?=',
+    'PROGRESSIVE_DELIVERY_PROFILE ?=',
+    'PROGRESSIVE_DELIVERY_GITOPS_PROFILE ?=',
+    'PROGRESSIVE_DELIVERY_RUNTIME_PROFILE ?=',
+    'PROGRESSIVE_DELIVERY_SLO_SOURCE ?=',
+    'PROGRESSIVE_DELIVERY_ROLLBACK_DRILL ?=',
+    'PROGRESSIVE_DELIVERY_OUTPUT ?=',
+    'PROGRESSIVE_DELIVERY_VALUES ?=',
+    'progressive-delivery-plan:',
+    'scripts/progressive_delivery_plan.py',
+    '--config "$(PROGRESSIVE_DELIVERY_CONFIG)"',
+    '--profile "$(PROGRESSIVE_DELIVERY_PROFILE)"',
+    '--rollback-drill',
+    '--overrides "$(PROGRESSIVE_DELIVERY_VALUES)"',
+    'SCALING_POLICY_CONFIG ?=',
+    'SCALING_POLICY_PROFILE ?=',
+    'SCALING_POLICY_METRICS_SOURCE ?=',
+    'SCALING_POLICY_EVENT_SOURCE ?=',
+    'SCALING_POLICY_CAPACITY_REPORT ?=',
+    'SCALING_POLICY_LOAD_TEST_EVIDENCE ?=',
+    'SCALING_POLICY_OUTPUT ?=',
+    'SCALING_POLICY_VALUES ?=',
+    'scaling-policy-plan:',
+    'scripts/scaling_policy_plan.py',
+    '--config "$(SCALING_POLICY_CONFIG)"',
+    '--profile "$(SCALING_POLICY_PROFILE)"',
+    '--load-test-evidence',
+    '--overrides "$(SCALING_POLICY_VALUES)"',
+    'NETWORK_CONNECTIVITY_CONFIG ?=',
+    'NETWORK_CONNECTIVITY_PROFILE ?=',
+    'NETWORK_CONNECTIVITY_TRAFFIC_INVENTORY ?=',
+    'NETWORK_CONNECTIVITY_EGRESS_CONTRACT ?=',
+    'NETWORK_CONNECTIVITY_DNS_TLS_EVIDENCE ?=',
+    'NETWORK_CONNECTIVITY_MESH_READINESS ?=',
+    'NETWORK_CONNECTIVITY_OUTPUT ?=',
+    'NETWORK_CONNECTIVITY_VALUES ?=',
+    'network-connectivity-plan:',
+    'scripts/network_connectivity_plan.py',
+    '--config "$(NETWORK_CONNECTIVITY_CONFIG)"',
+    '--profile "$(NETWORK_CONNECTIVITY_PROFILE)"',
+    '--dns-tls-evidence',
+    '--mesh-readiness',
+    '--overrides "$(NETWORK_CONNECTIVITY_VALUES)"',
+    'ACCESS_GOVERNANCE_CONFIG ?=',
+    'ACCESS_GOVERNANCE_PROFILE ?=',
+    'ACCESS_GOVERNANCE_IDENTITY_PROVIDER ?=',
+    'ACCESS_GOVERNANCE_GROUP_MAPPING ?=',
+    'ACCESS_GOVERNANCE_TENANT_MODEL ?=',
+    'ACCESS_GOVERNANCE_RBAC_INVENTORY ?=',
+    'ACCESS_GOVERNANCE_AUDIT_EVIDENCE ?=',
+    'ACCESS_GOVERNANCE_BREAK_GLASS_REVIEW ?=',
+    'ACCESS_GOVERNANCE_OUTPUT ?=',
+    'ACCESS_GOVERNANCE_VALUES ?=',
+    'access-governance-plan:',
+    'scripts/access_governance_plan.py',
+    '--config "$(ACCESS_GOVERNANCE_CONFIG)"',
+    '--profile "$(ACCESS_GOVERNANCE_PROFILE)"',
+    '--audit-evidence',
+    '--break-glass-review',
+    '--overrides "$(ACCESS_GOVERNANCE_VALUES)"',
+    'COMPLIANCE_EVIDENCE_CONFIG ?=',
+    'COMPLIANCE_EVIDENCE_PROFILE ?=',
+    'COMPLIANCE_EVIDENCE_RELEASE_TAG ?=',
+    'COMPLIANCE_EVIDENCE_PRIVATE_INDEX ?=',
+    'COMPLIANCE_EVIDENCE_RESTORE_DRILL ?=',
+    'COMPLIANCE_EVIDENCE_ACCESS_REVIEW ?=',
+    'COMPLIANCE_EVIDENCE_INCIDENT_DRILL ?=',
+    'COMPLIANCE_EVIDENCE_OUTPUT ?=',
+    'COMPLIANCE_EVIDENCE_VALUES ?=',
+    'compliance-evidence-plan:',
+    'scripts/compliance_evidence_plan.py',
+    '--config "$(COMPLIANCE_EVIDENCE_CONFIG)"',
+    '--profile "$(COMPLIANCE_EVIDENCE_PROFILE)"',
+    '--restore-drill-evidence',
+    '--access-review-evidence',
+    '--incident-drill-evidence',
+    '--overrides "$(COMPLIANCE_EVIDENCE_VALUES)"',
+    'INCIDENT_RESPONSE_CONFIG ?=',
+    'INCIDENT_RESPONSE_PROFILE ?=',
+    'INCIDENT_RESPONSE_ALERT_ROUTE_SOURCE ?=',
+    'INCIDENT_RESPONSE_ESCALATION_ROTA ?=',
+    'INCIDENT_RESPONSE_PAGER_SERVICE ?=',
+    'INCIDENT_RESPONSE_RUNBOOK_SOURCE ?=',
+    'INCIDENT_RESPONSE_INCIDENT_DRILL ?=',
+    'INCIDENT_RESPONSE_POST_INCIDENT_REVIEW ?=',
+    'INCIDENT_RESPONSE_OUTPUT ?=',
+    'INCIDENT_RESPONSE_VALUES ?=',
+    'incident-response-plan:',
+    'scripts/incident_response_plan.py',
+    '--config "$(INCIDENT_RESPONSE_CONFIG)"',
+    '--profile "$(INCIDENT_RESPONSE_PROFILE)"',
+    '--incident-drill',
+    '--post-incident-review',
+    '--overrides "$(INCIDENT_RESPONSE_VALUES)"',
+    'CHANGE_MANAGEMENT_CONFIG ?=',
+    'CHANGE_MANAGEMENT_PROFILE ?=',
+    'CHANGE_MANAGEMENT_TICKET ?=',
+    'CHANGE_MANAGEMENT_FREEZE_CHECK ?=',
+    'CHANGE_MANAGEMENT_STAKEHOLDER_NOTICE ?=',
+    'CHANGE_MANAGEMENT_POST_CHANGE_REVIEW ?=',
+    'CHANGE_MANAGEMENT_OUTPUT ?=',
+    'CHANGE_MANAGEMENT_VALUES ?=',
+    'change-management-plan:',
+    'scripts/change_management_plan.py',
+    '--config "$(CHANGE_MANAGEMENT_CONFIG)"',
+    '--profile "$(CHANGE_MANAGEMENT_PROFILE)"',
+    '--freeze-check',
+    '--stakeholder-notice',
+    '--post-change-review',
+    '--overrides "$(CHANGE_MANAGEMENT_VALUES)"',
+    'DISASTER_RECOVERY_CONFIG ?=',
+    'DISASTER_RECOVERY_PROFILE ?=',
+    'DISASTER_RECOVERY_RTO_RPO ?=',
+    'DISASTER_RECOVERY_DEPENDENCY_MAP ?=',
+    'DISASTER_RECOVERY_BACKUP_REPLICATION ?=',
+    'DISASTER_RECOVERY_POST_DRILL_REVIEW ?=',
+    'DISASTER_RECOVERY_OUTPUT ?=',
+    'DISASTER_RECOVERY_VALUES ?=',
+    'disaster-recovery-plan:',
+    'scripts/disaster_recovery_plan.py',
+    '--config "$(DISASTER_RECOVERY_CONFIG)"',
+    '--profile "$(DISASTER_RECOVERY_PROFILE)"',
+    '--rto-rpo "$(DISASTER_RECOVERY_RTO_RPO)"',
+    '--dependency-map "$(DISASTER_RECOVERY_DEPENDENCY_MAP)"',
+    '--post-drill-review',
+    '--overrides "$(DISASTER_RECOVERY_VALUES)"',
     '--image-mode "$(MIGRATION_IMAGE_MODE)"',
     '--rke2-nodes "$(MIGRATION_RKE2_NODES)"',
     '--private-dir "$(MIGRATION_PRIVATE_DIR)"',
+    '--profile "$(MIGRATION_PROFILE)"',
+    '--lab-workload-cpu-request "$(MIGRATION_LAB_WORKLOAD_CPU_REQUEST)"',
+    '--lab-workload-memory-request "$(MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST)"',
+    '--lab-workload-cpu-limit "$(MIGRATION_LAB_WORKLOAD_CPU_LIMIT)"',
+    '--lab-workload-memory-limit "$(MIGRATION_LAB_WORKLOAD_MEMORY_LIMIT)"',
+    '--preflight-min-node-memory "$(MIGRATION_PREFLIGHT_MIN_NODE_MEMORY)"',
+    '--preflight-min-node-disk-free "$(MIGRATION_PREFLIGHT_MIN_NODE_DISK_FREE)"',
+    '--preflight-max-imported-workloads "$(MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS)"',
+    '--preflight-capacity-utilization-limit "$(MIGRATION_PREFLIGHT_CAPACITY_UTILIZATION_LIMIT)"',
+    '--batch-size "$(MIGRATION_BATCH_SIZE)"',
+    '--import-batch "$(MIGRATION_IMPORT_BATCH)"',
+    '--state-file "$(MIGRATION_STATE_FILE)"',
+    '--secret-provider "$(MIGRATION_SECRET_PROVIDER)"',
+    '--secret-remote-prefix "$(MIGRATION_SECRET_REMOTE_PREFIX)"',
+    '--secret-store-name "$(MIGRATION_SECRET_STORE_NAME)"',
+    '--force-rerun',
+    '--preflight-require-ingress-endpoint',
     '--stage "$(MIGRATION_STAGE)"',
     '--auto-prepare',
     '--ingress-controller $(INGRESS)',
     'import-check:',
+    'import-preflight:',
     'import-migrate:',
     'scripts/import_project.py --project-path "$(PROJECT_PATH)"',
     'scripts/migrate_project.py --project-path "$(PROJECT_PATH)"',
@@ -741,6 +1248,7 @@ for makefile_helm_token in [
     'HELMFILE_SYNC_SCRIPT',
     'scripts/tools/helmfile-sync-retry.sh',
     'HELMFILE_SYNC_RETRIES',
+    'INSTALL_VELERO',
     'install-local-path-storage:',
     'ensure-storageclass:',
     'INSTALL_LOCAL_PATH_STORAGE',
@@ -763,6 +1271,70 @@ for makefile_helm_token in [
     'DEPLOY_ENABLE_LOGSTASH',
     'DEPLOY_ENABLE_LOKI',
     'DEPLOY_ENABLE_CLICKHOUSE',
+    'DEPLOY_ENABLE_VELERO',
+    'DEPLOY_ENABLE_MINIO',
+    'DEPLOY_ENABLE_RABBITMQ',
+    'DEPLOY_ENABLE_KEYCLOAK',
+    'DEPLOY_ENABLE_EMQX',
+    'DEPLOY_ENABLE_NATS',
+    'DEPLOY_ENABLE_VAULT',
+    'DEPLOY_ENABLE_KYVERNO',
+    'DEPLOY_ENABLE_TEMPORAL',
+    'DEPLOY_ENABLE_ARGO_WORKFLOWS',
+    'DEPLOY_ENABLE_LINKERD',
+    'DEPLOY_ENABLE_ISTIO',
+    'VELERO_PROVIDER ?=',
+    'VELERO_BUCKET ?=',
+    'VELERO_EXISTING_SECRET ?=',
+    'VELERO_SNAPSHOTS_ENABLED ?=',
+    'BACKUP_POLICY ?=',
+    'BACKUP_OUTPUT ?=',
+    'backup-plan:',
+    'scripts/backup_plan.py',
+    'OBSERVABILITY_CONFIG ?=',
+    'SLO_CONFIG ?=',
+    'OBSERVABILITY_PLAN_OUTPUT ?=',
+    'observability-plan:',
+    'scripts/observability_plan.py',
+    'CLUSTER_DOCTOR_OUTPUT ?=',
+    'CLUSTER_DOCTOR_NODES ?=',
+    'CLUSTER_DOCTOR_REPAIR ?=',
+    'cluster-doctor:',
+    'cluster-repair:',
+    'scripts/cluster_doctor.py',
+    'LAB_CAPACITY_CONFIG ?=',
+    'LAB_DEPLOY_OUTPUT ?=',
+    'LAB_DEPLOY_VALUES ?=',
+    'lab-deploy-plan:',
+    'scripts/lab_deploy_plan.py',
+    'IMAGE_CACHE_CONFIG ?=',
+    'IMAGE_CACHE_PROFILE ?=',
+    'IMAGE_CACHE_OUTPUT ?=',
+    'image-cache-plan:',
+    'scripts/image_cache_plan.py',
+    'DB_MIGRATION_CONFIG ?=',
+    'DB_MIGRATION_PROFILE ?=',
+    'DB_MIGRATION_OUTPUT ?=',
+    'database-migration-plan:',
+    'scripts/database_migration_controller.py',
+    'EDGE_MIGRATION_CONFIG ?=',
+    'EDGE_MIGRATION_PROFILE ?=',
+    'EDGE_MIGRATION_OUTPUT ?=',
+    'edge-migration-plan:',
+    'scripts/edge_migration_plan.py',
+    'ENV_PROFILE_CONFIG ?=',
+    'ENV_PROFILE ?=',
+    'ENV_PROFILE_OUTPUT ?=',
+    'ENV_PROFILE_VALUES ?=',
+    'environment-profile-plan:',
+    'scripts/environment_profile_plan.py',
+    'RELEASE_VERIFY_REPORT ?=',
+    'IMAGE_PROMOTION_REGISTRY ?=',
+    'image-promotion-plan:',
+    'scripts/images/promotion_plan.py',
+    'release-evidence:',
+    'verify-release-evidence:',
+    'scripts/release/verify_release_evidence.py',
     'DEPLOY_EDGE_OBSERVABILITY_PORTS',
     'DEPLOY_KIBANA_NODE_PORT',
     'DEPLOY_ELASTICSEARCH_NODE_PORT',
@@ -770,6 +1342,17 @@ for makefile_helm_token in [
     'DEPLOY_LOKI_NODE_PORT',
     'DEPLOY_CLICKHOUSE_HTTP_NODE_PORT',
     'DEPLOY_CLICKHOUSE_TCP_NODE_PORT',
+    'INSTALL_MINIO="$(DEPLOY_ENABLE_MINIO)"',
+    'INSTALL_RABBITMQ="$(DEPLOY_ENABLE_RABBITMQ)"',
+    'INSTALL_KEYCLOAK="$(DEPLOY_ENABLE_KEYCLOAK)"',
+    'INSTALL_EMQX="$(DEPLOY_ENABLE_EMQX)"',
+    'INSTALL_NATS="$(DEPLOY_ENABLE_NATS)"',
+    'INSTALL_VAULT="$(DEPLOY_ENABLE_VAULT)"',
+    'INSTALL_KYVERNO="$(DEPLOY_ENABLE_KYVERNO)"',
+    'INSTALL_TEMPORAL="$(DEPLOY_ENABLE_TEMPORAL)"',
+    'INSTALL_ARGO_WORKFLOWS="$(DEPLOY_ENABLE_ARGO_WORKFLOWS)"',
+    'INSTALL_LINKERD="$(DEPLOY_ENABLE_LINKERD)"',
+    'INSTALL_ISTIO="$(DEPLOY_ENABLE_ISTIO)"',
     'deploy-auto: MIGRATION_AUTO_REPAIR_CLUSTER = true',
     'configure-edge-ports:',
     'Using recovered private inventory for edge ports',
@@ -792,6 +1375,68 @@ for makefile_helm_token in [
     if makefile_helm_token not in makefile_text:
         errors.append(f'Makefile must prepare operator tooling before deploy: {makefile_helm_token}')
 
+helmfile_text = (ROOT / 'deploy/helmfile.yaml.gotmpl').read_text(encoding='utf-8')
+for helmfile_backup_token in [
+    'https://vmware-tanzu.github.io/helm-charts',
+    'name: velero',
+    'chart: vmware-tanzu/velero',
+    'INSTALL_VELERO',
+    'VELERO_EXISTING_SECRET',
+    'backupStorageLocation',
+]:
+    if helmfile_backup_token not in helmfile_text:
+        errors.append(f'Helmfile missing optional backup operator token: {helmfile_backup_token}')
+
+for helmfile_capability_token in [
+    'https://repos.emqx.io/charts',
+    'https://nats-io.github.io/k8s/helm/charts/',
+    'https://helm.releases.hashicorp.com',
+    'https://kyverno.github.io/kyverno/',
+    'https://argoproj.github.io/argo-helm',
+    'https://go.temporal.io/helm-charts',
+    'https://helm.linkerd.io/stable',
+    'https://istio-release.storage.googleapis.com/charts',
+    'name: minio',
+    'chart: bitnami/minio',
+    'INSTALL_MINIO',
+    'name: rabbitmq',
+    'chart: bitnami/rabbitmq',
+    'INSTALL_RABBITMQ',
+    'name: keycloak',
+    'chart: bitnami/keycloak',
+    'INSTALL_KEYCLOAK',
+    'name: emqx',
+    'chart: emqx/emqx',
+    'INSTALL_EMQX',
+    'name: nats',
+    'chart: nats/nats',
+    'INSTALL_NATS',
+    'name: vault',
+    'chart: hashicorp/vault',
+    'INSTALL_VAULT',
+    'name: kyverno',
+    'chart: kyverno/kyverno',
+    'INSTALL_KYVERNO',
+    'name: temporal',
+    'chart: temporal/temporal',
+    'INSTALL_TEMPORAL',
+    'name: argo-workflows',
+    'chart: argo/argo-workflows',
+    'INSTALL_ARGO_WORKFLOWS',
+    'name: linkerd-crds',
+    'chart: linkerd/linkerd-crds',
+    'name: linkerd-control-plane',
+    'chart: linkerd/linkerd-control-plane',
+    'INSTALL_LINKERD',
+    'name: istio-base',
+    'chart: istio/base',
+    'name: istiod',
+    'chart: istio/istiod',
+    'INSTALL_ISTIO',
+]:
+    if helmfile_capability_token not in helmfile_text:
+        errors.append(f'Helmfile missing optional platform capability token: {helmfile_capability_token}')
+
 project_import_text = (ROOT / 'scripts/import_project.py').read_text(encoding='utf-8')
 for project_import_token in [
     'find_compose_files',
@@ -805,6 +1450,10 @@ for project_import_token in [
     '--redact-sensitive',
     'Migration Plan',
     'database_target_images',
+    'OPTIONAL_DATABASE_KINDS',
+    'microsoft-sql-server',
+    'service_uses_sqlite_files',
+    'Optional database services detected',
     'pg_dump --format=custom',
     'ingressClassName: traefik',
 ]:
@@ -830,10 +1479,63 @@ for migration_automation_token in [
     'docker.io/library/postgres:18.3',
     'MIGRATION_SKIP_UNAVAILABLE_DATABASES',
     '--strict-database-migration',
+    'OPTIONAL_DATABASE_PORTS',
+    'OPTIONAL_DATABASE_TOOLS',
+    'optional_database_target',
+    'Optional database target scaffolds',
     'sys.executable',
     'PYTHON="${PYTHON:-python3}"',
     'kubernetes_service_exists',
     'kubernetes_workload_manifests',
+    'MIGRATION_PROFILE',
+    'LAB_PROFILE_OVERLAY',
+    'lab_profile_overlay',
+    'lab-profile-values.yaml',
+    'import-profile.md',
+    'stage_preflight',
+    'import-preflight.md',
+    'import-capacity.md',
+    'import-batches.md',
+    'import-batches.yaml',
+    'import-resume.md',
+    'write_import_batch_plan',
+    'filter_service_pairs_for_import_batch',
+    'stage_scope_pairs',
+    'databaseTargetsFingerprint',
+    'write_migration_state_report',
+    'migration_stage_completed',
+    'mark_migration_stage_completed',
+    'preflight_check_readyz',
+    'preflight_check_nodes',
+    'preflight_check_storage',
+    'preflight_check_imported_capacity',
+    'preflight_check_ingress_endpoint',
+    'preflight_check_remote_nodes',
+    'MIGRATION_PREFLIGHT_MIN_NODE_MEMORY',
+    'MIGRATION_PREFLIGHT_MIN_NODE_DISK_FREE',
+    'MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS',
+    'MIGRATION_PREFLIGHT_CAPACITY_UTILIZATION_LIMIT',
+    'MIGRATION_PREFLIGHT_REQUIRE_INGRESS_ENDPOINT',
+    'MIGRATION_BATCH_SIZE',
+    'MIGRATION_IMPORT_BATCH',
+    'MIGRATION_STATE_FILE',
+    'MIGRATION_RESUME',
+    'MIGRATION_FORCE_RERUN',
+    'imported_workload_resources',
+    '--profile',
+    '--lab-workload-cpu-request',
+    '--preflight-min-node-memory',
+    '--preflight-max-imported-workloads',
+    '--preflight-capacity-utilization-limit',
+    '--batch-size',
+    '--import-batch',
+    '--state-file',
+    '--resume',
+    '--no-resume',
+    '--force-rerun',
+    '--preflight-require-ingress-endpoint',
+    'args.image_mode = "preload" if lab_profile_enabled(args) else "registry"',
+    'args.profile != "production"',
     'imported-workloads.yaml',
     'Skipping ingress candidate',
     'No ingress candidates were applied because their backend services are not present yet.',
@@ -868,6 +1570,12 @@ for migration_automation_token in [
     'MIGRATION_PRUNE_OPERATOR_CACHE',
     'MIGRATION_REGISTRY_USERNAME',
     'MIGRATION_ALLOW_SECRET_MATERIAL',
+    'MIGRATION_SECRET_PROVIDER',
+    'MIGRATION_SECRET_REMOTE_PREFIX',
+    'MIGRATION_SECRET_STORE_NAME',
+    'external-secrets',
+    'vault',
+    'import-secret-provider.md',
     'run-migration.sh',
     'traefik-ingress-candidates.yaml',
     'ingress_source_allowlist_cidrs',
@@ -889,12 +1597,39 @@ for project_import_docs_token in [
     'Every report includes a migration plan section',
     'database upgrades',
     'make import-migrate PROJECT_PATH=/path/to/compose-project',
+    'make environment-profile-plan',
+    'reports/environment-profile-plan.md',
+    'reports/environment-profile-values.yaml',
     'make import-auto PROJECT_PATH=/path/to/compose-project',
+    'make import-preflight PROJECT_PATH=/path/to/compose-project',
     'operator-kubeconfig repair target',
+    'import-preflight.md',
+    'import-capacity.md',
+    'import-batches.md',
+    'import-resume.md',
+    'MIGRATION_IMPORT_BATCH=auto',
+    'MIGRATION_IMPORT_BATCH=all',
+    'MIGRATION_RESUME=true',
+    'MIGRATION_FORCE_RERUN=true',
+    'MIGRATION_STATE_FILE',
+    'MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS',
+    'MIGRATION_PREFLIGHT_REQUIRE_INGRESS_ENDPOINT=true',
+    'MIGRATION_PROFILE=lab',
+    'lab-profile-values.yaml',
+    'MIGRATION_PROFILE=production',
+    'make image-cache-plan',
+    'reports/image-cache-plan.md',
+    'make database-migration-plan',
+    'reports/database-migration-plan.md',
+    'make edge-migration-plan',
+    'reports/edge-migration-plan.md',
     'prepares the private operator workspace',
     'MIGRATION_STAGE=databases',
     'MIGRATION_IMAGE_MODE=preload',
     'MIGRATION_RKE2_NODES',
+    'MIGRATION_SECRET_PROVIDER=external-secrets',
+    'MIGRATION_SECRET_PROVIDER=vault',
+    'MIGRATION_SECRET_REMOTE_PREFIX',
     'MIGRATION_CLEANUP_OPERATOR_IMAGES=false',
     'MIGRATION_EXECUTE=true',
     'MIGRATION_REGISTRY_USERNAME',
@@ -903,6 +1638,1193 @@ for project_import_docs_token in [
 ]:
     if project_import_docs_token not in project_import_docs_text:
         errors.append(f'Project import docs missing token: {project_import_docs_token}')
+
+design_docs = {
+    'docs/hld.md': [
+        'High-Level Design',
+        'public-safe high-level design',
+        'Logical Architecture',
+        'Deployment Profiles',
+        'Import and Migration Design',
+        'Database Strategy',
+        'Image Strategy',
+        'Secret Strategy',
+        'Backup Strategy',
+        'Resource Strategy',
+        'Public-Safe Boundaries',
+    ],
+    'docs/lld.md': [
+        'Low-Level Design',
+        'public-safe low-level design',
+        'Repository Components',
+        'Deployment Execution Flow',
+        'Import Execution Flow',
+        'Kubernetes Access Repair',
+        'Helmfile Design',
+        'Helm Chart Design',
+        'Backup Implementation',
+        'Image Migration Design',
+        'Database Migration Design',
+        'Public-Safe Review Checklist',
+    ],
+}
+for design_doc, required_tokens in design_docs.items():
+    design_doc_text = (ROOT / design_doc).read_text(encoding='utf-8')
+    for required_token in required_tokens:
+        if required_token not in design_doc_text:
+            errors.append(f'{design_doc} missing public-safe design token: {required_token}')
+    if re.search(r'\b(?:10|192\.168)\.[0-9]{1,3}\.[0-9]{1,3}\b', design_doc_text):
+        errors.append(f'{design_doc} must not contain private IPv4 addresses')
+    if re.search(r'\b172\.(?:1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}\b', design_doc_text):
+        errors.append(f'{design_doc} must not contain private IPv4 addresses')
+    for private_design_token in ['/srv/', '/opt/', 'auyp']:
+        if private_design_token in design_doc_text:
+            errors.append(f'{design_doc} must not contain private token: {private_design_token}')
+
+secret_provider_config_text = (ROOT / 'config/secret-provider-adapters.yaml').read_text(encoding='utf-8')
+for secret_provider_config_token in [
+    'defaultProfile: disabled',
+    'kubernetes-direct:',
+    'external-secrets:',
+    'vault:',
+    'sops:',
+    'sealed-secrets:',
+    'automaticProviders:',
+    'planOnlyProviders:',
+    'directSecretGate: MIGRATION_ALLOW_SECRET_MATERIAL=true',
+    'recommendedProductionProvider: external-secrets',
+]:
+    if secret_provider_config_token not in secret_provider_config_text:
+        errors.append(f'Secret provider adapter config missing token: {secret_provider_config_token}')
+
+secret_provider_docs_text = (ROOT / 'docs/secret-provider-adapters.md').read_text(encoding='utf-8')
+for secret_provider_docs_token in [
+    'Secret Provider Adapters',
+    'disabled by default',
+    'MIGRATION_SECRET_PROVIDER=external-secrets',
+    'MIGRATION_SECRET_PROVIDER=vault',
+    'MIGRATION_SECRET_REMOTE_PREFIX',
+    'SOPS',
+    'Sealed Secrets',
+    'ExternalSecret',
+]:
+    if secret_provider_docs_token not in secret_provider_docs_text:
+        errors.append(f'Secret provider adapter docs missing token: {secret_provider_docs_token}')
+
+secrets_docs_text = (ROOT / 'docs/secrets-management.md').read_text(encoding='utf-8')
+for secrets_docs_token in [
+    'Provider Adapters',
+    'config/secret-provider-adapters.yaml',
+    'MIGRATION_SECRET_PROVIDER=external-secrets',
+    'MIGRATION_SECRET_PROVIDER=vault',
+]:
+    if secrets_docs_token not in secrets_docs_text:
+        errors.append(f'Secrets management docs missing provider adapter token: {secrets_docs_token}')
+
+storage_tiers_config_text = (ROOT / 'config/storage-tiers.yaml').read_text(encoding='utf-8')
+for storage_tiers_config_token in [
+    'defaultProfile: lab',
+    'hot:',
+    'warm:',
+    'cold:',
+    'objectStore:',
+    's3-compatible',
+    'workloadMapping:',
+    'databaseBackups: cold',
+    'importDumps: cold',
+]:
+    if storage_tiers_config_token not in storage_tiers_config_text:
+        errors.append(f'Storage tier contract missing token: {storage_tiers_config_token}')
+
+storage_tiers_docs_text = (ROOT / 'docs/storage-tiers.md').read_text(encoding='utf-8')
+for storage_tiers_docs_token in [
+    'optional hot/warm/cold storage architecture',
+    'storageTiers:',
+    'Current Chart Behavior',
+    'CloudNativePG database clusters',
+    'generic StatefulSet workloads',
+    'Cold object-store settings are a public-safe contract',
+]:
+    if storage_tiers_docs_token not in storage_tiers_docs_text:
+        errors.append(f'Storage tier docs missing token: {storage_tiers_docs_token}')
+
+storage_tiers_values_text = (ROOT / 'helm/urban-platform-infra/values.yaml').read_text(encoding='utf-8')
+for storage_tiers_values_token in [
+    'storageTiers:',
+    'description: Active low-latency PVCs',
+    'description: Lower-cost PVCs',
+    'description: Archive tier',
+    'provider: s3-compatible',
+]:
+    if storage_tiers_values_token not in storage_tiers_values_text:
+        errors.append(f'Helm values missing storage tier token: {storage_tiers_values_token}')
+
+storage_tiers_template_text = '\n'.join(
+    (ROOT / storage_tiers_template_file).read_text(encoding='utf-8')
+    for storage_tiers_template_file in [
+        'helm/urban-platform-infra/templates/_helpers.tpl',
+        'helm/urban-platform-infra/templates/databases-cnpg.yaml',
+        'helm/urban-platform-infra/templates/messaging-kafka.yaml',
+        'helm/urban-platform-infra/templates/redis.yaml',
+        'helm/urban-platform-infra/templates/workloads.yaml',
+    ]
+)
+for storage_tiers_template_token in [
+    'define "cip.storageClassName"',
+    'storageTiers',
+    '$zookeeperStorageClass',
+    '$kafkaStorageClass',
+    '$redisStorageClass',
+    '$statefulStorageClass',
+]:
+    if storage_tiers_template_token not in storage_tiers_template_text:
+        errors.append(f'Helm templates missing storage tier token: {storage_tiers_template_token}')
+
+backup_policy_text = (ROOT / 'config/backup-policy.yaml').read_text(encoding='utf-8')
+for backup_policy_token in [
+    'defaultProfile: disabled',
+    'enabledByDefault: false',
+    'rke2Etcd:',
+    'cloudnativePg:',
+    'velero:',
+    'imageArchives:',
+    'urbackup:',
+    'restic:',
+    'kopia:',
+    'borg:',
+    'installInCluster: false',
+    'backupPlaintext: false',
+    'restore-drill-runbook-reviewed',
+]:
+    if backup_policy_token not in backup_policy_text:
+        errors.append(f'Backup policy missing disabled-by-default token: {backup_policy_token}')
+
+backup_docs_text = (ROOT / 'docs/backup-restore.md').read_text(encoding='utf-8')
+for backup_docs_token in [
+    'Backups are disabled by default',
+    'make backup-plan',
+    'CloudNativePG Barman',
+    'Velero is optional and disabled',
+    'UrBackup',
+    'restic',
+    'Kopia',
+    'Borg',
+    'RKE2 etcd snapshots',
+    'Restore Drills',
+]:
+    if backup_docs_token not in backup_docs_text:
+        errors.append(f'Backup/restore docs missing token: {backup_docs_token}')
+
+backup_plan_text = (ROOT / 'scripts/backup_plan.py').read_text(encoding='utf-8')
+for backup_plan_token in [
+    'public_safe_backup_plan',
+    'Global backup switch',
+    'CloudNativePG backup rendering',
+    'Velero operator install',
+    'External Backup Providers',
+    'urbackup',
+    'restic',
+    'kopia',
+    'borg',
+    'Backups are disabled by default',
+]:
+    if backup_plan_token not in backup_plan_text:
+        errors.append(f'Backup plan script missing public-safe token: {backup_plan_token}')
+
+observability_plan_text = (ROOT / 'scripts/observability_plan.py').read_text(encoding='utf-8')
+for observability_plan_token in [
+    'Observability And SLO Readiness Plan',
+    'Lab-safe default',
+    'Prometheus Operator CRD gate',
+    'SLO Objective Coverage',
+    'ServiceMonitor template',
+    'Production Enablement Sequence',
+]:
+    if observability_plan_token not in observability_plan_text:
+        errors.append(f'Observability plan script missing public-safe token: {observability_plan_token}')
+
+cluster_doctor_text = (ROOT / 'scripts/cluster_doctor.py').read_text(encoding='utf-8')
+for cluster_doctor_token in [
+    'Cluster Doctor Report',
+    'public-safe',
+    'redact',
+    'local binary `kubectl`',
+    'operator Kubernetes `/readyz`',
+    'passwordless sudo',
+    'haproxy-config',
+    'keepalived-config',
+    'make cluster-repair',
+    'MIGRATION_AUTO_REPAIR_CLUSTER',
+]:
+    if cluster_doctor_token not in cluster_doctor_text:
+        errors.append(f'Cluster doctor script missing diagnostic token: {cluster_doctor_token}')
+
+lab_deploy_plan_text = (ROOT / 'scripts/lab_deploy_plan.py').read_text(encoding='utf-8')
+for lab_deploy_plan_token in [
+    'Lab Capacity And Progressive Deploy Plan',
+    'public-safe',
+    'progressive_waves',
+    'lab-deploy-values.yaml',
+    'global.replicaOverride',
+    'global.skipPlaceholderWorkloads',
+    'MIGRATION_IMPORT_BATCH=1',
+]:
+    if lab_deploy_plan_token not in lab_deploy_plan_text:
+        errors.append(f'Lab deploy plan script missing capacity token: {lab_deploy_plan_token}')
+
+lab_capacity_text = (ROOT / 'config/lab-capacity.yaml').read_text(encoding='utf-8')
+for lab_capacity_token in [
+    'defaultProfile: three-node-4g',
+    'memoryPerNode: 4Gi',
+    'capacityUtilizationLimit: 0.70',
+    'maxDatabases: 3',
+    'importedBatchSize: 40',
+    'progressiveWaves:',
+]:
+    if lab_capacity_token not in lab_capacity_text:
+        errors.append(f'Lab capacity config missing guardrail token: {lab_capacity_token}')
+
+image_cache_plan_text = (ROOT / 'scripts/image_cache_plan.py').read_text(encoding='utf-8')
+for image_cache_plan_token in [
+    'Image Cache, Preload, And Cleanup Plan',
+    'public-safe',
+    'MIGRATION_CLEANUP_OPERATOR_IMAGES',
+    'MIGRATION_PRUNE_OPERATOR_CACHE',
+    'MIGRATION_RKE2_IMPORT_IMAGES',
+    'RKE2 containerd import',
+    'operator cache cleanup',
+    'make image-cache-plan',
+]:
+    if image_cache_plan_token not in image_cache_plan_text:
+        errors.append(f'Image cache plan script missing preload/cleanup token: {image_cache_plan_token}')
+
+image_cache_config_text = (ROOT / 'config/image-cache.yaml').read_text(encoding='utf-8')
+for image_cache_config_token in [
+    'defaultProfile: lab-preload',
+    'production-registry:',
+    'disconnected-preload:',
+    'cleanupOperatorImages: true',
+    'pruneOperatorCache: true',
+    'rke2ImportImages: true',
+    'staleArchiveAction:',
+    'nodeArchiveRetention:',
+]:
+    if image_cache_config_token not in image_cache_config_text:
+        errors.append(f'Image cache config missing preload/cleanup token: {image_cache_config_token}')
+
+image_cache_docs_text = (ROOT / 'docs/image-cache-preload.md').read_text(encoding='utf-8')
+for image_cache_docs_token in [
+    'Image Cache, Preload, And Cleanup',
+    'make image-cache-plan',
+    'MIGRATION_IMAGE_MODE=preload',
+    'MIGRATION_RKE2_NODES',
+    'MIGRATION_CLEANUP_OPERATOR_IMAGES=true',
+    'MIGRATION_PRUNE_OPERATOR_CACHE=true',
+    'MIGRATION_RKE2_IMPORT_IMAGES=true',
+    'containerd',
+]:
+    if image_cache_docs_token not in image_cache_docs_text:
+        errors.append(f'Image cache docs missing preload/cleanup token: {image_cache_docs_token}')
+
+registry_promotion_script_text = (ROOT / 'scripts/images/registry_promotion_controller.py').read_text(encoding='utf-8')
+for registry_promotion_script_token in [
+    'Image Registry Promotion Controller',
+    'public-safe',
+    'global.imageRegistry',
+    'imagePullSecrets',
+    'requireSignatureOrAttestation',
+    'Registry promotion override template',
+]:
+    if registry_promotion_script_token not in registry_promotion_script_text:
+        errors.append(f'Registry promotion controller script missing token: {registry_promotion_script_token}')
+
+registry_promotion_config_text = (ROOT / 'config/registry-promotion.yaml').read_text(encoding='utf-8')
+for registry_promotion_config_token in [
+    'defaultProfile: disabled',
+    'production-registry:',
+    'enterprise-signed:',
+    'credentialSources:',
+    'controller:',
+    'oneCommandTargets:',
+]:
+    if registry_promotion_config_token not in registry_promotion_config_text:
+        errors.append(f'Registry promotion config missing token: {registry_promotion_config_token}')
+
+registry_promotion_docs_text = (ROOT / 'docs/registry-promotion-controller.md').read_text(encoding='utf-8')
+for registry_promotion_docs_token in [
+    'Article 16 Baseline',
+    'make registry-promotion-plan',
+    'REGISTRY_PROMOTION_PROFILE=production-registry',
+    'reports/registry-promotion-controller.md',
+    'reports/registry-promotion-values.yaml',
+    'MIGRATION_IMAGE_MODE=registry',
+]:
+    if registry_promotion_docs_token not in registry_promotion_docs_text:
+        errors.append(f'Registry promotion docs missing token: {registry_promotion_docs_token}')
+
+runtime_hardening_plan_text = (ROOT / 'scripts/runtime_hardening_plan.py').read_text(encoding='utf-8')
+for runtime_hardening_plan_token in [
+    'Runtime Hardening And Admission Policy Plan',
+    'public-safe',
+    'requireReadOnlyRootFilesystem',
+    'requireSignedImages',
+    'runtime-hardening-values.yaml',
+    'make runtime-hardening-plan',
+]:
+    if runtime_hardening_plan_token not in runtime_hardening_plan_text:
+        errors.append(f'Runtime hardening plan script missing token: {runtime_hardening_plan_token}')
+
+runtime_hardening_config_text = (ROOT / 'config/runtime-hardening.yaml').read_text(encoding='utf-8')
+for runtime_hardening_config_token in [
+    'defaultProfile: disabled',
+    'lab-audit:',
+    'production-restricted:',
+    'enterprise-signed:',
+    'policyEngine: kyverno',
+    'requireSignedImages: true',
+    'admissionChecks:',
+]:
+    if runtime_hardening_config_token not in runtime_hardening_config_text:
+        errors.append(f'Runtime hardening config missing token: {runtime_hardening_config_token}')
+
+runtime_hardening_docs_text = (ROOT / 'docs/runtime-hardening-admission.md').read_text(encoding='utf-8')
+for runtime_hardening_docs_token in [
+    'Article 17 Baseline',
+    'make runtime-hardening-plan',
+    'RUNTIME_HARDENING_PROFILE=production-restricted',
+    'reports/runtime-hardening-plan.md',
+    'reports/runtime-hardening-values.yaml',
+    'signed-image admission',
+]:
+    if runtime_hardening_docs_token not in runtime_hardening_docs_text:
+        errors.append(f'Runtime hardening docs missing token: {runtime_hardening_docs_token}')
+
+gitops_delivery_plan_text = (ROOT / 'scripts/gitops_delivery_plan.py').read_text(encoding='utf-8')
+for gitops_delivery_plan_token in [
+    'GitOps Delivery And Drift Control Plan',
+    'public-safe',
+    'driftDetection',
+    'gitops-delivery-values.yaml',
+    'make gitops-delivery-plan',
+    'Helmfile break-glass',
+]:
+    if gitops_delivery_plan_token not in gitops_delivery_plan_text:
+        errors.append(f'GitOps delivery plan script missing token: {gitops_delivery_plan_token}')
+
+gitops_delivery_config_text = (ROOT / 'config/gitops-delivery.yaml').read_text(encoding='utf-8')
+for gitops_delivery_config_token in [
+    'defaultProfile: operator-managed',
+    'lab-argocd:',
+    'production-argocd:',
+    'production-flux:',
+    'supportedControllers:',
+    'requiredChecks:',
+]:
+    if gitops_delivery_config_token not in gitops_delivery_config_text:
+        errors.append(f'GitOps delivery config missing token: {gitops_delivery_config_token}')
+
+gitops_delivery_docs_text = (ROOT / 'docs/gitops-delivery.md').read_text(encoding='utf-8')
+for gitops_delivery_docs_token in [
+    'Article 18 Baseline',
+    'make gitops-delivery-plan',
+    'GITOPS_DELIVERY_PROFILE=production-argocd',
+    'reports/gitops-delivery-plan.md',
+    'reports/gitops-delivery-values.yaml',
+    'Argo CD',
+    'Flux',
+]:
+    if gitops_delivery_docs_token not in gitops_delivery_docs_text:
+        errors.append(f'GitOps delivery docs missing token: {gitops_delivery_docs_token}')
+
+progressive_delivery_plan_text = (ROOT / 'scripts/progressive_delivery_plan.py').read_text(encoding='utf-8')
+for progressive_delivery_plan_token in [
+    'Progressive Delivery And Rollback Plan',
+    'public-safe',
+    'canarySteps',
+    'rollback-drill',
+    'progressive-delivery-values.yaml',
+    'make progressive-delivery-plan',
+    'helm rollback',
+]:
+    if progressive_delivery_plan_token not in progressive_delivery_plan_text:
+        errors.append(f'Progressive delivery plan script missing token: {progressive_delivery_plan_token}')
+
+progressive_delivery_config_text = (ROOT / 'config/progressive-delivery.yaml').read_text(encoding='utf-8')
+for progressive_delivery_config_token in [
+    'defaultProfile: disabled',
+    'lab-canary:',
+    'production-canary:',
+    'production-blue-green:',
+    'supportedControllers:',
+    'supportedTrafficProviders:',
+    'requiredChecks:',
+]:
+    if progressive_delivery_config_token not in progressive_delivery_config_text:
+        errors.append(f'Progressive delivery config missing token: {progressive_delivery_config_token}')
+
+progressive_delivery_docs_text = (ROOT / 'docs/progressive-delivery.md').read_text(encoding='utf-8')
+for progressive_delivery_docs_token in [
+    'Article 19 Baseline',
+    'make progressive-delivery-plan',
+    'PROGRESSIVE_DELIVERY_PROFILE=production-canary',
+    'reports/progressive-delivery-plan.md',
+    'reports/progressive-delivery-values.yaml',
+    'Argo Rollouts',
+    'blue-green',
+]:
+    if progressive_delivery_docs_token not in progressive_delivery_docs_text:
+        errors.append(f'Progressive delivery docs missing token: {progressive_delivery_docs_token}')
+
+scaling_policy_plan_text = (ROOT / 'scripts/scaling_policy_plan.py').read_text(encoding='utf-8')
+for scaling_policy_plan_token in [
+    'Scaling Policy And Capacity Automation Plan',
+    'public-safe',
+    'load-test-evidence',
+    'scaling-policy-values.yaml',
+    'make scaling-policy-plan',
+    'KEDA triggers',
+]:
+    if scaling_policy_plan_token not in scaling_policy_plan_text:
+        errors.append(f'Scaling policy plan script missing token: {scaling_policy_plan_token}')
+
+scaling_policy_config_text = (ROOT / 'config/scaling-policy.yaml').read_text(encoding='utf-8')
+for scaling_policy_config_token in [
+    'defaultProfile: disabled',
+    'lab-rightsize:',
+    'production-hpa:',
+    'event-driven-keda:',
+    'enterprise-autoscaling:',
+    'supportedAutoscalers:',
+    'requiredChecks:',
+]:
+    if scaling_policy_config_token not in scaling_policy_config_text:
+        errors.append(f'Scaling policy config missing token: {scaling_policy_config_token}')
+
+scaling_policy_docs_text = (ROOT / 'docs/scaling-policy.md').read_text(encoding='utf-8')
+for scaling_policy_docs_token in [
+    'Article 20 Baseline',
+    'make scaling-policy-plan',
+    'SCALING_POLICY_PROFILE=production-hpa',
+    'reports/scaling-policy-plan.md',
+    'reports/scaling-policy-values.yaml',
+    'HPA',
+    'KEDA',
+]:
+    if scaling_policy_docs_token not in scaling_policy_docs_text:
+        errors.append(f'Scaling policy docs missing token: {scaling_policy_docs_token}')
+
+network_connectivity_plan_text = (ROOT / 'scripts/network_connectivity_plan.py').read_text(encoding='utf-8')
+for network_connectivity_plan_token in [
+    'Network Connectivity And Service Mesh Plan',
+    'public-safe',
+    'dns-tls-evidence',
+    'network-connectivity-values.yaml',
+    'make network-connectivity-plan',
+    'Service mesh',
+]:
+    if network_connectivity_plan_token not in network_connectivity_plan_text:
+        errors.append(f'Network connectivity plan script missing token: {network_connectivity_plan_token}')
+
+network_connectivity_config_text = (ROOT / 'config/network-connectivity.yaml').read_text(encoding='utf-8')
+for network_connectivity_config_token in [
+    'defaultProfile: disabled',
+    'lab-baseline:',
+    'production-restricted:',
+    'mesh-linkerd:',
+    'mesh-istio:',
+    'supportedServiceMeshes:',
+    'requiredChecks:',
+]:
+    if network_connectivity_config_token not in network_connectivity_config_text:
+        errors.append(f'Network connectivity config missing token: {network_connectivity_config_token}')
+
+network_connectivity_docs_text = (ROOT / 'docs/network-connectivity.md').read_text(encoding='utf-8')
+for network_connectivity_docs_token in [
+    'Article 21 Baseline',
+    'make network-connectivity-plan',
+    'NETWORK_CONNECTIVITY_PROFILE=production-restricted',
+    'reports/network-connectivity-plan.md',
+    'reports/network-connectivity-values.yaml',
+    'Linkerd',
+    'Istio',
+]:
+    if network_connectivity_docs_token not in network_connectivity_docs_text:
+        errors.append(f'Network connectivity docs missing token: {network_connectivity_docs_token}')
+
+access_governance_plan_text = (ROOT / 'scripts/access_governance_plan.py').read_text(encoding='utf-8')
+for access_governance_plan_token in [
+    'Access Governance And Tenant Isolation Plan',
+    'public-safe',
+    'break-glass-review',
+    'access-governance-values.yaml',
+    'make access-governance-plan',
+    'tenant isolation',
+]:
+    if access_governance_plan_token not in access_governance_plan_text:
+        errors.append(f'Access governance plan script missing token: {access_governance_plan_token}')
+
+access_governance_config_text = (ROOT / 'config/access-governance.yaml').read_text(encoding='utf-8')
+for access_governance_config_token in [
+    'defaultProfile: disabled',
+    'lab-audit:',
+    'production-rbac:',
+    'oidc-sso:',
+    'multi-tenant:',
+    'supportedIdentityProviders:',
+    'requiredChecks:',
+]:
+    if access_governance_config_token not in access_governance_config_text:
+        errors.append(f'Access governance config missing token: {access_governance_config_token}')
+
+access_governance_docs_text = (ROOT / 'docs/access-governance.md').read_text(encoding='utf-8')
+for access_governance_docs_token in [
+    'Article 22 Baseline',
+    'make access-governance-plan',
+    'ACCESS_GOVERNANCE_PROFILE=production-rbac',
+    'reports/access-governance-plan.md',
+    'reports/access-governance-values.yaml',
+    'OIDC',
+    'tenant isolation',
+]:
+    if access_governance_docs_token not in access_governance_docs_text:
+        errors.append(f'Access governance docs missing token: {access_governance_docs_token}')
+
+compliance_evidence_plan_text = (ROOT / 'scripts/compliance_evidence_plan.py').read_text(encoding='utf-8')
+for compliance_evidence_plan_token in [
+    'Compliance Evidence And Audit Pack Plan',
+    'public-safe',
+    'restore-drill-evidence',
+    'access-review-evidence',
+    'incident-drill-evidence',
+    'compliance-evidence-values.yaml',
+    'make compliance-evidence-plan',
+    'certification',
+]:
+    if compliance_evidence_plan_token not in compliance_evidence_plan_text:
+        errors.append(f'Compliance evidence plan script missing token: {compliance_evidence_plan_token}')
+
+compliance_evidence_config_text = (ROOT / 'config/compliance-evidence.yaml').read_text(encoding='utf-8')
+for compliance_evidence_config_token in [
+    'defaultProfile: disabled',
+    'lab-evidence:',
+    'staging-control-review:',
+    'production-audit-pack:',
+    'regulated-retention:',
+    'evidenceSources:',
+    'requiredChecks:',
+]:
+    if compliance_evidence_config_token not in compliance_evidence_config_text:
+        errors.append(f'Compliance evidence config missing token: {compliance_evidence_config_token}')
+
+compliance_evidence_docs_text = (ROOT / 'docs/compliance-evidence.md').read_text(encoding='utf-8')
+for compliance_evidence_docs_token in [
+    'Article 23 Baseline',
+    'make compliance-evidence-plan',
+    'COMPLIANCE_EVIDENCE_PROFILE=production-audit-pack',
+    'reports/compliance-evidence-plan.md',
+    'reports/compliance-evidence-values.yaml',
+    'audit pack',
+    'certification',
+]:
+    if compliance_evidence_docs_token not in compliance_evidence_docs_text:
+        errors.append(f'Compliance evidence docs missing token: {compliance_evidence_docs_token}')
+
+incident_response_plan_text = (ROOT / 'scripts/incident_response_plan.py').read_text(encoding='utf-8')
+for incident_response_plan_token in [
+    'Incident Response And Operational Readiness Plan',
+    'public-safe',
+    'incident-drill',
+    'post-incident-review',
+    'incident-response-values.yaml',
+    'make incident-response-plan',
+    'pager',
+]:
+    if incident_response_plan_token not in incident_response_plan_text:
+        errors.append(f'Incident response plan script missing token: {incident_response_plan_token}')
+
+incident_response_config_text = (ROOT / 'config/incident-response.yaml').read_text(encoding='utf-8')
+for incident_response_config_token in [
+    'defaultProfile: disabled',
+    'lab-readiness:',
+    'staging-drill:',
+    'production-oncall:',
+    'regulated-incident:',
+    'supportedIntegrations:',
+    'requiredChecks:',
+]:
+    if incident_response_config_token not in incident_response_config_text:
+        errors.append(f'Incident response config missing token: {incident_response_config_token}')
+
+incident_response_docs_text = (ROOT / 'docs/incident-response.md').read_text(encoding='utf-8')
+for incident_response_docs_token in [
+    'Article 24 Baseline',
+    'make incident-response-plan',
+    'INCIDENT_RESPONSE_PROFILE=production-oncall',
+    'reports/incident-response-plan.md',
+    'reports/incident-response-values.yaml',
+    'post-incident review',
+    'pager',
+]:
+    if incident_response_docs_token not in incident_response_docs_text:
+        errors.append(f'Incident response docs missing token: {incident_response_docs_token}')
+
+change_management_plan_text = (ROOT / 'scripts/change_management_plan.py').read_text(encoding='utf-8')
+for change_management_plan_token in [
+    'Change Management And Maintenance Window Plan',
+    'public-safe',
+    'freeze-check',
+    'stakeholder-notice',
+    'post-change-review',
+    'change-management-values.yaml',
+    'make change-management-plan',
+    'maintenance window',
+]:
+    if change_management_plan_token not in change_management_plan_text:
+        errors.append(f'Change management plan script missing token: {change_management_plan_token}')
+
+change_management_config_text = (ROOT / 'config/change-management.yaml').read_text(encoding='utf-8')
+for change_management_config_token in [
+    'defaultProfile: disabled',
+    'lab-change:',
+    'staging-approval:',
+    'production-cab:',
+    'regulated-change:',
+    'supportedSystems:',
+    'requiredChecks:',
+]:
+    if change_management_config_token not in change_management_config_text:
+        errors.append(f'Change management config missing token: {change_management_config_token}')
+
+change_management_docs_text = (ROOT / 'docs/change-management.md').read_text(encoding='utf-8')
+for change_management_docs_token in [
+    'Article 25 Baseline',
+    'make change-management-plan',
+    'CHANGE_MANAGEMENT_PROFILE=production-cab',
+    'reports/change-management-plan.md',
+    'reports/change-management-values.yaml',
+    'post-change review',
+    'maintenance windows',
+]:
+    if change_management_docs_token not in change_management_docs_text:
+        errors.append(f'Change management docs missing token: {change_management_docs_token}')
+
+disaster_recovery_plan_text = (ROOT / 'scripts/disaster_recovery_plan.py').read_text(encoding='utf-8')
+for disaster_recovery_plan_token in [
+    'Disaster Recovery And Business Continuity Plan',
+    'public-safe',
+    'post-drill-review',
+    'disaster-recovery-values.yaml',
+    'make disaster-recovery-plan',
+    'RTO/RPO',
+    'restore drill',
+]:
+    if disaster_recovery_plan_token not in disaster_recovery_plan_text:
+        errors.append(f'Disaster recovery plan script missing token: {disaster_recovery_plan_token}')
+
+disaster_recovery_config_text = (ROOT / 'config/disaster-recovery.yaml').read_text(encoding='utf-8')
+for disaster_recovery_config_token in [
+    'defaultProfile: disabled',
+    'lab-dr:',
+    'staging-rehearsal:',
+    'production-dr:',
+    'regulated-bcp:',
+    'supportedStrategies:',
+    'requiredChecks:',
+]:
+    if disaster_recovery_config_token not in disaster_recovery_config_text:
+        errors.append(f'Disaster recovery config missing token: {disaster_recovery_config_token}')
+
+disaster_recovery_docs_text = (ROOT / 'docs/disaster-recovery.md').read_text(encoding='utf-8')
+for disaster_recovery_docs_token in [
+    'Article 26 Baseline',
+    'make disaster-recovery-plan',
+    'DISASTER_RECOVERY_PROFILE=production-dr',
+    'reports/disaster-recovery-plan.md',
+    'reports/disaster-recovery-values.yaml',
+    'business continuity',
+    'post-drill review',
+]:
+    if disaster_recovery_docs_token not in disaster_recovery_docs_text:
+        errors.append(f'Disaster recovery docs missing token: {disaster_recovery_docs_token}')
+
+database_migration_controller_text = (ROOT / 'scripts/database_migration_controller.py').read_text(encoding='utf-8')
+for database_migration_controller_token in [
+    'Database Migration Controller Plan',
+    'public-safe',
+    'MIGRATION_ALLOW_SECRET_MATERIAL',
+    'MIGRATION_SKIP_UNAVAILABLE_DATABASES',
+    'MIGRATION_POSTGRES_CLIENT_IMAGE',
+    'pg_dump --format=custom',
+    'pg_restore --clean --if-exists --no-owner',
+    'make database-migration-plan',
+]:
+    if database_migration_controller_token not in database_migration_controller_text:
+        errors.append(f'Database migration controller script missing token: {database_migration_controller_token}')
+
+database_migration_config_text = (ROOT / 'config/database-migration.yaml').read_text(encoding='utf-8')
+for database_migration_config_token in [
+    'defaultProfile: lab',
+    'production:',
+    'skipUnavailableSources: true',
+    'skipUnavailableSources: false',
+    'requireAllowSecretMaterial: true',
+    'postgresql:',
+    'postgis:',
+    'timescaledb:',
+    'status: automated',
+    'status: scaffolded',
+    'phases:',
+]:
+    if database_migration_config_token not in database_migration_config_text:
+        errors.append(f'Database migration config missing controller token: {database_migration_config_token}')
+
+database_migration_docs_text = (ROOT / 'docs/database-migration-controller.md').read_text(encoding='utf-8')
+for database_migration_docs_token in [
+    'Database Migration Controller',
+    'make database-migration-plan',
+    'MIGRATION_STAGE=databases',
+    'MIGRATION_ALLOW_SECRET_MATERIAL=true',
+    'MIGRATION_SKIP_UNAVAILABLE_DATABASES=false',
+    'PostgreSQL, PostGIS, and TimescaleDB',
+    'Optional engines',
+]:
+    if database_migration_docs_token not in database_migration_docs_text:
+        errors.append(f'Database migration controller docs missing token: {database_migration_docs_token}')
+
+edge_migration_plan_text = (ROOT / 'scripts/edge_migration_plan.py').read_text(encoding='utf-8')
+for edge_migration_plan_token in [
+    'Ingress And Edge Migration Plan',
+    'public-safe',
+    'MIGRATION_INGRESS_HOST',
+    'MIGRATION_TLS_CERT_FILE',
+    'MIGRATION_TLS_KEY_FILE',
+    'source allowlist',
+    'backend Services already exist',
+    'make edge-migration-plan',
+]:
+    if edge_migration_plan_token not in edge_migration_plan_text:
+        errors.append(f'Edge migration plan script missing token: {edge_migration_plan_token}')
+
+edge_migration_config_text = (ROOT / 'config/edge-migration.yaml').read_text(encoding='utf-8')
+for edge_migration_config_token in [
+    'defaultProfile: traefik-public',
+    'ingressClassName: traefik',
+    'preserveBackendNginx: internal-only',
+    'requireBackendServiceBeforeApply: true',
+    'defaultTlsMode: cert-manager-self-signed',
+    'sourceAllowListRecommended: true',
+    'ingress-nginx:',
+    'internal-only:',
+]:
+    if edge_migration_config_token not in edge_migration_config_text:
+        errors.append(f'Edge migration config missing ingress/edge token: {edge_migration_config_token}')
+
+edge_migration_docs_text = (ROOT / 'docs/edge-migration.md').read_text(encoding='utf-8')
+for edge_migration_docs_token in [
+    'Ingress And Edge Migration',
+    'make edge-migration-plan',
+    'MIGRATION_STAGE=manifests',
+    'MIGRATION_INGRESS_HOST',
+    'DEPLOY_ALLOWED_CIDRS',
+    'Compose nginx edge gateways',
+    'RKE2-bundled Traefik',
+    'backend Kubernetes Service already exists',
+]:
+    if edge_migration_docs_token not in edge_migration_docs_text:
+        errors.append(f'Edge migration docs missing ingress/edge token: {edge_migration_docs_token}')
+
+environment_profile_plan_text = (ROOT / 'scripts/environment_profile_plan.py').read_text(encoding='utf-8')
+for environment_profile_plan_token in [
+    'Environment Profile Plan',
+    'public-safe',
+    'environment-profile-values.yaml',
+    'MIGRATION_PROFILE=lab',
+    'MIGRATION_IMAGE_MODE=preload',
+    'make environment-profile-plan',
+    'Strict database migration',
+    'Secret provider profile',
+    'Registry promotion profile',
+    'Runtime hardening profile',
+    'GitOps delivery profile',
+    'Progressive delivery profile',
+    'Scaling policy profile',
+    'Network connectivity profile',
+    'Access governance profile',
+    'Compliance evidence profile',
+    'Incident response profile',
+    'Change management profile',
+    'Disaster recovery profile',
+]:
+    if environment_profile_plan_token not in environment_profile_plan_text:
+        errors.append(f'Environment profile plan script missing token: {environment_profile_plan_token}')
+
+environment_profiles_config_text = (ROOT / 'config/environment-profiles.yaml').read_text(encoding='utf-8')
+for environment_profiles_config_token in [
+    'defaultProfile: lab',
+    'staging:',
+    'production:',
+    'migrationProfile: production',
+    'secretProviderProfile: vault',
+    'registryPromotionProfile: enterprise-signed',
+    'runtimeHardeningProfile: production-restricted',
+    'gitOpsProfile: production-argocd',
+    'progressiveDeliveryProfile: production-canary',
+    'scalingPolicyProfile: production-hpa',
+    'networkConnectivityProfile: production-restricted',
+    'accessGovernanceProfile: oidc-sso',
+    'complianceEvidenceProfile: production-audit-pack',
+    'incidentResponseProfile: production-oncall',
+    'changeManagementProfile: production-cab',
+    'disasterRecoveryProfile: production-dr',
+    'imageMode: preload',
+    'imageMode: registry',
+    'strictDatabaseMigration: true',
+    'requireReleaseEvidence: true',
+    'helmValues:',
+]:
+    if environment_profiles_config_token not in environment_profiles_config_text:
+        errors.append(f'Environment profile config missing token: {environment_profiles_config_token}')
+
+environment_profiles_docs_text = (ROOT / 'docs/environment-profiles.md').read_text(encoding='utf-8')
+for environment_profiles_docs_token in [
+    'Environment Profiles',
+    'make environment-profile-plan',
+    'reports/environment-profile-values.yaml',
+    'MIGRATION_PROFILE=lab',
+    'MIGRATION_IMAGE_MODE=preload',
+    'GitOps delivery',
+    'progressive delivery',
+    'scaling policy',
+    'network connectivity',
+    'access governance',
+    'compliance evidence',
+    'incident response',
+    'change management',
+    'disaster recovery',
+    'production',
+    'restore drills',
+]:
+    if environment_profiles_docs_token not in environment_profiles_docs_text:
+        errors.append(f'Environment profile docs missing token: {environment_profiles_docs_token}')
+
+secret_management_values_text = (ROOT / 'helm/urban-platform-infra/values.yaml').read_text(encoding='utf-8')
+for secret_management_values_token in [
+    'providerAdapters:',
+    'kubernetesDirect:',
+    'externalSecrets:',
+    'sealedSecrets:',
+    'rendersPlainKubernetesSecrets: false',
+    'requiredOperator: external-secrets-operator',
+    'requiredOperator: sealed-secrets-controller',
+]:
+    if secret_management_values_token not in secret_management_values_text:
+        errors.append(f'Helm values missing secret provider adapter token: {secret_management_values_token}')
+
+for runtime_hardening_values_token in [
+    'runtimeHardening:',
+    'profile: disabled',
+    'policyEngine: none',
+    'requireReadOnlyRootFilesystem: false',
+    'requireSignatureVerification: false',
+    'reports/runtime-hardening-plan.md',
+]:
+    if runtime_hardening_values_token not in secret_management_values_text:
+        errors.append(f'Helm values missing runtime hardening token: {runtime_hardening_values_token}')
+
+for gitops_delivery_values_token in [
+    'gitOpsDelivery:',
+    'profile: operator-managed',
+    'controller: none',
+    'driftDetection: report-only',
+    'reports/gitops-delivery-plan.md',
+]:
+    if gitops_delivery_values_token not in secret_management_values_text:
+        errors.append(f'Helm values missing GitOps delivery token: {gitops_delivery_values_token}')
+
+for progressive_delivery_values_token in [
+    'progressiveDelivery:',
+    'profile: disabled',
+    'strategy: rolling-update',
+    'controller: none',
+    'reports/progressive-delivery-plan.md',
+]:
+    if progressive_delivery_values_token not in secret_management_values_text:
+        errors.append(f'Helm values missing progressive delivery token: {progressive_delivery_values_token}')
+
+for scaling_policy_values_token in [
+    'scalingPolicy:',
+    'profile: disabled',
+    'mode: disabled',
+    'metricsSource: none',
+    'reports/scaling-policy-plan.md',
+]:
+    if scaling_policy_values_token not in secret_management_values_text:
+        errors.append(f'Helm values missing scaling policy token: {scaling_policy_values_token}')
+
+for network_connectivity_values_token in [
+    'networkConnectivity:',
+    'profile: disabled',
+    'mode: baseline',
+    'ingressClassName: traefik',
+    'serviceMesh:',
+    'provider: none',
+    'reports/network-connectivity-plan.md',
+]:
+    if network_connectivity_values_token not in secret_management_values_text:
+        errors.append(f'Helm values missing network connectivity token: {network_connectivity_values_token}')
+
+for access_governance_values_token in [
+    'accessGovernance:',
+    'profile: disabled',
+    'mode: baseline',
+    'serviceAccountTokenAutomount: false',
+    'identity:',
+    'provider: none',
+    'tenantIsolation:',
+    'reports/access-governance-plan.md',
+]:
+    if access_governance_values_token not in secret_management_values_text:
+        errors.append(f'Helm values missing access governance token: {access_governance_values_token}')
+
+for compliance_evidence_values_token in [
+    'complianceEvidence:',
+    'profile: disabled',
+    'mode: baseline',
+    'collectReports: false',
+    'requirePrivateIndex: false',
+    'packaging:',
+    'format: report-only',
+    'reports/compliance-evidence-plan.md',
+]:
+    if compliance_evidence_values_token not in secret_management_values_text:
+        errors.append(f'Helm values missing compliance evidence token: {compliance_evidence_values_token}')
+
+for incident_response_values_token in [
+    'incidentResponse:',
+    'profile: disabled',
+    'mode: baseline',
+    'severityModel: none',
+    'requirePaging: false',
+    'runbooks:',
+    'requirePostIncidentReview: false',
+    'reports/incident-response-plan.md',
+]:
+    if incident_response_values_token not in secret_management_values_text:
+        errors.append(f'Helm values missing incident response token: {incident_response_values_token}')
+
+for change_management_values_token in [
+    'changeManagement:',
+    'profile: disabled',
+    'mode: baseline',
+    'approvalModel: none',
+    'requireChangeTicket: false',
+    'maintenanceWindow:',
+    'requirePostChangeReview: false',
+    'reports/change-management-plan.md',
+]:
+    if change_management_values_token not in secret_management_values_text:
+        errors.append(f'Helm values missing change management token: {change_management_values_token}')
+
+for disaster_recovery_values_token in [
+    'disasterRecovery:',
+    'profile: disabled',
+    'mode: baseline',
+    'failoverModel: none',
+    'recoveryObjectives:',
+    'requireRtoRpo: false',
+    'restoreDrills:',
+    'requirePostDrillReview: false',
+    'reports/disaster-recovery-plan.md',
+]:
+    if disaster_recovery_values_token not in secret_management_values_text:
+        errors.append(f'Helm values missing disaster recovery token: {disaster_recovery_values_token}')
+
+backup_values_text = (ROOT / 'helm/urban-platform-infra/values.yaml').read_text(encoding='utf-8')
+for backup_values_token in [
+    'backup:',
+    'profile: disabled',
+    'installOperator: false',
+    'rke2Etcd:',
+    'imageArchives:',
+    'externalProviders:',
+    'urbackup:',
+    'restic:',
+    'kopia:',
+    'borg:',
+    'installInCluster: false',
+]:
+    if backup_values_token not in backup_values_text:
+        errors.append(f'Helm values missing disabled backup token: {backup_values_token}')
+
+for platform_capability_values_token in [
+    'platformCapabilities:',
+    'objectStorage:',
+    'minio:',
+    'messaging:',
+    'mqtt:',
+    'provider: emqx',
+    'rabbitmq:',
+    'nats:',
+    'kafkaEcosystem:',
+    'schemaRegistry:',
+    'kafkaConnect:',
+    'debezium:',
+    'identity:',
+    'keycloak:',
+    'secrets:',
+    'vault:',
+    'policy:',
+    'kyverno:',
+    'workflows:',
+    'temporal:',
+    'argoWorkflows:',
+    'serviceMesh:',
+    'provider: none',
+    'linkerd:',
+    'istio:',
+]:
+    if platform_capability_values_token not in backup_values_text:
+        errors.append(f'Helm values missing disabled platform capability token: {platform_capability_values_token}')
+
+platform_capabilities_config_text = (ROOT / 'config/platform-capabilities.yaml').read_text(encoding='utf-8')
+for platform_capabilities_config_token in [
+    'defaultProfile: lab',
+    'enabledByDefault: false',
+    'recommendedOrder:',
+    'category: object-storage',
+    'minio:',
+    'category: messaging',
+    'mqtt:',
+    'rabbitmq:',
+    'nats:',
+    'category: kafka-ecosystem',
+    'schema-registry:',
+    'kafka-connect:',
+    'debezium:',
+    'category: identity',
+    'keycloak:',
+    'category: secrets',
+    'vault:',
+    'category: policy',
+    'kyverno:',
+    'category: workflows',
+    'temporal:',
+    'argo-workflows:',
+    'service-mesh:',
+    'linkerd:',
+    'istio:',
+]:
+    if platform_capabilities_config_token not in platform_capabilities_config_text:
+        errors.append(f'Platform capabilities catalog missing token: {platform_capabilities_config_token}')
+
+platform_capabilities_docs_text = (ROOT / 'docs/platform-capabilities.md').read_text(encoding='utf-8')
+for platform_capabilities_docs_token in [
+    'Optional Platform Capabilities',
+    'disabled by default',
+    'Recommended Enablement Order',
+    'MinIO',
+    'MQTT',
+    'RabbitMQ',
+    'NATS',
+    'Keycloak',
+    'Schema Registry',
+    'Kafka Connect',
+    'Debezium',
+    'Vault',
+    'Kyverno',
+    'Temporal',
+    'Argo Workflows',
+    'Service mesh',
+    'DEPLOY_ENABLE_MINIO=true',
+]:
+    if platform_capabilities_docs_token not in platform_capabilities_docs_text:
+        errors.append(f'Platform capabilities docs missing token: {platform_capabilities_docs_token}')
+
+import_profiles_text = (ROOT / 'config/import-profiles.yaml').read_text(encoding='utf-8')
+for import_profile_token in [
+    'defaultProfile: lab',
+    'enabledByDefault: true',
+    'minimumMemoryPerNode: 4Gi',
+    'importedWorkloads:',
+    'requests:',
+    'cpu: 25m',
+    'memory: 64Mi',
+    'limits:',
+    'cpu: 250m',
+    'memory: 256Mi',
+    'observability: disabled',
+    'optionalCapabilities: disabled',
+    'databaseInstances: 1',
+    'kafkaReplicas: 1',
+    'kafkaUi: disabled',
+    'redisSentinel: disabled',
+    'skipDockerSocketServices: true',
+    'skipUnavailableDatabases: true',
+    'preflight:',
+    'minimumNodeMemory: 3500Mi',
+    'minimumNodeDiskFree: 2048Mi',
+    'maxImportedWorkloads: 40',
+    'capacityUtilizationLimit: 0.70',
+    'batchSize: 40',
+    'importBatch: auto',
+    'resume: true',
+    'requireIngressEndpoint: false',
+    'production:',
+    'capacityUtilizationLimit: 0.85',
+    'importBatch: all',
+    'requireIngressEndpoint: true',
+    'strictDatabaseMigration: true',
+]:
+    if import_profile_token not in import_profiles_text:
+        errors.append(f'Import profiles catalog missing lab-safe token: {import_profile_token}')
+
+values_schema_text = (ROOT / 'helm/urban-platform-infra/values.schema.json').read_text(encoding='utf-8')
+for values_schema_capability_token in [
+    '"platformCapabilities"',
+    '"Optional platform capability catalog"',
+    '"enabled"',
+    '"secretProviderAdapter"',
+    '"providerAdapters"',
+    '"imagePromotionController"',
+    '"requireSignatureOrAttestation"',
+    '"runtimeHardening"',
+    '"requireReadOnlyRootFilesystem"',
+    '"requireSignatureVerification"',
+    '"gitOpsDelivery"',
+    '"driftDetection"',
+    '"progressiveDelivery"',
+    '"blue-green"',
+    '"argo-rollouts"',
+    '"scalingPolicy"',
+    '"event-driven-keda"',
+    '"clusterAutoscaler"',
+    '"networkConnectivity"',
+    '"mesh-linkerd"',
+    '"mesh-istio"',
+    '"requireExplicitCidrs"',
+    '"accessGovernance"',
+    '"oidc-sso"',
+    '"multi-tenant"',
+    '"requireGroupMapping"',
+    '"complianceEvidence"',
+    '"production-audit-pack"',
+    '"regulated-retention"',
+    '"requirePrivateIndex"',
+    '"incidentResponse"',
+    '"production-oncall"',
+    '"regulated-incident"',
+    '"requirePaging"',
+    '"changeManagement"',
+    '"production-cab"',
+    '"regulated-change"',
+    '"requireFreezeCheck"',
+    '"disasterRecovery"',
+    '"production-dr"',
+    '"regulated-bcp"',
+    '"requireRtoRpo"',
+]:
+    if values_schema_capability_token not in values_schema_text:
+        errors.append(f'Values schema missing platform capability token: {values_schema_capability_token}')
 
 helm_installer_text = (ROOT / 'scripts/tools/install-helm.sh').read_text(encoding='utf-8')
 for helm_installer_token in [
@@ -1128,6 +3050,19 @@ for control in [
 ]:
     if release_integrity.get(control) is not True:
         errors.append(f'Supply-chain policy must enable release control: {control}')
+release_verification = policy.get('releaseVerification', {})
+for verification_control in [
+    'verifyTagMatchesChartVersion',
+    'verifyChecksumContents',
+    'verifySbomJson',
+    'publicSafetyScan',
+]:
+    if release_verification.get(verification_control) is not True:
+        errors.append(f'Supply-chain policy must enable release verification control: {verification_control}')
+if release_verification.get('offlineVerifier') != 'scripts/release/verify_release_evidence.py':
+    errors.append('Supply-chain policy must point at the offline release evidence verifier')
+if release_verification.get('report') != 'reports/release-evidence-verification.md':
+    errors.append('Supply-chain policy must write the public-safe release verification report')
 if 'master' not in policy.get('githubActions', {}).get('disallowFloatingRefs', []):
     errors.append('Supply-chain policy must disallow floating @master action refs')
 if 'main' not in policy.get('githubActions', {}).get('disallowFloatingRefs', []):
@@ -1148,6 +3083,32 @@ if 'latest-pg18' not in blocked_tags:
     errors.append('Image policy must block TimescaleDB latest-pg18 mutable tag')
 if image_policy_controls.get('defaultApplicationTag') != '0.1.0':
     errors.append('Image policy must pin placeholder application images to 0.1.0')
+image_promotion_controls = image_policy_controls.get('imagePromotion', {})
+for promotion_control in [
+    'requirePrivateRegistry',
+    'requireDigestPins',
+    'requireVulnerabilityScan',
+    'requireSbom',
+    'requireSignatureOrAttestation',
+    'requirePromotionRecord',
+    'publicSafeReport',
+]:
+    if image_promotion_controls.get(promotion_control) is not True:
+        errors.append(f'Image policy must enable promotion evidence control: {promotion_control}')
+if image_promotion_controls.get('planGenerator') != 'scripts/images/promotion_plan.py':
+    errors.append('Image policy must point at the public-safe image promotion planner')
+if image_promotion_controls.get('report') != 'reports/image-promotion-plan.md':
+    errors.append('Image policy must write the public-safe image promotion report')
+if image_promotion_controls.get('controllerConfig') != 'config/registry-promotion.yaml':
+    errors.append('Image policy must point at the registry promotion controller config')
+if image_promotion_controls.get('controllerGenerator') != 'scripts/images/registry_promotion_controller.py':
+    errors.append('Image policy must point at the registry promotion controller script')
+if image_promotion_controls.get('controllerReport') != 'reports/registry-promotion-controller.md':
+    errors.append('Image policy must write the registry promotion controller report')
+if image_promotion_controls.get('controllerOverrides') != 'reports/registry-promotion-values.yaml':
+    errors.append('Image policy must write the registry promotion values overlay')
+if image_promotion_controls.get('defaultControllerProfile') != 'disabled':
+    errors.append('Image policy registry promotion controller must default to disabled')
 for approved_repository in [
     'nginxinc/nginx-unprivileged',
     'confluentinc/cp-zookeeper',

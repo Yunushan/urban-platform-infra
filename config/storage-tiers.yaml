@@ -1,0 +1,79 @@
+defaultProfile: lab
+tiers:
+  hot:
+    description: Active read/write data for databases, queues, caches, and stateful application pods.
+    kubernetes:
+      storageClassName: ''
+      volumeBindingMode: WaitForFirstConsumer
+      reclaimPolicy: Retain
+    expectedMedia:
+      - ssd
+      - nvme
+    examples:
+      - PostgreSQL primary data
+      - PostGIS active data
+      - TimescaleDB active chunks
+      - Kafka broker logs
+      - Redis append-only data
+  warm:
+    description: Lower-cost persistent volumes for compressed or less frequently accessed data.
+    kubernetes:
+      storageClassName: ''
+      volumeBindingMode: WaitForFirstConsumer
+      reclaimPolicy: Retain
+    expectedMedia:
+      - standard-ssd
+      - replicated-block
+    examples:
+      - compressed TimescaleDB chunks
+      - older analytics tables
+      - medium-retention logs
+  cold:
+    description: Object storage or archive storage for backups, dumps, old logs, and long-retention exports.
+    kubernetes:
+      storageClassName: ''
+      volumeBindingMode: WaitForFirstConsumer
+      reclaimPolicy: Retain
+    objectStore:
+      provider: s3-compatible
+      bucket: ''
+      prefix: urban-platform
+      credentialsSecretRef:
+        name: ''
+        namespace: ''
+        accessKeyIdKey: accessKeyId
+        secretAccessKeyKey: secretAccessKey
+    examples:
+      - CloudNativePG backups
+      - import database dumps
+      - Elasticsearch or OpenSearch snapshots
+      - historical log archives
+profiles:
+  lab:
+    description: Constrained lab profile; hot storage can use local-path and cold storage can remain disabled.
+    recommended:
+      hot:
+        enabled: true
+      warm:
+        enabled: false
+      cold:
+        enabled: false
+  production:
+    description: Production profile with fast hot storage and object-store-backed cold archives.
+    recommended:
+      hot:
+        enabled: true
+      warm:
+        enabled: true
+      cold:
+        enabled: true
+workloadMapping:
+  activeDatabases: hot
+  databaseBackups: cold
+  kafkaData: hot
+  redisData: hot
+  importedStatefulWorkloads: hot
+  observabilityIndexes: warm
+  observabilitySnapshots: cold
+  importDumps: cold
+  releaseEvidence: cold

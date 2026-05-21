@@ -1,6 +1,8 @@
 {{- if .Values.messaging.kafka.enabled }}
 {{- $zookeeperReplicas := int (include "cip.replicaCount" (list . (.Values.messaging.kafka.zookeeper.replicas | default 3))) }}
 {{- $kafkaReplicas := int (include "cip.replicaCount" (list . (.Values.messaging.kafka.replicas | default 3))) }}
+{{- $zookeeperStorageClass := include "cip.storageClassName" (list . (.Values.messaging.kafka.zookeeper.storage.className | default "") "hot") }}
+{{- $kafkaStorageClass := include "cip.storageClassName" (list . (.Values.messaging.kafka.storage.className | default "") "hot") }}
 {{- $zookeeperServers := list }}
 {{- $zookeeperConnect := list }}
 {{- range $i := until $zookeeperReplicas }}
@@ -81,8 +83,8 @@ spec:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
-{{ if .Values.messaging.kafka.zookeeper.storage.className }}
-        storageClassName: {{ .Values.messaging.kafka.zookeeper.storage.className | quote }}
+{{ if $zookeeperStorageClass }}
+        storageClassName: {{ $zookeeperStorageClass | quote }}
 {{ end }}
         resources:
           requests:
@@ -171,8 +173,8 @@ spec:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
-{{ if .Values.messaging.kafka.storage.className }}
-        storageClassName: {{ .Values.messaging.kafka.storage.className | quote }}
+{{ if $kafkaStorageClass }}
+        storageClassName: {{ $kafkaStorageClass | quote }}
 {{ end }}
         resources:
           requests:

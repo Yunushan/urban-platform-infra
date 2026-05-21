@@ -18,6 +18,9 @@ This project treats the Helm chart as the production contract for the infrastruc
 - `global.podSecurityContext` enables pod-level runtime defaults such as seccomp and `fsGroupChangePolicy`.
 - `global.security` controls container-level settings for application workloads.
 - `global.scheduling.topologySpread` enables zone and node spreading for replicated workloads.
+- `runtimeHardening` is a disabled-by-default admission readiness contract. Use
+  `make runtime-hardening-plan` before enforcing restricted Pod Security,
+  read-only root filesystems, digest-only images, or signed-image admission.
 - `webserver.service` controls service type, annotations, and load balancer source ranges.
 - Per-workload `service.annotations` and `service.loadBalancerSourceRanges` support controlled cloud-provider integration when a workload must be directly exposed.
 
@@ -27,3 +30,5 @@ This project treats the Helm chart as the production contract for the infrastruc
 2. Add provider-specific webserver security contexts after validating each image can run non-root.
 3. Add chart unit tests for service exposure, service account token behavior, and topology spread rendering.
 4. Promote `namespace.podSecurity.enforce` from `baseline` to `restricted` after image runtime compatibility is verified.
+5. Generate `reports/runtime-hardening-plan.md` and move from `lab-audit` to
+   `production-restricted` only after writable paths and digest pins are ready.

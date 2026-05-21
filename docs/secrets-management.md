@@ -24,6 +24,23 @@ The secret inventory lives in `config/secrets.contract.yaml`. It defines:
 
 The contract intentionally does not include values.
 
+## Provider Adapters
+
+Secret provider adapter profiles live in
+`config/secret-provider-adapters.yaml`. They are disabled by default and define
+the supported runtime or Git-encrypted delivery modes:
+
+- `external-secrets`: renders External Secrets Operator resources that pull
+  values from a managed provider.
+- `vault`: Vault-backed External Secrets profile for enterprise deployments.
+- `sops`: encrypted files in Git with SOPS and age.
+- `sealed-secrets`: GitOps-friendly encrypted Secret manifests.
+- `kubernetes-direct`: a guarded lab or emergency path that requires
+  `MIGRATION_ALLOW_SECRET_MATERIAL=true`.
+
+See [`docs/secret-provider-adapters.md`](secret-provider-adapters.md) for the
+import switches and production guidance.
+
 ## External Secrets
 
 The Helm chart can render `ExternalSecret` resources from `secretManagement.externalSecrets`, but the feature is disabled by default:
@@ -34,6 +51,10 @@ secretManagement:
 ```
 
 Enable it only after installing External Secrets Operator and creating the referenced `SecretStore` or `ClusterSecretStore` in the cluster.
+During import, `MIGRATION_SECRET_PROVIDER=external-secrets` or
+`MIGRATION_SECRET_PROVIDER=vault` applies `ExternalSecret` resources instead of
+plain Kubernetes Secret manifests. Remote provider values must already exist
+under `MIGRATION_SECRET_REMOTE_PREFIX`.
 
 ## SOPS
 

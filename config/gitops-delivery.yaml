@@ -1,0 +1,73 @@
+defaultProfile: operator-managed
+profiles:
+  operator-managed:
+    description: Default mode. The operator runs Make, Helmfile, and Helm directly.
+    enabled: false
+    controller: none
+    reconciliation: manual
+    driftDetection: report-only
+    prune: false
+    selfHeal: false
+    requirePrivateRepo: false
+    requireSignedCommits: false
+    requireProtectedBranch: false
+    requirePrivateOverlays: false
+  lab-argocd:
+    description: Lab GitOps profile for Argo CD dry runs and drift visibility.
+    enabled: true
+    controller: argocd
+    reconciliation: automated
+    driftDetection: warn
+    prune: false
+    selfHeal: true
+    requirePrivateRepo: false
+    requireSignedCommits: false
+    requireProtectedBranch: false
+    requirePrivateOverlays: false
+  production-argocd:
+    description: Production Argo CD profile with private overlays and controlled pruning.
+    enabled: true
+    controller: argocd
+    reconciliation: automated
+    driftDetection: enforce
+    prune: false
+    selfHeal: true
+    requirePrivateRepo: true
+    requireSignedCommits: true
+    requireProtectedBranch: true
+    requirePrivateOverlays: true
+  production-flux:
+    description: Production Flux profile for teams standardizing on source and Helm controllers.
+    enabled: true
+    controller: flux
+    reconciliation: automated
+    driftDetection: enforce
+    prune: false
+    selfHeal: true
+    requirePrivateRepo: true
+    requireSignedCommits: true
+    requireProtectedBranch: true
+    requirePrivateOverlays: true
+controller:
+  publicSafeReport: true
+  report: reports/gitops-delivery-plan.md
+  overrides: reports/gitops-delivery-values.yaml
+  argocdApplication: deploy/argocd/urban-platform-infra-application.yaml
+  kustomizeRoot: deploy/kustomize
+  helmfile: deploy/helmfile.yaml.gotmpl
+  supportedControllers:
+    - none
+    - argocd
+    - flux
+  requiredChecks:
+    - private repo URL provided outside public Git
+    - private values overlays live outside public repo
+    - branch protection and signed commit policy reviewed
+    - Helm render and policy checks pass before sync
+    - drift remediation and rollback owner assigned
+guardrails:
+  - keep GitOps delivery disabled by default in committed values
+  - never commit private repo URLs, deploy keys, tokens, kubeconfigs, or private overlays
+  - start with prune disabled until ownership and orphan handling are reviewed
+  - keep operator-managed Helmfile available as the break-glass path
+  - run runtime hardening, registry promotion, backup, and restore plans before production GitOps enforcement

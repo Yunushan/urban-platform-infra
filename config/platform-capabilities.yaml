@@ -1,0 +1,111 @@
+defaultProfile: lab
+enabledByDefault: false
+profiles:
+  lab:
+    description: Minimal profile for constrained test clusters.
+    enabled: false
+    defaultAction: document-only
+  enterprise:
+    description: Enterprise capability catalog for explicit opt-in deployments.
+    enabled: false
+    defaultAction: operator-reviewed
+recommendedOrder:
+- minio
+- mqtt
+- rabbitmq
+- keycloak
+- kafka-schema-registry
+- kafka-connect
+- debezium
+- vault
+- kyverno
+- nats
+- temporal
+- argo-workflows
+- service-mesh
+capabilities:
+  minio:
+    enabled: false
+    category: object-storage
+    role: s3-compatible-artifacts-backups-uploads
+    defaultMode: external-or-helmfile
+    labImpact: medium
+  mqtt:
+    enabled: false
+    category: messaging
+    providers:
+      emqx:
+        enabled: false
+        role: enterprise-mqtt-iot-broker
+      mosquitto:
+        enabled: false
+        role: lightweight-mqtt-lab-or-edge-broker
+    labImpact: medium
+  rabbitmq:
+    enabled: false
+    category: messaging
+    role: work-queues-retries-delayed-tasks
+    labImpact: medium
+  nats:
+    enabled: false
+    category: messaging
+    role: lightweight-low-latency-pubsub-and-edge-events
+    labImpact: low
+  keycloak:
+    enabled: false
+    category: identity
+    role: oidc-saml-sso-and-role-management
+    labImpact: medium
+  kafka-schema-registry:
+    enabled: false
+    category: kafka-ecosystem
+    role: kafka-event-contract-governance
+    labImpact: low
+  kafka-connect:
+    enabled: false
+    category: kafka-ecosystem
+    role: connector-runtime-for-ingest-egress-and-cdc
+    labImpact: medium
+  debezium:
+    enabled: false
+    category: kafka-ecosystem
+    role: database-change-data-capture-through-kafka-connect
+    labImpact: medium
+  vault:
+    enabled: false
+    category: secrets
+    role: enterprise-secret-and-pki-backend
+    labImpact: medium
+  kyverno:
+    enabled: false
+    category: policy
+    role: kubernetes-admission-policy-and-image-guardrails
+    labImpact: low
+  temporal:
+    enabled: false
+    category: workflows
+    role: durable-long-running-service-workflows
+    labImpact: high
+  argo-workflows:
+    enabled: false
+    category: workflows
+    role: kubernetes-native-batch-and-migration-workflows
+    labImpact: medium
+  service-mesh:
+    enabled: false
+    category: networking
+    providers:
+      linkerd:
+        enabled: false
+        role: lightweight-mtls-traffic-policy
+      istio:
+        enabled: false
+        role: enterprise-mesh-traffic-security-and-policy
+    labImpact: high
+validation:
+  requiredBeforeEnable:
+  - capacity-plan-reviewed
+  - storage-and-secret-references-declared
+  - ingress-and-dns-plan-reviewed
+  - restore-or-rollback-plan-defined
+  - production-owner-approved

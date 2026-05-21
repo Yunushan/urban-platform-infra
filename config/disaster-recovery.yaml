@@ -1,0 +1,202 @@
+defaultProfile: disabled
+enabledByDefault: false
+
+profiles:
+  disabled:
+    description: No disaster recovery or business continuity automation is enabled.
+    enabled: false
+    mode: baseline
+    tier: none
+    failoverModel: none
+    recoveryObjectives:
+      enabled: false
+      requireRtoRpo: false
+      requireDependencyMap: false
+      requireCriticalityMap: false
+    replication:
+      enabled: false
+      requireBackupReplication: false
+      requireDataReplication: false
+      requireCrossZonePlacement: false
+    restoreDrills:
+      enabled: false
+      requireDatabaseRestore: false
+      requireEtcdRestore: false
+      requireNamespaceRestore: false
+      requireApplicationSmokeTest: false
+    continuity:
+      enabled: false
+      requireRunbook: false
+      requireCommsPlan: false
+      requireManualWorkaround: false
+      requireSupplierContacts: false
+    evidence:
+      enabled: false
+      requireDrillEvidence: false
+      requireRtoEvidence: false
+      requirePostDrillReview: false
+
+  lab-dr:
+    description: Lab disaster recovery rehearsal for selected workloads.
+    enabled: false
+    mode: rehearsal
+    tier: lab
+    failoverModel: backup-restore
+    recoveryObjectives:
+      enabled: true
+      requireRtoRpo: false
+      requireDependencyMap: false
+      requireCriticalityMap: false
+    replication:
+      enabled: false
+      requireBackupReplication: false
+      requireDataReplication: false
+      requireCrossZonePlacement: false
+    restoreDrills:
+      enabled: true
+      requireDatabaseRestore: true
+      requireEtcdRestore: false
+      requireNamespaceRestore: false
+      requireApplicationSmokeTest: true
+    continuity:
+      enabled: true
+      requireRunbook: true
+      requireCommsPlan: false
+      requireManualWorkaround: false
+      requireSupplierContacts: false
+    evidence:
+      enabled: true
+      requireDrillEvidence: false
+      requireRtoEvidence: false
+      requirePostDrillReview: false
+
+  staging-rehearsal:
+    description: Staging rehearsal for backup restore, namespace restore, and failover runbooks.
+    enabled: false
+    mode: rehearsal
+    tier: non-production
+    failoverModel: warm-standby
+    recoveryObjectives:
+      enabled: true
+      requireRtoRpo: true
+      requireDependencyMap: true
+      requireCriticalityMap: true
+    replication:
+      enabled: true
+      requireBackupReplication: true
+      requireDataReplication: false
+      requireCrossZonePlacement: false
+    restoreDrills:
+      enabled: true
+      requireDatabaseRestore: true
+      requireEtcdRestore: true
+      requireNamespaceRestore: true
+      requireApplicationSmokeTest: true
+    continuity:
+      enabled: true
+      requireRunbook: true
+      requireCommsPlan: true
+      requireManualWorkaround: false
+      requireSupplierContacts: false
+    evidence:
+      enabled: true
+      requireDrillEvidence: true
+      requireRtoEvidence: true
+      requirePostDrillReview: true
+
+  production-dr:
+    description: Production disaster recovery readiness for critical services.
+    enabled: false
+    mode: production
+    tier: critical
+    failoverModel: active-passive
+    recoveryObjectives:
+      enabled: true
+      requireRtoRpo: true
+      requireDependencyMap: true
+      requireCriticalityMap: true
+    replication:
+      enabled: true
+      requireBackupReplication: true
+      requireDataReplication: true
+      requireCrossZonePlacement: true
+    restoreDrills:
+      enabled: true
+      requireDatabaseRestore: true
+      requireEtcdRestore: true
+      requireNamespaceRestore: true
+      requireApplicationSmokeTest: true
+    continuity:
+      enabled: true
+      requireRunbook: true
+      requireCommsPlan: true
+      requireManualWorkaround: true
+      requireSupplierContacts: true
+    evidence:
+      enabled: true
+      requireDrillEvidence: true
+      requireRtoEvidence: true
+      requirePostDrillReview: true
+
+  regulated-bcp:
+    description: Regulated business continuity profile with evidence and review controls.
+    enabled: false
+    mode: regulated
+    tier: regulated-critical
+    failoverModel: active-passive
+    recoveryObjectives:
+      enabled: true
+      requireRtoRpo: true
+      requireDependencyMap: true
+      requireCriticalityMap: true
+    replication:
+      enabled: true
+      requireBackupReplication: true
+      requireDataReplication: true
+      requireCrossZonePlacement: true
+    restoreDrills:
+      enabled: true
+      requireDatabaseRestore: true
+      requireEtcdRestore: true
+      requireNamespaceRestore: true
+      requireApplicationSmokeTest: true
+    continuity:
+      enabled: true
+      requireRunbook: true
+      requireCommsPlan: true
+      requireManualWorkaround: true
+      requireSupplierContacts: true
+    evidence:
+      enabled: true
+      requireDrillEvidence: true
+      requireRtoEvidence: true
+      requirePostDrillReview: true
+
+controller:
+  report: reports/disaster-recovery-plan.md
+  overrides: reports/disaster-recovery-values.yaml
+  status: plan-only
+  mutatesCluster: false
+
+supportedStrategies:
+  - none
+  - backup-restore
+  - single-region-ha
+  - multi-zone
+  - warm-standby
+  - active-passive
+  - active-active
+
+requiredChecks:
+  - backup-plan-reviewed
+  - restore-drill-evidence-reviewed
+  - rto-rpo-objectives-reviewed
+  - dependency-map-reviewed
+  - failover-runbook-reviewed
+  - post-drill-review-recorded
+
+guardrails:
+  - Keep real recovery site names, DNS names, node addresses, and supplier contacts out of public reports.
+  - Do not claim production continuity until restore drills prove RTO/RPO targets.
+  - Do not enable active failover automation from public values alone.
+  - Keep drill logs, outage timelines, and customer impact notes in approved private systems.

@@ -1,0 +1,167 @@
+defaultProfile: disabled
+profiles:
+  disabled:
+    description: Default committed state. Autoscaling and right-sizing automation remain disabled.
+    enabled: false
+    mode: disabled
+    metricsSource: none
+    hpa:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 70
+    vpa:
+      enabled: false
+      updateMode: Off
+    keda:
+      enabled: false
+      triggers: []
+    clusterAutoscaler:
+      enabled: false
+      mode: external
+    rightSizing:
+      enabled: false
+      capacityUtilizationLimit: 0.70
+      requireRequests: true
+    requireMetrics: false
+    requireSlo: false
+    requireLoadTest: false
+    requireCapacityReport: false
+    requireEventSource: false
+  lab-rightsize:
+    description: Lab sizing guardrails for small clusters. HPA and event-driven scaling stay disabled until metrics exist.
+    enabled: true
+    mode: rightsize
+    metricsSource: none
+    hpa:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 1
+      targetCPUUtilizationPercentage: 70
+    vpa:
+      enabled: false
+      updateMode: Off
+    keda:
+      enabled: false
+      triggers: []
+    clusterAutoscaler:
+      enabled: false
+      mode: external
+    rightSizing:
+      enabled: true
+      capacityUtilizationLimit: 0.70
+      requireRequests: true
+    requireMetrics: false
+    requireSlo: false
+    requireLoadTest: false
+    requireCapacityReport: true
+    requireEventSource: false
+  production-hpa:
+    description: Production HPA readiness profile. Requires metrics, SLO review, capacity evidence, and load-test evidence.
+    enabled: true
+    mode: hpa
+    metricsSource: prometheus-adapter
+    hpa:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 9
+      targetCPUUtilizationPercentage: 70
+    vpa:
+      enabled: false
+      updateMode: Off
+    keda:
+      enabled: false
+      triggers: []
+    clusterAutoscaler:
+      enabled: false
+      mode: external
+    rightSizing:
+      enabled: true
+      capacityUtilizationLimit: 0.85
+      requireRequests: true
+    requireMetrics: true
+    requireSlo: true
+    requireLoadTest: true
+    requireCapacityReport: true
+    requireEventSource: false
+  event-driven-keda:
+    description: Optional event-driven scaling readiness profile for queue, stream, or schedule based workloads.
+    enabled: true
+    mode: keda
+    metricsSource: keda
+    hpa:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 12
+      targetCPUUtilizationPercentage: 70
+    vpa:
+      enabled: false
+      updateMode: Off
+    keda:
+      enabled: true
+      triggers:
+      - kafka
+      - redis
+      - cron
+    clusterAutoscaler:
+      enabled: false
+      mode: external
+    rightSizing:
+      enabled: true
+      capacityUtilizationLimit: 0.85
+      requireRequests: true
+    requireMetrics: true
+    requireSlo: true
+    requireLoadTest: true
+    requireCapacityReport: true
+    requireEventSource: true
+  enterprise-autoscaling:
+    description: Enterprise autoscaling readiness profile combining HPA, VPA recommendation mode, and externally owned cluster autoscaler.
+    enabled: true
+    mode: enterprise
+    metricsSource: prometheus-adapter
+    hpa:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 12
+      targetCPUUtilizationPercentage: 65
+    vpa:
+      enabled: true
+      updateMode: Initial
+    keda:
+      enabled: false
+      triggers: []
+    clusterAutoscaler:
+      enabled: true
+      mode: external
+    rightSizing:
+      enabled: true
+      capacityUtilizationLimit: 0.80
+      requireRequests: true
+    requireMetrics: true
+    requireSlo: true
+    requireLoadTest: true
+    requireCapacityReport: true
+    requireEventSource: false
+controller:
+  report: reports/scaling-policy-plan.md
+  overrides: reports/scaling-policy-values.yaml
+  supportedAutoscalers:
+  - none
+  - hpa
+  - vpa
+  - keda
+  - cluster-autoscaler
+  requiredChecks:
+  - capacity report reviewed
+  - workload requests and limits reviewed
+  - metrics pipeline installed and queried
+  - SLO burn-rate or saturation alerts reviewed
+  - load test or replay evidence reviewed
+  - rollback and progressive delivery gates reviewed
+guardrails:
+- keep scaling policy disabled by default in committed values
+- keep lab HPA disabled until metrics-server or Prometheus Adapter is proven
+- do not enable VPA mutating modes with HPA before ownership is reviewed
+- do not enable KEDA without private trigger metadata and secret references
+- cluster autoscaler is an infrastructure concern and must be owned outside public chart defaults

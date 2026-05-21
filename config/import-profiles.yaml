@@ -1,0 +1,86 @@
+defaultProfile: lab
+profiles:
+  lab:
+    enabledByDefault: true
+    description: Constrained import profile for small validation clusters.
+    expectedCluster:
+      minimumNodes: 1
+      recommendedNodes: 3
+      minimumMemoryPerNode: 4Gi
+    importedWorkloads:
+      replicas: 1
+      resources:
+        requests:
+          cpu: 25m
+          memory: 64Mi
+        limits:
+          cpu: 250m
+          memory: 256Mi
+    platformDefaults:
+      autoscaling: disabled
+      observability: disabled
+      optionalCapabilities: disabled
+      databaseInstances: 1
+      databaseStorage: 1Gi
+      kafkaReplicas: 1
+      kafkaUi: disabled
+      redisSentinel: disabled
+    migrationGuards:
+      skipDockerSocketServices: true
+      skipUnavailableDatabases: true
+      strictDatabaseMigration: false
+    generatedArtifacts:
+    - reports/import-migration/import-preflight.md
+    - reports/import-migration/import-capacity.md
+    - reports/import-migration/import-batches.md
+    - reports/import-migration/import-batches.yaml
+    - reports/import-migration/import-resume.md
+    - reports/import-migration/import-profile.md
+    - reports/import-migration/lab-profile-values.yaml
+    preflight:
+      minimumNodeMemory: 3500Mi
+      minimumNodeDiskFree: 2048Mi
+      maxImportedWorkloads: 40
+      capacityUtilizationLimit: 0.70
+      batchSize: 40
+      importBatch: auto
+      resume: true
+      requireIngressEndpoint: false
+  production:
+    enabledByDefault: false
+    description: Capacity-planned import profile for production migrations.
+    expectedCluster:
+      minimumNodes: 3
+      recommendedNodes: 3+
+      minimumMemoryPerNode: capacity-plan-required
+    importedWorkloads:
+      replicas: source-or-helm-values
+      resources: capacity-plan-required
+    platformDefaults:
+      autoscaling: explicit
+      observability: explicit
+      optionalCapabilities: explicit
+      databaseInstances: explicit-ha-plan
+      databaseStorage: explicit-storage-plan
+      kafkaReplicas: explicit-ha-plan
+      kafkaUi: explicit
+      redisSentinel: explicit
+    migrationGuards:
+      skipDockerSocketServices: true
+      skipUnavailableDatabases: false
+      strictDatabaseMigration: true
+    requiredBeforeUse:
+    - capacity-plan-reviewed
+    - backup-and-restore-plan-reviewed
+    - registry-or-preload-strategy-reviewed
+    - database-target-map-reviewed
+    - cluster-health-preflight-passing
+    preflight:
+      minimumNodeMemory: capacity-plan-required
+      minimumNodeDiskFree: capacity-plan-required
+      maxImportedWorkloads: disabled
+      capacityUtilizationLimit: 0.85
+      batchSize: disabled
+      importBatch: all
+      resume: true
+      requireIngressEndpoint: true

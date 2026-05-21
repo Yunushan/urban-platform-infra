@@ -12,6 +12,14 @@ journalctl -u keepalived -n 100
 
 ## Kubernetes API unreachable
 
+Generate a public-safe diagnostic report first:
+
+```bash
+make cluster-doctor \
+  CLUSTER_DOCTOR_NODES=<node-1>,<node-2>,<node-3> \
+  CLUSTER_DOCTOR_SSH_USER=ansible
+```
+
 ```bash
 systemctl status haproxy
 ss -lntp | grep -E '6443|7443|9345|9346'
@@ -26,6 +34,10 @@ by hand:
 make operator-kubeconfig ENV=prod ENGINE=rke2 INVENTORY=<private-inventory>
 kubectl config view --minify | grep server
 ```
+
+If the report shows SSH/sudo, HAProxy, Keepalived, or RKE2 service problems and
+you want the guarded repair workflow to run, use `make cluster-repair` with the
+same node/user variables.
 
 `make install-operators` and `make deploy` run this step automatically.
 

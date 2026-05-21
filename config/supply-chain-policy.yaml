@@ -6,6 +6,13 @@ policy:
     requireSbom: true
     requireGithubArtifactAttestations: true
     requireOidcForSigning: true
+  releaseVerification:
+    offlineVerifier: scripts/release/verify_release_evidence.py
+    report: reports/release-evidence-verification.md
+    verifyTagMatchesChartVersion: true
+    verifyChecksumContents: true
+    verifySbomJson: true
+    publicSafetyScan: true
   githubActions:
     disallowFloatingRefs:
       - master

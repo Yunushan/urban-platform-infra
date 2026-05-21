@@ -1,0 +1,70 @@
+defaultProfile: traefik-public
+profiles:
+  traefik-public:
+    description: Default RKE2 edge migration profile using Traefik Ingress.
+    ingressClassName: traefik
+    webserverProvider: nginx
+    migrateHostPorts: true
+    preserveBackendNginx: internal-only
+    requireBackendServiceBeforeApply: true
+    requireTls: true
+    defaultTlsMode: cert-manager-self-signed
+    enableHttpRedirect: true
+    sourceAllowListRecommended: true
+    guardrails:
+    - move host port 80 and 443 bindings to Kubernetes Ingress
+    - keep nginx as an internal backend only when it still serves static files or reverse-proxy rules
+    - do not deploy a second Traefik controller when RKE2 bundled Traefik is selected
+    - apply generated Ingress candidates only after backend Services exist
+    - keep private DNS names, VIPs, and TLS material outside Git
+  ingress-nginx:
+    description: Compatibility profile for clusters intentionally using ingress-nginx.
+    ingressClassName: nginx
+    webserverProvider: nginx
+    migrateHostPorts: true
+    preserveBackendNginx: internal-only
+    requireBackendServiceBeforeApply: true
+    requireTls: true
+    defaultTlsMode: existing-or-cert-manager
+    enableHttpRedirect: true
+    sourceAllowListRecommended: true
+    guardrails:
+    - set both inventory and Helm values to nginx ingress before deployment
+    - use nginx ingress annotations instead of Traefik middleware resources
+    - keep backend nginx separate from the ingress controller
+  internal-only:
+    description: No public edge cutover; generated services remain ClusterIP or private.
+    ingressClassName: none
+    webserverProvider: nginx
+    migrateHostPorts: false
+    preserveBackendNginx: internal-only
+    requireBackendServiceBeforeApply: true
+    requireTls: false
+    defaultTlsMode: disabled
+    enableHttpRedirect: false
+    sourceAllowListRecommended: false
+    guardrails:
+    - skip public Ingress until a DNS and TLS cutover plan exists
+    - validate private service connectivity with port-forward or internal probes
+phases:
+- name: discover
+  automation: import-check edge findings and service inventory
+- name: classify
+  automation: host port 80/443, nginx, and Traefik Compose service classification
+- name: backend
+  automation: generate ClusterIP Service and Deployment manifests
+- name: tls
+  automation: existing secret, provided cert files, cert-manager, or self-signed fallback
+- name: middleware
+  automation: HTTP redirect and optional source allowlist middleware
+- name: route
+  automation: write Traefik Ingress candidates and apply only when backend Services exist
+- name: validate
+  automation: DNS, TLS endpoint, route, and backend smoke checks
+checks:
+- ingress host or global cluster domain is configured before public TLS issuance
+- TLS mode is selected before public cutover
+- source allowlist is reviewed for public routes
+- backend Kubernetes Services exist before generated Ingress candidates are applied
+- Compose edge gateway host ports are removed from the Kubernetes workload model
+- nginx 1.18 style edge gateways are replaced by Traefik routes or internal backend Services

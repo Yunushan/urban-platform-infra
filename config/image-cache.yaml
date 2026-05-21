@@ -1,0 +1,59 @@
+defaultProfile: lab-preload
+profiles:
+  lab-preload:
+    description: Public-safe default for small RKE2 labs without a private registry.
+    imageMode: preload
+    cleanupOperatorImages: true
+    pruneOperatorCache: true
+    rke2ImportImages: true
+    streamArchives: true
+    staleArchiveAction: delete-before-run
+    nodeArchiveRetention: remove-after-containerd-import
+    pullPolicy: IfNotPresent
+    maxOperatorArchiveGi: 8
+    maxOperatorCacheGi: 12
+    guardrails:
+    - keep MIGRATION_CLEANUP_OPERATOR_IMAGES=true unless debugging a failed build
+    - keep MIGRATION_PRUNE_OPERATOR_CACHE=true on small operator disks
+    - set MIGRATION_RKE2_NODES so preload archives stream to nodes instead of remaining on the operator
+    - keep MIGRATION_RKE2_IMPORT_IMAGES=true so running RKE2 nodes import archives without a service restart
+  production-registry:
+    description: Production-friendly path using an authenticated private registry.
+    imageMode: registry
+    cleanupOperatorImages: true
+    pruneOperatorCache: true
+    rke2ImportImages: false
+    streamArchives: false
+    staleArchiveAction: not-applicable
+    nodeArchiveRetention: not-applicable
+    pullPolicy: IfNotPresent
+    maxOperatorArchiveGi: 0
+    maxOperatorCacheGi: 20
+    guardrails:
+    - require MIGRATION_REGISTRY to point at a real private registry
+    - use registry credentials through MIGRATION_REGISTRY_USERNAME and MIGRATION_REGISTRY_PASSWORD when login is required
+    - pin promoted production images by digest after scan, SBOM, and release evidence are ready
+  disconnected-preload:
+    description: Air-gapped or disconnected path using RKE2 image archives.
+    imageMode: preload
+    cleanupOperatorImages: false
+    pruneOperatorCache: false
+    rke2ImportImages: true
+    streamArchives: true
+    staleArchiveAction: rotate-explicitly
+    nodeArchiveRetention: remove-after-containerd-import
+    pullPolicy: IfNotPresent
+    maxOperatorArchiveGi: 50
+    maxOperatorCacheGi: 50
+    guardrails:
+    - archive retention may be intentionally enabled for offline evidence
+    - copy archives to every RKE2 server and agent that can run imported workloads
+    - verify containerd imports before disconnecting the operator machine
+checks:
+- local container CLI is docker or podman
+- preload nodes are SSH reachable with sudo
+- RKE2 image directory exists or can be created
+- running containerd import is attempted before requiring RKE2 restart
+- operator image tags are removed after each successful candidate
+- operator archive directory is cleaned unless retention is intentional
+- dangling build cache is pruned unless retry speed is more important than disk pressure
