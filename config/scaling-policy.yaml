@@ -12,7 +12,7 @@ profiles:
       targetCPUUtilizationPercentage: 70
     vpa:
       enabled: false
-      updateMode: Off
+      updateMode: "Off"
     keda:
       enabled: false
       triggers: []
@@ -40,7 +40,7 @@ profiles:
       targetCPUUtilizationPercentage: 70
     vpa:
       enabled: false
-      updateMode: Off
+      updateMode: "Off"
     keda:
       enabled: false
       triggers: []
@@ -68,7 +68,7 @@ profiles:
       targetCPUUtilizationPercentage: 70
     vpa:
       enabled: false
-      updateMode: Off
+      updateMode: "Off"
     keda:
       enabled: false
       triggers: []
@@ -96,7 +96,7 @@ profiles:
       targetCPUUtilizationPercentage: 70
     vpa:
       enabled: false
-      updateMode: Off
+      updateMode: "Off"
     keda:
       enabled: true
       triggers:

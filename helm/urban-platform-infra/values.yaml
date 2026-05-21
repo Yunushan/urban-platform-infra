@@ -71,10 +71,10 @@ runtimeHardening:
     requireSignatureVerification: false
     allowedRegistries: []
     deniedTags:
-      - latest
-      - latest-pg16
-      - latest-pg17
-      - latest-pg18
+    - latest
+    - latest-pg16
+    - latest-pg17
+    - latest-pg18
   reports:
     plan: reports/runtime-hardening-plan.md
     overrides: reports/runtime-hardening-values.yaml
@@ -91,7 +91,7 @@ gitOpsDelivery:
     targetRevision: main
     path: helm/urban-platform-infra
     valueFiles:
-      - values.yaml
+    - values.yaml
   reports:
     plan: reports/gitops-delivery-plan.md
     overrides: reports/gitops-delivery-values.yaml
@@ -133,7 +133,7 @@ scalingPolicy:
     targetCPUUtilizationPercentage: 70
   vpa:
     enabled: false
-    updateMode: Off
+    updateMode: "Off"
   keda:
     enabled: false
     triggers: []
