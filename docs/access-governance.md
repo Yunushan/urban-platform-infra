@@ -5,8 +5,8 @@
 Access governance support is optional architecture and disabled by default. The
 baseline keeps the chart's service account token automount disabled and uses a
 public-safe planner to review RBAC, OIDC/SSO, Kubernetes audit logging,
-break-glass access, and tenant namespace boundaries before stricter access
-controls are enabled.
+break-glass access, tenant isolation, and tenant namespace boundaries before
+stricter access controls are enabled.
 
 The planner does not create users, groups, ClusterRoles, RoleBindings, OIDC
 configuration, or tenant namespaces.

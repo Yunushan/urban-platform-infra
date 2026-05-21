@@ -267,6 +267,7 @@ def generate_report(args: argparse.Namespace, config: dict[str, Any]) -> str:
             "",
             "## Cleanup Contract",
             "",
+            "- operator cache cleanup is part of the preload contract and should stay enabled for small lab disks.",
             f"- `MIGRATION_CLEANUP_OPERATOR_IMAGES={str(cleanup_operator_images).lower()}` controls generated import tags and local preload archive cleanup.",
             f"- `MIGRATION_PRUNE_OPERATOR_CACHE={str(prune_operator_cache).lower()}` controls dangling Docker/Podman image and builder cache pruning.",
             f"- `MIGRATION_RKE2_IMPORT_IMAGES={str(rke2_import_images).lower()}` controls running RKE2 containerd import for preload archives.",

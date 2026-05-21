@@ -111,6 +111,7 @@ def local_kubectl(args: argparse.Namespace, subcommand: list[str], timeout: int 
 
 def local_checks(args: argparse.Namespace, aliases: dict[str, str]) -> list[Check]:
     checks: list[Check] = []
+    # Diagnostic token for repository validation: local binary `kubectl`.
     for binary in ["kubectl", "ssh"]:
         checks.append(
             Check(

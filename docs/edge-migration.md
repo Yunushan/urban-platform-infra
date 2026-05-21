@@ -50,6 +50,7 @@ The import stage writes generated Ingress candidates to
 execution is enabled, it applies only candidates whose backend Kubernetes
 Service already exists in the target namespace. This avoids broken routes during
 partial or batched imports.
+The guard explicitly skips a route when the backend Kubernetes Service already exists check fails.
 
 ## Source Allowlist
 

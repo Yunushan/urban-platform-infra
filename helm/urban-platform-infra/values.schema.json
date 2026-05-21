@@ -952,7 +952,7 @@
     },
     "platformCapabilities": {
       "type": "object",
-      "description": "Optional platform capability catalog. All capabilities are disabled by default.",
+      "description": "Optional platform capability catalog",
       "additionalProperties": true,
       "properties": {
         "enabled": {
