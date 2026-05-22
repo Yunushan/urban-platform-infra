@@ -16,7 +16,9 @@ validate:
   stage: validate
   image: python:3.12-slim
   script:
-    - pip install pyyaml
+    - pip install -r requirements-ci-modern.txt
+    - python3 scripts/tools/validate_ci_contract.py
+    - python3 scripts/tools/private_data_audit.py
     - python3 scripts/validate.py
     - python3 scripts/images/validate-images.py
 
@@ -35,7 +37,7 @@ policy:
   image: python:3.12-slim
   needs: [render]
   script:
-    - pip install pyyaml
+    - pip install -r requirements-ci-modern.txt
     - python3 tests/policy/basic_policy.py rendered.yaml
 
 security:
@@ -70,10 +72,12 @@ release-evidence:
       --dist dist
       --rendered dist/rendered.yaml
       --sbom dist/urban-platform-infra.spdx.json
+      --manifest dist/release-evidence.json
       --checksums dist/SHA256SUMS
   artifacts:
     paths:
       - dist/*.tgz
       - dist/rendered.yaml
       - dist/urban-platform-infra.spdx.json
+      - dist/release-evidence.json
       - dist/SHA256SUMS

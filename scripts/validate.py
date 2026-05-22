@@ -2,7 +2,197 @@
 from pathlib import Path
 import re
 import sys
-import yaml
+from typing import Any, Optional
+
+try:
+    import yaml
+except ModuleNotFoundError:  # pragma: no cover - used on lean operator workstations.
+    yaml = None
+
+
+def _strip_yaml_comment(line: str) -> str:
+    quote = ''
+    escaped = False
+    for index, char in enumerate(line):
+        if escaped:
+            escaped = False
+            continue
+        if char == '\\':
+            escaped = True
+            continue
+        if quote:
+            if char == quote:
+                quote = ''
+            continue
+        if char in {'"', "'"}:
+            quote = char
+            continue
+        if char == '#' and (index == 0 or line[index - 1].isspace()):
+            return line[:index].rstrip()
+    return line.rstrip()
+
+
+def _yaml_scalar(value: str) -> Any:
+    value = value.strip()
+    if value in {'', "''", '""'}:
+        return ''
+    lowered = value.lower()
+    if lowered in {'true', 'false'}:
+        return lowered == 'true'
+    if lowered in {'null', '~'}:
+        return None
+    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+        return value[1:-1]
+    if value.startswith('[') and value.endswith(']'):
+        inner = value[1:-1].strip()
+        if not inner:
+            return []
+        return [_yaml_scalar(part.strip()) for part in inner.split(',')]
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        return value
+
+
+def _yaml_lines(text: str) -> list[tuple[int, str]]:
+    lines: list[tuple[int, str]] = []
+    for raw_line in text.splitlines():
+        if not raw_line.strip() or raw_line.lstrip().startswith('#'):
+            continue
+        stripped = raw_line.strip()
+        if stripped in {'---', '...'}:
+            continue
+        line = _strip_yaml_comment(raw_line.rstrip())
+        if not line.strip():
+            continue
+        lines.append((len(line) - len(line.lstrip(' ')), line.lstrip()))
+    return lines
+
+
+def _next_yaml_indent(lines: list[tuple[int, str]], index: int, current_indent: int) -> Optional[int]:
+    for next_indent, stripped in lines[index + 1:]:
+        if next_indent == current_indent and stripped.startswith('- '):
+            return next_indent
+        if next_indent > current_indent:
+            return next_indent
+        if next_indent <= current_indent:
+            return None
+    return None
+
+
+def _parse_yaml_block(lines: list[tuple[int, str]], index: int, indent: int) -> tuple[Any, int]:
+    if index >= len(lines) or lines[index][0] < indent:
+        return {}, index
+    if lines[index][1].startswith('- '):
+        items: list[Any] = []
+        while index < len(lines):
+            line_indent, stripped = lines[index]
+            if line_indent < indent or not stripped.startswith('- '):
+                break
+            if line_indent > indent:
+                break
+            item_text = stripped[2:].strip()
+            if not item_text:
+                child_indent = _next_yaml_indent(lines, index, line_indent)
+                if child_indent is None:
+                    items.append({})
+                    index += 1
+                else:
+                    child, index = _parse_yaml_block(lines, index + 1, child_indent)
+                    items.append(child)
+                continue
+            if ':' in item_text and not item_text.startswith(('"', "'")):
+                key, raw_value = item_text.split(':', 1)
+                item: dict[str, Any] = {}
+                raw_value = raw_value.strip()
+                if raw_value in {'|', '>'}:
+                    child_indent = _next_yaml_indent(lines, index, line_indent)
+                    item[key.strip().strip('"\'')] = ''
+                    index = _consume_yaml_multiline(lines, index + 1, child_indent or line_indent + 2)[1]
+                elif raw_value:
+                    item[key.strip().strip('"\'')] = _yaml_scalar(raw_value)
+                    index += 1
+                else:
+                    child_indent = _next_yaml_indent(lines, index, line_indent)
+                    if child_indent is None:
+                        item[key.strip().strip('"\'')] = {}
+                        index += 1
+                    else:
+                        child, index = _parse_yaml_block(lines, index + 1, child_indent)
+                        item[key.strip().strip('"\'')] = child
+                while index < len(lines) and lines[index][0] > line_indent:
+                    continuation, index = _parse_yaml_block(lines, index, lines[index][0])
+                    if isinstance(continuation, dict):
+                        item.update(continuation)
+                    else:
+                        break
+                items.append(item)
+                continue
+            items.append(_yaml_scalar(item_text))
+            index += 1
+        return items, index
+
+    mapping: dict[str, Any] = {}
+    while index < len(lines):
+        line_indent, stripped = lines[index]
+        if line_indent < indent or stripped.startswith('- '):
+            break
+        if line_indent > indent:
+            break
+        if ':' not in stripped:
+            index += 1
+            continue
+        key, raw_value = stripped.split(':', 1)
+        key = key.strip().strip('"\'')
+        raw_value = raw_value.strip()
+        if raw_value in {'|', '>'}:
+            child_indent = _next_yaml_indent(lines, index, line_indent)
+            mapping[key], index = _consume_yaml_multiline(lines, index + 1, child_indent or line_indent + 2)
+        elif raw_value:
+            mapping[key] = _yaml_scalar(raw_value)
+            index += 1
+        else:
+            child_indent = _next_yaml_indent(lines, index, line_indent)
+            if child_indent is None:
+                mapping[key] = {}
+                index += 1
+            else:
+                mapping[key], index = _parse_yaml_block(lines, index + 1, child_indent)
+    return mapping, index
+
+
+def _consume_yaml_multiline(lines: list[tuple[int, str]], index: int, indent: int) -> tuple[str, int]:
+    values: list[str] = []
+    while index < len(lines) and lines[index][0] >= indent:
+        values.append(lines[index][1])
+        index += 1
+    return '\n'.join(values), index
+
+
+def _yaml_input_text(stream_or_text: Any) -> str:
+    if hasattr(stream_or_text, 'read'):
+        return stream_or_text.read()
+    return str(stream_or_text)
+
+
+def safe_load(stream_or_text: Any) -> Any:
+    if yaml is not None:
+        return yaml.safe_load(stream_or_text)
+    text = _yaml_input_text(stream_or_text)
+    parsed, _ = _parse_yaml_block(_yaml_lines(text), 0, 0)
+    return parsed
+
+
+def safe_load_all(stream_or_text: Any) -> list[Any]:
+    if yaml is not None:
+        return list(yaml.safe_load_all(stream_or_text))
+    text = _yaml_input_text(stream_or_text)
+    documents = re.split(r'(?m)^---\s*$', text)
+    return [safe_load(document) for document in documents if document.strip()]
 
 ROOT = Path(__file__).resolve().parents[1]
 YAML_DIRS = [
@@ -21,6 +211,8 @@ REQUIRED = [
     'README.md', 'LICENSE', '.github/workflows/ci.yml', '.gitlab-ci.yml',
     '.github/workflows/release.yml', '.github/dependabot.yml', '.pre-commit-config.yaml',
     'requirements-ci.txt', 'requirements-ci-modern.txt',
+    'scripts/tools/setup_local.py', 'scripts/tools/doctor_local.py',
+    'scripts/tools/validate_ci_contract.py', 'scripts/tools/private_data_audit.py',
     'ansible/requirements.yml', 'ansible/requirements-modern.yml',
     '.sops.yaml.example', 'ansible/playbooks/preflight.yml',
     'ansible/playbooks/operator-kubeconfig.yml',
@@ -47,6 +239,10 @@ REQUIRED = [
     'config/compliance-evidence.yaml',
     'config/incident-response.yaml',
     'config/change-management.yaml',
+    'config/cutover-gates.yaml',
+    'config/smoke-tests.yaml',
+    'config/release-runbook.yaml',
+    'config/cluster-upgrade.yaml',
     'config/disaster-recovery.yaml',
     'config/database-migration.yaml',
     'config/edge-migration.yaml',
@@ -63,6 +259,10 @@ REQUIRED = [
     'scripts/compliance_evidence_plan.py',
     'scripts/incident_response_plan.py',
     'scripts/change_management_plan.py',
+    'scripts/cutover_gate_plan.py',
+    'scripts/smoke_test_plan.py',
+    'scripts/release_runbook_plan.py',
+    'scripts/cluster_upgrade_plan.py',
     'scripts/disaster_recovery_plan.py',
     'scripts/release/generate_sbom.py',
     'scripts/release/verify_release_evidence.py',
@@ -70,6 +270,8 @@ REQUIRED = [
     'scripts/observability_plan.py',
     'scripts/cluster_doctor.py',
     'scripts/lab_deploy_plan.py',
+    'scripts/capacity_preflight.py',
+    'scripts/import_recovery_plan.py',
     'scripts/image_cache_plan.py',
     'scripts/database_migration_controller.py',
     'scripts/edge_migration_plan.py',
@@ -81,12 +283,15 @@ REQUIRED = [
     'scripts/tools/install-local-path-storage.sh', 'scripts/tools/recover-helm-release.sh',
     'scripts/tools/ensure-kubeconfig.sh',
     'tests/policy/basic_policy.py', 'docs/hld.md', 'docs/lld.md',
+    'docs/local-toolchain.md', 'docs/ci-validation.md',
+    'docs/operator-workflows.md',
     'docs/bootstrap-safety.md', 'docs/secrets-management.md',
     'docs/secret-provider-adapters.md',
     'docs/supply-chain.md', 'docs/image-governance.md', 'docs/observability-slo.md',
     'docs/deployment-topologies.md', 'docs/storage-tiers.md',
     'docs/runbooks.md', 'docs/release-guide.md',
     'docs/project-import.md',
+    'docs/import-recovery.md',
     'docs/cluster-doctor.md',
     'docs/lab-capacity.md',
     'docs/image-cache-preload.md',
@@ -100,6 +305,10 @@ REQUIRED = [
     'docs/compliance-evidence.md',
     'docs/incident-response.md',
     'docs/change-management.md',
+    'docs/cutover-gates.md',
+    'docs/smoke-tests.md',
+    'docs/release-runbook.md',
+    'docs/cluster-upgrade.md',
     'docs/disaster-recovery.md',
     'docs/database-migration-controller.md',
     'docs/edge-migration.md',
@@ -122,6 +331,7 @@ SENSITIVE_DIRS = [
 ]
 TEXT_SCAN_SKIP = {
     Path('scripts/validate.py'),
+    Path('scripts/tools/private_data_audit.py'),
 }
 TEXT_SCAN_EXCLUDED_DIRS = {
     '.ansible',
@@ -171,7 +381,7 @@ DISCLOSURE_IDENTIFIER_PATTERN = re.compile(
 
 def check_yaml(path):
     with open(path, 'r', encoding='utf-8') as f:
-        return list(yaml.safe_load_all(f))
+        return safe_load_all(f)
 
 def relative_name(path):
     return path.relative_to(ROOT).as_posix()
@@ -216,7 +426,7 @@ for path in [ROOT / '.sops.yaml.example']:
     except Exception as exc:
         errors.append(f'YAML error in {relative_name(path)}: {exc}')
 
-values = yaml.safe_load((ROOT / 'helm/urban-platform-infra/values.yaml').read_text())
+values = safe_load((ROOT / 'helm/urban-platform-infra/values.yaml').read_text())
 if values['global']['cluster']['engine'] != 'rke2':
     errors.append('Default engine must be rke2')
 if values['global']['cluster']['nodes'] != 3:
@@ -402,6 +612,139 @@ if change_management_values.get('evidence', {}).get('enabled') is not False:
     errors.append('Change management evidence collection must be disabled by default')
 if change_management_values.get('reports', {}).get('plan') != 'reports/change-management-plan.md':
     errors.append('Change management must point at the public-safe plan report')
+cutover_gates_values = values.get('cutoverGates', {})
+if cutover_gates_values.get('enabled') is not False:
+    errors.append('Cutover gates must be disabled by default')
+if cutover_gates_values.get('profile') != 'disabled':
+    errors.append('Cutover gates profile must default to disabled')
+if cutover_gates_values.get('mode') != 'baseline':
+    errors.append('Cutover gates mode must default to baseline')
+if cutover_gates_values.get('trafficSwitch', {}).get('enabled') is not False:
+    errors.append('Cutover traffic switch automation must be disabled by default')
+if cutover_gates_values.get('trafficSwitch', {}).get('method') != 'none':
+    errors.append('Cutover traffic switch method must default to none')
+if cutover_gates_values.get('trafficSwitch', {}).get('requireDnsTlsEvidence') is not False:
+    errors.append('Cutover DNS/TLS evidence requirement must default to false')
+if cutover_gates_values.get('preCutover', {}).get('requireImportPreflight') is not False:
+    errors.append('Cutover import preflight requirement must default to false')
+if cutover_gates_values.get('preCutover', {}).get('requireReleaseEvidence') is not False:
+    errors.append('Cutover release evidence requirement must default to false')
+if cutover_gates_values.get('smokeTests', {}).get('enabled') is not False:
+    errors.append('Cutover smoke-test automation must be disabled by default')
+if cutover_gates_values.get('smokeTests', {}).get('requirePostMigrationCheck') is not False:
+    errors.append('Cutover post-migration check requirement must default to false')
+if cutover_gates_values.get('rollback', {}).get('enabled') is not False:
+    errors.append('Cutover rollback automation must be disabled by default')
+if cutover_gates_values.get('rollback', {}).get('requireRecoveryPlan') is not False:
+    errors.append('Cutover recovery plan requirement must default to false')
+if cutover_gates_values.get('postCutover', {}).get('enabled') is not False:
+    errors.append('Cutover post-cutover automation must be disabled by default')
+if cutover_gates_values.get('reports', {}).get('plan') != 'reports/cutover-gate-plan.md':
+    errors.append('Cutover gates must point at the public-safe plan report')
+smoke_testing_values = values.get('smokeTesting', {})
+if smoke_testing_values.get('enabled') is not False:
+    errors.append('Smoke testing must be disabled by default')
+if smoke_testing_values.get('profile') != 'disabled':
+    errors.append('Smoke testing profile must default to disabled')
+if smoke_testing_values.get('mode') != 'baseline':
+    errors.append('Smoke testing mode must default to baseline')
+if smoke_testing_values.get('execution', {}).get('enabled') is not False:
+    errors.append('Smoke testing execution must be disabled by default')
+if smoke_testing_values.get('execution', {}).get('runner') != 'none':
+    errors.append('Smoke testing runner must default to none')
+if smoke_testing_values.get('probes', {}).get('kubernetesRollout') is not False:
+    errors.append('Smoke testing Kubernetes rollout probes must be disabled by default')
+if smoke_testing_values.get('probes', {}).get('databaseConnections') is not False:
+    errors.append('Smoke testing database probes must be disabled by default')
+if smoke_testing_values.get('probes', {}).get('messagingConnections') is not False:
+    errors.append('Smoke testing messaging probes must be disabled by default')
+if smoke_testing_values.get('evidence', {}).get('requirePlan') is not False:
+    errors.append('Smoke testing plan evidence must be disabled by default')
+if smoke_testing_values.get('evidence', {}).get('requireResults') is not False:
+    errors.append('Smoke testing result evidence must be disabled by default')
+if smoke_testing_values.get('evidence', {}).get('requireOwnerReview') is not False:
+    errors.append('Smoke testing owner review must be disabled by default')
+if smoke_testing_values.get('reports', {}).get('plan') != 'reports/smoke-test-plan.md':
+    errors.append('Smoke testing must point at the public-safe plan report')
+release_runbook_values = values.get('releaseRunbook', {})
+if release_runbook_values.get('enabled') is not False:
+    errors.append('Release runbook must be disabled by default')
+if release_runbook_values.get('profile') != 'disabled':
+    errors.append('Release runbook profile must default to disabled')
+if release_runbook_values.get('mode') != 'baseline':
+    errors.append('Release runbook mode must default to baseline')
+if release_runbook_values.get('execution', {}).get('enabled') is not False:
+    errors.append('Release runbook execution must be disabled by default')
+if release_runbook_values.get('execution', {}).get('publisher') != 'none':
+    errors.append('Release runbook publisher must default to none')
+if release_runbook_values.get('execution', {}).get('deployer') != 'none':
+    errors.append('Release runbook deployer must default to none')
+for release_runbook_gate in [
+    'requireReleaseTag',
+    'requireCleanWorktree',
+    'requireArtifactEvidence',
+    'requireSbom',
+    'requireChecksums',
+    'requireAttestation',
+    'requireChangeApproval',
+    'requireSmokeTestPlan',
+    'requireCutoverGate',
+    'requireRollbackPlan',
+]:
+    if release_runbook_values.get('gates', {}).get(release_runbook_gate) is not False:
+        errors.append(f'Release runbook gate {release_runbook_gate} must be disabled by default')
+for release_runbook_evidence in [
+    'requirePublicBundle',
+    'requirePrivateApprovalIndex',
+    'requireOwnerReview',
+]:
+    if release_runbook_values.get('evidence', {}).get(release_runbook_evidence) is not False:
+        errors.append(f'Release runbook evidence {release_runbook_evidence} must be disabled by default')
+if release_runbook_values.get('reports', {}).get('plan') != 'reports/release-runbook-plan.md':
+    errors.append('Release runbook must point at the public-safe plan report')
+cluster_upgrade_values = values.get('clusterUpgrade', {})
+if cluster_upgrade_values.get('enabled') is not False:
+    errors.append('Cluster upgrade must be disabled by default')
+if cluster_upgrade_values.get('profile') != 'disabled':
+    errors.append('Cluster upgrade profile must default to disabled')
+if cluster_upgrade_values.get('mode') != 'baseline':
+    errors.append('Cluster upgrade mode must default to baseline')
+if cluster_upgrade_values.get('engine') != 'rke2':
+    errors.append('Cluster upgrade engine must default to rke2')
+if cluster_upgrade_values.get('orchestration', {}).get('enabled') is not False:
+    errors.append('Cluster upgrade orchestration must be disabled by default')
+if cluster_upgrade_values.get('orchestration', {}).get('strategy') != 'none':
+    errors.append('Cluster upgrade strategy must default to none')
+if cluster_upgrade_values.get('orchestration', {}).get('drainNodes') is not False:
+    errors.append('Cluster upgrade node drain must be disabled by default')
+if cluster_upgrade_values.get('orchestration', {}).get('restartServices') is not False:
+    errors.append('Cluster upgrade service restart must be disabled by default')
+if cluster_upgrade_values.get('versions', {}).get('maxMinorSkew') != 0:
+    errors.append('Cluster upgrade max minor skew must default to zero')
+for cluster_upgrade_gate in [
+    'requirePinnedVersion',
+    'requireSupportedSkew',
+    'requireEtcdSnapshot',
+    'requireBackupRestore',
+    'requireMaintenanceWindow',
+    'requireCapacityHeadroom',
+    'requireNodeHealth',
+    'requireRollbackPlan',
+    'requireAddOnCompatibility',
+    'requirePostUpgradeSmokeTest',
+]:
+    if cluster_upgrade_values.get('gates', {}).get(cluster_upgrade_gate) is not False:
+        errors.append(f'Cluster upgrade gate {cluster_upgrade_gate} must be disabled by default')
+for cluster_upgrade_evidence in [
+    'requireClusterDoctor',
+    'requireInventoryReview',
+    'requireReleaseNotesReview',
+    'requireOwnerApproval',
+]:
+    if cluster_upgrade_values.get('evidence', {}).get(cluster_upgrade_evidence) is not False:
+        errors.append(f'Cluster upgrade evidence {cluster_upgrade_evidence} must be disabled by default')
+if cluster_upgrade_values.get('reports', {}).get('plan') != 'reports/cluster-upgrade-plan.md':
+    errors.append('Cluster upgrade must point at the public-safe plan report')
 disaster_recovery_values = values.get('disasterRecovery', {})
 if disaster_recovery_values.get('enabled') is not False:
     errors.append('Disaster recovery must be disabled by default')
@@ -584,7 +927,10 @@ for release_token in [
     'actions/attest@v4',
     'subject-checksums',
     'sbom-path',
+    'RELEASE_MANIFEST',
+    '--manifest "${RELEASE_MANIFEST}"',
     'SHA256SUMS',
+    'release-evidence.json',
     'spdx.json',
     'Validate release tag matches chart version',
 ]:
@@ -604,6 +950,10 @@ for ci_token in [
     'python-3.14',
     'requirements-ci-modern.txt',
     'ansible/requirements-modern.yml',
+    'Validate CI contract',
+    'scripts/tools/validate_ci_contract.py',
+    'Audit private data guardrails',
+    'scripts/tools/private_data_audit.py',
 ]:
     if ci_token not in ci_workflow_text:
         errors.append(f'CI missing Python/Ansible compatibility lane token: {ci_token}')
@@ -654,8 +1004,12 @@ gitlab_ci_text = (ROOT / '.gitlab-ci.yml').read_text(encoding='utf-8')
 for gitlab_token in [
     'aquasec/trivy:0.70.0',
     'alpine/helm:3.19.0',
+    'pip install -r requirements-ci-modern.txt',
+    'python3 scripts/tools/validate_ci_contract.py',
+    'python3 scripts/tools/private_data_audit.py',
     'release-evidence:',
     'SHA256SUMS',
+    'release-evidence.json',
     'urban-platform-infra.spdx.json',
 ]:
     if gitlab_token not in gitlab_ci_text:
@@ -1027,6 +1381,7 @@ for makefile_helm_token in [
     'MIGRATION_STATE_FILE ?=',
     'MIGRATION_RESUME ?= true',
     'MIGRATION_FORCE_RERUN ?= false',
+    'IMPORT_RECOVERY_OUTPUT ?=',
     'MIGRATION_IMAGE_MODE ?= $(if $(filter lab,$(MIGRATION_PROFILE)),preload,registry)',
     'MIGRATION_RKE2_VERSION ?=',
     'MIGRATION_AUTO_REPAIR_CLUSTER ?=',
@@ -1181,6 +1536,51 @@ for makefile_helm_token in [
     '--stakeholder-notice',
     '--post-change-review',
     '--overrides "$(CHANGE_MANAGEMENT_VALUES)"',
+    'CUTOVER_GATES_CONFIG ?=',
+    'CUTOVER_GATES_PROFILE ?=',
+    'CUTOVER_GATES_OUTPUT ?=',
+    'CUTOVER_GATES_VALUES ?=',
+    'CUTOVER_DNS_TLS_EVIDENCE ?=',
+    'CUTOVER_OWNER_HANDOFF ?=',
+    'cutover-gate-plan:',
+    'scripts/cutover_gate_plan.py',
+    '--config "$(CUTOVER_GATES_CONFIG)"',
+    '--profile "$(CUTOVER_GATES_PROFILE)"',
+    '--dns-tls-evidence',
+    '--owner-handoff',
+    '--overrides "$(CUTOVER_GATES_VALUES)"',
+    'SMOKE_TEST_CONFIG ?=',
+    'SMOKE_TEST_PROFILE ?=',
+    'SMOKE_TEST_OUTPUT ?=',
+    'SMOKE_TEST_VALUES ?=',
+    'SMOKE_TEST_EVIDENCE ?=',
+    'smoke-test-plan:',
+    'scripts/smoke_test_plan.py',
+    '--config "$(SMOKE_TEST_CONFIG)"',
+    '--profile "$(SMOKE_TEST_PROFILE)"',
+    '--overrides "$(SMOKE_TEST_VALUES)"',
+    'RELEASE_RUNBOOK_CONFIG ?=',
+    'RELEASE_RUNBOOK_PROFILE ?=',
+    'RELEASE_RUNBOOK_RELEASE_EVIDENCE ?=',
+    'RELEASE_RUNBOOK_OUTPUT ?=',
+    'RELEASE_RUNBOOK_VALUES ?=',
+    'release-runbook-plan:',
+    'scripts/release_runbook_plan.py',
+    '--config "$(RELEASE_RUNBOOK_CONFIG)"',
+    '--profile "$(RELEASE_RUNBOOK_PROFILE)"',
+    '--release-evidence "$(RELEASE_RUNBOOK_RELEASE_EVIDENCE)"',
+    '--overrides "$(RELEASE_RUNBOOK_VALUES)"',
+    'CLUSTER_UPGRADE_CONFIG ?=',
+    'CLUSTER_UPGRADE_PROFILE ?=',
+    'CLUSTER_UPGRADE_TARGET_RKE2 ?=',
+    'CLUSTER_UPGRADE_OUTPUT ?=',
+    'CLUSTER_UPGRADE_VALUES ?=',
+    'cluster-upgrade-plan:',
+    'scripts/cluster_upgrade_plan.py',
+    '--config "$(CLUSTER_UPGRADE_CONFIG)"',
+    '--profile "$(CLUSTER_UPGRADE_PROFILE)"',
+    '--target-rke2 "$(CLUSTER_UPGRADE_TARGET_RKE2)"',
+    '--overrides "$(CLUSTER_UPGRADE_VALUES)"',
     'DISASTER_RECOVERY_CONFIG ?=',
     'DISASTER_RECOVERY_PROFILE ?=',
     'DISASTER_RECOVERY_RTO_RPO ?=',
@@ -1222,8 +1622,10 @@ for makefile_helm_token in [
     '--ingress-controller $(INGRESS)',
     'import-check:',
     'import-preflight:',
+    'import-recovery-plan:',
     'import-migrate:',
     'scripts/import_project.py --project-path "$(PROJECT_PATH)"',
+    'scripts/import_recovery_plan.py',
     'scripts/migrate_project.py --project-path "$(PROJECT_PATH)"',
     '--redact-sensitive',
     'OPERATOR_KUBECONFIG ?=',
@@ -1305,8 +1707,13 @@ for makefile_helm_token in [
     'LAB_CAPACITY_CONFIG ?=',
     'LAB_DEPLOY_OUTPUT ?=',
     'LAB_DEPLOY_VALUES ?=',
+    'CAPACITY_PREFLIGHT_OUTPUT ?=',
+    'CAPACITY_PREFLIGHT_ENV_PROFILE ?=',
+    'CAPACITY_PREFLIGHT_IMPORT_BATCH ?=',
     'lab-deploy-plan:',
+    'capacity-preflight:',
     'scripts/lab_deploy_plan.py',
+    'scripts/capacity_preflight.py',
     'IMAGE_CACHE_CONFIG ?=',
     'IMAGE_CACHE_PROFILE ?=',
     'IMAGE_CACHE_OUTPUT ?=',
@@ -1326,8 +1733,10 @@ for makefile_helm_token in [
     'ENV_PROFILE ?=',
     'ENV_PROFILE_OUTPUT ?=',
     'ENV_PROFILE_VALUES ?=',
+    'ENV_PROFILE_EVIDENCE ?=',
     'environment-profile-plan:',
     'scripts/environment_profile_plan.py',
+    '--evidence-output "$(ENV_PROFILE_EVIDENCE)"',
     'RELEASE_VERIFY_REPORT ?=',
     'IMAGE_PROMOTION_REGISTRY ?=',
     'image-promotion-plan:',
@@ -1498,6 +1907,7 @@ for migration_automation_token in [
     'import-batches.md',
     'import-batches.yaml',
     'import-resume.md',
+    'import-recovery-plan.md',
     'write_import_batch_plan',
     'filter_service_pairs_for_import_batch',
     'stage_scope_pairs',
@@ -1521,6 +1931,9 @@ for migration_automation_token in [
     'MIGRATION_STATE_FILE',
     'MIGRATION_RESUME',
     'MIGRATION_FORCE_RERUN',
+    'make import-recovery-plan IMPORT_REDACT=true',
+    'cleanup boundaries',
+    'rollback boundaries',
     'imported_workload_resources',
     '--profile',
     '--lab-workload-cpu-request',
@@ -1585,6 +1998,20 @@ for migration_automation_token in [
     if migration_automation_token not in migration_automation_text:
         errors.append(f'Project migration automation missing token: {migration_automation_token}')
 
+import_recovery_plan_text = (ROOT / 'scripts/import_recovery_plan.py').read_text(encoding='utf-8')
+for import_recovery_plan_token in [
+    'Import Recovery Plan',
+    'public-safe',
+    'Safe Retry Controls',
+    'Cleanup Boundaries',
+    'Rollback Boundaries',
+    'MIGRATION_FORCE_RERUN=true',
+    'MIGRATION_STATE_FILE=/path/to/private/rehearsal-state.yaml',
+    'RKE2 containerd import is disabled',
+]:
+    if import_recovery_plan_token not in import_recovery_plan_text:
+        errors.append(f'Import recovery plan script missing token: {import_recovery_plan_token}')
+
 project_import_docs_text = (ROOT / 'docs/project-import.md').read_text(encoding='utf-8')
 for project_import_docs_token in [
     'make import-check PROJECT_PATH=/path/to/compose-project',
@@ -1607,11 +2034,14 @@ for project_import_docs_token in [
     'import-capacity.md',
     'import-batches.md',
     'import-resume.md',
+    'import-recovery-plan.md',
     'MIGRATION_IMPORT_BATCH=auto',
     'MIGRATION_IMPORT_BATCH=all',
     'MIGRATION_RESUME=true',
     'MIGRATION_FORCE_RERUN=true',
     'MIGRATION_STATE_FILE',
+    'make import-recovery-plan IMPORT_REDACT=true',
+    'Cleanup Boundaries',
     'MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS',
     'MIGRATION_PREFLIGHT_REQUIRE_INGRESS_ENDPOINT=true',
     'MIGRATION_PROFILE=lab',
@@ -1638,6 +2068,21 @@ for project_import_docs_token in [
 ]:
     if project_import_docs_token not in project_import_docs_text:
         errors.append(f'Project import docs missing token: {project_import_docs_token}')
+
+import_recovery_docs_text = (ROOT / 'docs/import-recovery.md').read_text(encoding='utf-8')
+for import_recovery_docs_token in [
+    'Import Resume, Recovery, And Cleanup',
+    'make import-recovery-plan IMPORT_REDACT=true',
+    'reports/import-migration/import-recovery-plan.md',
+    'MIGRATION_RESUME=true',
+    'MIGRATION_FORCE_RERUN=true',
+    'MIGRATION_STATE_FILE=/path/to/private/rehearsal-state.yaml',
+    'Cleanup Boundaries',
+    'Rollback Boundaries',
+    'public-safe',
+]:
+    if import_recovery_docs_token not in import_recovery_docs_text:
+        errors.append(f'Import recovery docs missing token: {import_recovery_docs_token}')
 
 design_docs = {
     'docs/hld.md': [
@@ -1871,6 +2316,19 @@ for lab_deploy_plan_token in [
 ]:
     if lab_deploy_plan_token not in lab_deploy_plan_text:
         errors.append(f'Lab deploy plan script missing capacity token: {lab_deploy_plan_token}')
+
+capacity_preflight_text = (ROOT / 'scripts/capacity_preflight.py').read_text(encoding='utf-8')
+for capacity_preflight_token in [
+    'Cluster Capacity Preflight',
+    'public-safe',
+    'capacity-evidence',
+    'MIGRATION_IMPORT_BATCH=all',
+    'global.replicaOverride=1',
+    'global.skipPlaceholderWorkloads=true',
+    'Use the generated lab values overlay',
+]:
+    if capacity_preflight_token not in capacity_preflight_text:
+        errors.append(f'Capacity preflight script missing guardrail token: {capacity_preflight_token}')
 
 lab_capacity_text = (ROOT / 'config/lab-capacity.yaml').read_text(encoding='utf-8')
 for lab_capacity_token in [
@@ -2308,6 +2766,168 @@ for change_management_docs_token in [
     if change_management_docs_token not in change_management_docs_text:
         errors.append(f'Change management docs missing token: {change_management_docs_token}')
 
+cutover_gate_plan_text = (ROOT / 'scripts/cutover_gate_plan.py').read_text(encoding='utf-8')
+for cutover_gate_plan_token in [
+    'Production Cutover And Smoke-Test Gate Plan',
+    'public-safe',
+    'cutover-gate-values.yaml',
+    'make cutover-gate-plan',
+    'dns-tls-evidence',
+    'owner-handoff',
+    'traffic switch',
+]:
+    if cutover_gate_plan_token not in cutover_gate_plan_text:
+        errors.append(f'Cutover gate plan script missing token: {cutover_gate_plan_token}')
+
+cutover_gates_config_text = (ROOT / 'config/cutover-gates.yaml').read_text(encoding='utf-8')
+for cutover_gates_config_token in [
+    'defaultProfile: disabled',
+    'lab-smoke:',
+    'staging-cutover:',
+    'production-cutover:',
+    'publicArtifacts:',
+    'requiredChecks:',
+    'guardrails:',
+]:
+    if cutover_gates_config_token not in cutover_gates_config_text:
+        errors.append(f'Cutover gates config missing token: {cutover_gates_config_token}')
+
+cutover_gates_docs_text = (ROOT / 'docs/cutover-gates.md').read_text(encoding='utf-8')
+for cutover_gates_docs_token in [
+    'Production Cutover And Smoke-Test Gates',
+    'make cutover-gate-plan',
+    'CUTOVER_GATES_PROFILE=production-cutover',
+    'reports/cutover-gate-plan.md',
+    'reports/cutover-gate-values.yaml',
+    'DNS/TLS',
+    'smoke-test',
+    'rollback',
+]:
+    if cutover_gates_docs_token not in cutover_gates_docs_text:
+        errors.append(f'Cutover gates docs missing token: {cutover_gates_docs_token}')
+
+smoke_test_plan_text = (ROOT / 'scripts/smoke_test_plan.py').read_text(encoding='utf-8')
+for smoke_test_plan_token in [
+    'Post-Migration Smoke-Test And Health-Probe Plan',
+    'public-safe',
+    'smoke-test-values.yaml',
+    'make smoke-test-plan',
+    'kubernetes rollout',
+    'database connection',
+    'messaging connection',
+    'private runner',
+]:
+    if smoke_test_plan_token not in smoke_test_plan_text:
+        errors.append(f'Smoke-test plan script missing token: {smoke_test_plan_token}')
+
+smoke_tests_config_text = (ROOT / 'config/smoke-tests.yaml').read_text(encoding='utf-8')
+for smoke_tests_config_token in [
+    'defaultProfile: disabled',
+    'lab-smoke:',
+    'staging-smoke:',
+    'production-smoke:',
+    'checkCatalog:',
+    'guardrails:',
+]:
+    if smoke_tests_config_token not in smoke_tests_config_text:
+        errors.append(f'Smoke-test config missing token: {smoke_tests_config_token}')
+
+smoke_tests_docs_text = (ROOT / 'docs/smoke-tests.md').read_text(encoding='utf-8')
+for smoke_tests_docs_token in [
+    'Post-Migration Smoke Tests And Health Probes',
+    'make smoke-test-plan',
+    'SMOKE_TEST_PROFILE=production-smoke',
+    'reports/smoke-test-plan.md',
+    'reports/smoke-test-values.yaml',
+    'Kubernetes rollout',
+    'database',
+    'messaging',
+]:
+    if smoke_tests_docs_token not in smoke_tests_docs_text:
+        errors.append(f'Smoke-test docs missing token: {smoke_tests_docs_token}')
+
+release_runbook_plan_text = (ROOT / 'scripts/release_runbook_plan.py').read_text(encoding='utf-8')
+for release_runbook_plan_token in [
+    'Release Runbook And Evidence Gate Plan',
+    'public-safe',
+    'release-runbook-values.yaml',
+    'make release-runbook-plan',
+    'release artifact evidence',
+    'change approval',
+    'rollback',
+    'private approval index',
+]:
+    if release_runbook_plan_token not in release_runbook_plan_text:
+        errors.append(f'Release runbook plan script missing token: {release_runbook_plan_token}')
+
+release_runbook_config_text = (ROOT / 'config/release-runbook.yaml').read_text(encoding='utf-8')
+for release_runbook_config_token in [
+    'defaultProfile: disabled',
+    'lab-release:',
+    'staging-release:',
+    'production-release:',
+    'runbookSections:',
+    'guardrails:',
+]:
+    if release_runbook_config_token not in release_runbook_config_text:
+        errors.append(f'Release runbook config missing token: {release_runbook_config_token}')
+
+release_runbook_docs_text = (ROOT / 'docs/release-runbook.md').read_text(encoding='utf-8')
+for release_runbook_docs_token in [
+    'Release Runbook And Evidence Gates',
+    'make release-runbook-plan',
+    'RELEASE_RUNBOOK_PROFILE=production-release',
+    'reports/release-runbook-plan.md',
+    'reports/release-runbook-values.yaml',
+    'change approval',
+    'rollback',
+]:
+    if release_runbook_docs_token not in release_runbook_docs_text:
+        errors.append(f'Release runbook docs missing token: {release_runbook_docs_token}')
+
+cluster_upgrade_plan_text = (ROOT / 'scripts/cluster_upgrade_plan.py').read_text(encoding='utf-8')
+for cluster_upgrade_plan_token in [
+    'Cluster Upgrade And Version-Skew Guardrail Plan',
+    'public-safe',
+    'cluster-upgrade-values.yaml',
+    'make cluster-upgrade-plan',
+    'version skew',
+    'RKE2 version',
+    'etcd snapshot',
+    'maintenance window',
+    'rollback plan',
+]:
+    if cluster_upgrade_plan_token not in cluster_upgrade_plan_text:
+        errors.append(f'Cluster upgrade plan script missing token: {cluster_upgrade_plan_token}')
+
+cluster_upgrade_config_text = (ROOT / 'config/cluster-upgrade.yaml').read_text(encoding='utf-8')
+for cluster_upgrade_config_token in [
+    'defaultProfile: disabled',
+    'lab-upgrade:',
+    'staging-upgrade:',
+    'production-upgrade:',
+    'versionSkewPolicy:',
+    'rke2VersionFormat: vMAJOR.MINOR.PATCH+rke2rN',
+    'guardrails:',
+]:
+    if cluster_upgrade_config_token not in cluster_upgrade_config_text:
+        errors.append(f'Cluster upgrade config missing token: {cluster_upgrade_config_token}')
+
+cluster_upgrade_docs_text = (ROOT / 'docs/cluster-upgrade.md').read_text(encoding='utf-8')
+for cluster_upgrade_docs_token in [
+    'Cluster Upgrade And Version-Skew Guardrails',
+    'make cluster-upgrade-plan',
+    'CLUSTER_UPGRADE_PROFILE=production-upgrade',
+    'reports/cluster-upgrade-plan.md',
+    'reports/cluster-upgrade-values.yaml',
+    'RKE2',
+    'version skew',
+    'etcd snapshot',
+    'rollback',
+]:
+    if cluster_upgrade_docs_token not in cluster_upgrade_docs_text:
+        errors.append(f'Cluster upgrade docs missing token: {cluster_upgrade_docs_token}')
+
 disaster_recovery_plan_text = (ROOT / 'scripts/disaster_recovery_plan.py').read_text(encoding='utf-8')
 for disaster_recovery_plan_token in [
     'Disaster Recovery And Business Continuity Plan',
@@ -2438,6 +3058,7 @@ for environment_profile_plan_token in [
     'Environment Profile Plan',
     'public-safe',
     'environment-profile-values.yaml',
+    'environment-profile-evidence-bundle.md',
     'MIGRATION_PROFILE=lab',
     'MIGRATION_IMAGE_MODE=preload',
     'make environment-profile-plan',
@@ -2453,7 +3074,16 @@ for environment_profile_plan_token in [
     'Compliance evidence profile',
     'Incident response profile',
     'Change management profile',
+    'Cutover gate profile',
+    'Smoke-test profile',
+    'Release runbook profile',
+    'Cluster upgrade profile',
+    'Evidence Bundle',
+    'publicReports',
     'Disaster recovery profile',
+    'smokeTesting.profile',
+    'releaseRunbook.profile',
+    'clusterUpgrade.profile',
 ]:
     if environment_profile_plan_token not in environment_profile_plan_text:
         errors.append(f'Environment profile plan script missing token: {environment_profile_plan_token}')
@@ -2475,7 +3105,17 @@ for environment_profiles_config_token in [
     'complianceEvidenceProfile: production-audit-pack',
     'incidentResponseProfile: production-oncall',
     'changeManagementProfile: production-cab',
+    'cutoverGateProfile: production-cutover',
+    'smokeTestProfile: production-smoke',
+    'releaseRunbookProfile: production-release',
+    'clusterUpgradeProfile: production-upgrade',
     'disasterRecoveryProfile: production-dr',
+    'reports/smoke-test-plan.md',
+    'reports/release-runbook-plan.md',
+    'reports/cluster-upgrade-plan.md',
+    'evidenceBundle:',
+    'publicReports:',
+    'privateEvidence:',
     'imageMode: preload',
     'imageMode: registry',
     'strictDatabaseMigration: true',
@@ -2490,6 +3130,7 @@ for environment_profiles_docs_token in [
     'Environment Profiles',
     'make environment-profile-plan',
     'reports/environment-profile-values.yaml',
+    'reports/environment-profile-evidence-bundle.md',
     'MIGRATION_PROFILE=lab',
     'MIGRATION_IMAGE_MODE=preload',
     'GitOps delivery',
@@ -2500,6 +3141,11 @@ for environment_profiles_docs_token in [
     'compliance evidence',
     'incident response',
     'change management',
+    'cutover gates',
+    'smoke tests',
+    'release runbook',
+    'cluster upgrade',
+    'evidence bundle',
     'disaster recovery',
     'production',
     'restore drills',
@@ -2624,6 +3270,73 @@ for change_management_values_token in [
 ]:
     if change_management_values_token not in secret_management_values_text:
         errors.append(f'Helm values missing change management token: {change_management_values_token}')
+
+for cutover_gates_values_token in [
+    'cutoverGates:',
+    'profile: disabled',
+    'mode: baseline',
+    'trafficSwitch:',
+    'method: none',
+    'requireDnsTlsEvidence: false',
+    'preCutover:',
+    'requireImportPreflight: false',
+    'smokeTests:',
+    'requirePostMigrationCheck: false',
+    'rollback:',
+    'requireRecoveryPlan: false',
+    'postCutover:',
+    'requireOwnerHandoff: false',
+    'reports/cutover-gate-plan.md',
+]:
+    if cutover_gates_values_token not in secret_management_values_text:
+        errors.append(f'Helm values missing cutover gates token: {cutover_gates_values_token}')
+
+for smoke_testing_values_token in [
+    'smokeTesting:',
+    'profile: disabled',
+    'mode: baseline',
+    'runner: none',
+    'kubernetesRollout: false',
+    'databaseConnections: false',
+    'messagingConnections: false',
+    'reports/smoke-test-plan.md',
+]:
+    if smoke_testing_values_token not in secret_management_values_text:
+        errors.append(f'Helm values missing smoke testing token: {smoke_testing_values_token}')
+
+for release_runbook_values_token in [
+    'releaseRunbook:',
+    'profile: disabled',
+    'mode: baseline',
+    'publisher: none',
+    'deployer: none',
+    'requireArtifactEvidence: false',
+    'requireAttestation: false',
+    'requireChangeApproval: false',
+    'requirePrivateApprovalIndex: false',
+    'reports/release-runbook-plan.md',
+]:
+    if release_runbook_values_token not in secret_management_values_text:
+        errors.append(f'Helm values missing release runbook token: {release_runbook_values_token}')
+
+for cluster_upgrade_values_token in [
+    'clusterUpgrade:',
+    'profile: disabled',
+    'mode: baseline',
+    'engine: rke2',
+    'strategy: none',
+    'drainNodes: false',
+    'restartServices: false',
+    'maxMinorSkew: 0',
+    'requirePinnedVersion: false',
+    'requireSupportedSkew: false',
+    'requireEtcdSnapshot: false',
+    'requireAddOnCompatibility: false',
+    'requirePostUpgradeSmokeTest: false',
+    'reports/cluster-upgrade-plan.md',
+]:
+    if cluster_upgrade_values_token not in secret_management_values_text:
+        errors.append(f'Helm values missing cluster upgrade token: {cluster_upgrade_values_token}')
 
 for disaster_recovery_values_token in [
     'disasterRecovery:',
@@ -2769,6 +3482,7 @@ for import_profile_token in [
     'importBatch: auto',
     'resume: true',
     'requireIngressEndpoint: false',
+    'reports/import-migration/import-recovery-plan.md',
     'production:',
     'capacityUtilizationLimit: 0.85',
     'importBatch: all',
@@ -2818,6 +3532,27 @@ for values_schema_capability_token in [
     '"production-cab"',
     '"regulated-change"',
     '"requireFreezeCheck"',
+    '"cutoverGates"',
+    '"Production cutover and smoke-test gate intent"',
+    '"production-cutover"',
+    '"requireDnsTlsEvidence"',
+    '"requirePostMigrationCheck"',
+    '"smokeTesting"',
+    '"Post-migration smoke-test and health-probe intent"',
+    '"production-smoke"',
+    '"databaseConnections"',
+    '"messagingConnections"',
+    '"releaseRunbook"',
+    '"Release runbook and evidence gate intent"',
+    '"production-release"',
+    '"requireArtifactEvidence"',
+    '"requirePrivateApprovalIndex"',
+    '"clusterUpgrade"',
+    '"Cluster upgrade and version-skew guardrail intent"',
+    '"production-upgrade"',
+    '"requireSupportedSkew"',
+    '"requireEtcdSnapshot"',
+    '"requireAddOnCompatibility"',
     '"disasterRecovery"',
     '"production-dr"',
     '"regulated-bcp"',
@@ -2917,11 +3652,11 @@ for hook_id in ['detect-private-key', 'detect-aws-credentials']:
     if hook_id not in precommit_text:
         errors.append(f'pre-commit must include secret hygiene hook: {hook_id}')
 
-secret_contract = yaml.safe_load((ROOT / 'config/secrets.contract.yaml').read_text(encoding='utf-8'))
+secret_contract = safe_load((ROOT / 'config/secrets.contract.yaml').read_text(encoding='utf-8'))
 if secret_contract.get('policy', {}).get('plaintextKubernetesSecretsAllowed') is not False:
     errors.append('Secret contract must disallow plaintext Kubernetes Secrets')
 
-deployment_topologies = yaml.safe_load((ROOT / 'config/deployment-topologies.yaml').read_text(encoding='utf-8'))
+deployment_topologies = safe_load((ROOT / 'config/deployment-topologies.yaml').read_text(encoding='utf-8'))
 expected_topologies = {
     'single-node': {'minimumNodes': 1, 'production': False},
     'two-node-lab': {'minimumNodes': 2, 'production': False},
@@ -2943,15 +3678,15 @@ for topology_name, expectations in expected_topologies.items():
         referenced = topology.get(path_key)
         if not referenced or not (ROOT / referenced).exists():
             errors.append(f'Deployment topology {topology_name} references missing {path_key}: {referenced}')
-    helm_values = yaml.safe_load((ROOT / topology['helmValues']).read_text(encoding='utf-8'))
+    helm_values = safe_load((ROOT / topology['helmValues']).read_text(encoding='utf-8'))
     if helm_values.get('global', {}).get('cluster', {}).get('nodes', 0) < topology.get('minimumNodes'):
         errors.append(f'Deployment topology {topology_name} Helm override must be >= minimumNodes')
-    inventory = yaml.safe_load((ROOT / topology['inventory']).read_text(encoding='utf-8'))
+    inventory = safe_load((ROOT / topology['inventory']).read_text(encoding='utf-8'))
     groups = inventory.get('all', {}).get('children', {})
     if 'cluster_nodes' not in groups or 'rke2_servers' not in groups:
         errors.append(f'Deployment topology {topology_name} inventory must define cluster_nodes and rke2_servers')
 
-platforms = yaml.safe_load((ROOT / 'config/platforms.yaml').read_text(encoding='utf-8'))
+platforms = safe_load((ROOT / 'config/platforms.yaml').read_text(encoding='utf-8'))
 required_debian_family_platforms = {
     'ubuntu-22.04', 'ubuntu-24.04', 'ubuntu-26.04',
     'debian-11', 'debian-12', 'debian-13',
@@ -2997,7 +3732,7 @@ for family, expected_versions in {
     if actual_versions != expected_versions:
         errors.append(f'Platform matrix {family} versions must be: {", ".join(sorted(expected_versions))}')
 
-cluster_profiles = yaml.safe_load((ROOT / 'config/cluster-profiles.yaml').read_text(encoding='utf-8'))
+cluster_profiles = safe_load((ROOT / 'config/cluster-profiles.yaml').read_text(encoding='utf-8'))
 cluster_profile_catalog = cluster_profiles.get('profiles', {})
 for profile_name in ['rke2', 'k3s', 'docker']:
     supported_node_os = set(cluster_profile_catalog.get(profile_name, {}).get('supportedNodeOs', []))
@@ -3036,7 +3771,7 @@ if missing_raw_rhel_platforms:
         + ', '.join(sorted(missing_raw_rhel_platforms))
     )
 
-supply_chain_policy = yaml.safe_load((ROOT / 'config/supply-chain-policy.yaml').read_text(encoding='utf-8'))
+supply_chain_policy = safe_load((ROOT / 'config/supply-chain-policy.yaml').read_text(encoding='utf-8'))
 policy = supply_chain_policy.get('policy', {})
 if policy.get('nodeLtsMajor') != 24:
     errors.append('Supply-chain policy must require Node 24 LTS for Node-based workflow tooling')
@@ -3045,6 +3780,7 @@ for control in [
     'requireChartVersionMatchesTag',
     'requireChecksums',
     'requireSbom',
+    'requireReleaseManifest',
     'requireGithubArtifactAttestations',
     'requireOidcForSigning',
 ]:
@@ -3055,6 +3791,7 @@ for verification_control in [
     'verifyTagMatchesChartVersion',
     'verifyChecksumContents',
     'verifySbomJson',
+    'verifyReleaseManifestJson',
     'publicSafetyScan',
 ]:
     if release_verification.get(verification_control) is not True:
@@ -3063,6 +3800,9 @@ if release_verification.get('offlineVerifier') != 'scripts/release/verify_releas
     errors.append('Supply-chain policy must point at the offline release evidence verifier')
 if release_verification.get('report') != 'reports/release-evidence-verification.md':
     errors.append('Supply-chain policy must write the public-safe release verification report')
+release_artifacts = policy.get('releaseArtifacts', {})
+if release_artifacts.get('releaseManifest') != 'dist/release-evidence.json':
+    errors.append('Supply-chain policy must require the public-safe release evidence manifest')
 if 'master' not in policy.get('githubActions', {}).get('disallowFloatingRefs', []):
     errors.append('Supply-chain policy must disallow floating @master action refs')
 if 'main' not in policy.get('githubActions', {}).get('disallowFloatingRefs', []):
@@ -3070,7 +3810,7 @@ if 'main' not in policy.get('githubActions', {}).get('disallowFloatingRefs', [])
 if policy.get('dependencyReview', {}).get('enabledForPullRequests') is not True:
     errors.append('Supply-chain policy must enable pull-request dependency review')
 
-image_policy = yaml.safe_load((ROOT / 'config/image-policy.yaml').read_text(encoding='utf-8'))
+image_policy = safe_load((ROOT / 'config/image-policy.yaml').read_text(encoding='utf-8'))
 image_policy_controls = image_policy.get('policy', {})
 if image_policy_controls.get('requireExplicitTags') is not True:
     errors.append('Image policy must require explicit image tags')
@@ -3162,7 +3902,7 @@ for retired_runtime_image in [
     if retired_runtime_image in runtime_image_surface_text:
         errors.append(f'Runtime image surface still contains retired pin: {retired_runtime_image}')
 
-slo_contract = yaml.safe_load((ROOT / 'config/slo.yaml').read_text(encoding='utf-8'))
+slo_contract = safe_load((ROOT / 'config/slo.yaml').read_text(encoding='utf-8'))
 objectives = slo_contract.get('objectives', {})
 if len(objectives) < 5:
     errors.append('SLO contract must define at least five production objectives')
@@ -3260,7 +4000,7 @@ status_script = (ROOT / 'scripts/health/status.sh').read_text(encoding='utf-8')
 for status_token in ['prometheusrules.monitoring.coreos.com', 'servicemonitors.monitoring.coreos.com', 'observability']:
     if status_token not in status_script:
         errors.append(f'status script missing observability check: {status_token}')
-observability_contract = yaml.safe_load((ROOT / 'config/observability.yaml').read_text(encoding='utf-8'))
+observability_contract = safe_load((ROOT / 'config/observability.yaml').read_text(encoding='utf-8'))
 if observability_contract.get('default') != 'disabled' or observability_contract.get('defaultStack') != 'disabled':
     errors.append('Observability contract must default to the disabled low-resource profile')
 for observability_profile in ['elasticsearch', 'grafana', 'prometheus', 'opentelemetry', 'loki', 'clickhouse']:

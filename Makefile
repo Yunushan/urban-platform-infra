@@ -15,15 +15,32 @@ ANSIBLE_CONFIG ?= ansible/ansible.cfg
 ANSIBLE_ARGS ?=
 ANSIBLE_DIFF ?= --diff
 VENV ?= .venv
-VENV_BIN := $(VENV)/bin
-VENV_PYTHON := $(wildcard $(VENV_BIN)/python3)
-PYTHON ?= $(if $(VENV_PYTHON),$(VENV_BIN)/python3,python3)
+VENV_POSIX_BIN := $(VENV)/bin
+VENV_WINDOWS_BIN := $(VENV)/Scripts
+VENV_POSIX_PYTHON := $(firstword $(wildcard $(VENV_POSIX_BIN)/python3) $(wildcard $(VENV_POSIX_BIN)/python))
+VENV_WINDOWS_PYTHON := $(wildcard $(VENV_WINDOWS_BIN)/python.exe)
+VENV_PYTHON := $(firstword $(VENV_POSIX_PYTHON) $(VENV_WINDOWS_PYTHON))
+VENV_BIN := $(if $(VENV_POSIX_PYTHON),$(VENV_POSIX_BIN),$(if $(VENV_WINDOWS_PYTHON),$(VENV_WINDOWS_BIN),$(VENV_POSIX_BIN)))
+SYSTEM_PYTHON := $(shell command -v python3 2>/dev/null || command -v python 2>/dev/null || printf python3)
+PYTHON ?= $(if $(VENV_PYTHON),$(VENV_PYTHON),$(SYSTEM_PYTHON))
 PIP ?= $(PYTHON) -m pip
-ANSIBLE_PLAYBOOK ?= $(if $(VENV_PYTHON),$(VENV_BIN)/ansible-playbook,ansible-playbook)
-ANSIBLE_GALAXY ?= $(if $(VENV_PYTHON),$(VENV_BIN)/ansible-galaxy,ansible-galaxy)
+VENV_ANSIBLE_PLAYBOOK := $(firstword $(wildcard $(VENV_BIN)/ansible-playbook) $(wildcard $(VENV_BIN)/ansible-playbook.exe))
+VENV_ANSIBLE_GALAXY := $(firstword $(wildcard $(VENV_BIN)/ansible-galaxy) $(wildcard $(VENV_BIN)/ansible-galaxy.exe))
+VENV_YAMLLINT := $(firstword $(wildcard $(VENV_BIN)/yamllint) $(wildcard $(VENV_BIN)/yamllint.exe))
+ANSIBLE_PLAYBOOK ?= $(if $(VENV_ANSIBLE_PLAYBOOK),$(VENV_ANSIBLE_PLAYBOOK),ansible-playbook)
+ANSIBLE_GALAXY ?= $(if $(VENV_ANSIBLE_GALAXY),$(VENV_ANSIBLE_GALAXY),ansible-galaxy)
+YAMLLINT ?= $(if $(VENV_YAMLLINT),$(VENV_YAMLLINT),yamllint)
+SHELLCHECK ?= shellcheck
 ANSIBLE_COLLECTION_REQUIREMENTS ?= ansible/requirements.yml
 ANSIBLE_COLLECTIONS_STAMP ?= .ansible/collections/.$(subst /,_,$(ANSIBLE_COLLECTION_REQUIREMENTS)).stamp
 PYTHON_DEPS_STAMP ?= .ansible/.python-deps.stamp
+LOCAL_SETUP_SCRIPT ?= scripts/tools/setup_local.py
+LOCAL_DOCTOR_SCRIPT ?= scripts/tools/doctor_local.py
+LOCAL_DOCTOR_REPORT ?= reports/local-doctor.md
+CI_CONTRACT_SCRIPT ?= scripts/tools/validate_ci_contract.py
+CI_CONTRACT_REPORT ?= reports/ci-contract.md
+PRIVATE_DATA_AUDIT_SCRIPT ?= scripts/tools/private_data_audit.py
+PRIVATE_DATA_AUDIT_REPORT ?= reports/private-data-audit.md
 CONFIRM_PROD ?= false
 HELM ?= helm
 HELM_INSTALL_SCRIPT ?= scripts/tools/install-helm.sh
@@ -182,6 +199,7 @@ MIGRATION_IMAGE_TAG ?= imported-0.1.0
 MIGRATION_NAMESPACE ?= $(NAMESPACE)
 MIGRATION_DUMP_DIR ?= $(MIGRATION_PRIVATE_DIR)/db-dumps
 MIGRATION_DB_TARGETS ?= $(MIGRATION_PRIVATE_DIR)/db-targets.yaml
+IMPORT_RECOVERY_OUTPUT ?= $(MIGRATION_OUTPUT)/import-recovery-plan.md
 BACKUP_POLICY ?= config/backup-policy.yaml
 BACKUP_OUTPUT ?= reports/backup-plan.md
 OBSERVABILITY_CONFIG ?= config/observability.yaml
@@ -207,6 +225,11 @@ LAB_DEPLOY_MAX_DATABASES ?= -1
 LAB_DEPLOY_BATCH_SIZE ?= 0
 LAB_DEPLOY_OUTPUT ?= reports/lab-deploy-plan.md
 LAB_DEPLOY_VALUES ?= reports/lab-deploy-values.yaml
+CAPACITY_PREFLIGHT_OUTPUT ?= reports/capacity-preflight.md
+CAPACITY_PREFLIGHT_ENV_PROFILE ?= $(ENV_PROFILE)
+CAPACITY_PREFLIGHT_IMPORT_BATCH ?= $(MIGRATION_IMPORT_BATCH)
+CAPACITY_PREFLIGHT_MAX_IMPORTED_WORKLOADS ?= $(MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS)
+CAPACITY_PREFLIGHT_EVIDENCE ?=
 IMAGE_CACHE_CONFIG ?= config/image-cache.yaml
 IMAGE_CACHE_PROFILE ?=
 IMAGE_CACHE_OUTPUT ?= reports/image-cache-plan.md
@@ -220,6 +243,49 @@ ENV_PROFILE_CONFIG ?= config/environment-profiles.yaml
 ENV_PROFILE ?= $(MIGRATION_PROFILE)
 ENV_PROFILE_OUTPUT ?= reports/environment-profile-plan.md
 ENV_PROFILE_VALUES ?= reports/environment-profile-values.yaml
+ENV_PROFILE_EVIDENCE ?= reports/environment-profile-evidence-bundle.md
+SMOKE_TEST_CONFIG ?= config/smoke-tests.yaml
+SMOKE_TEST_PROFILE ?=
+SMOKE_TEST_NAMESPACE ?= $(MIGRATION_NAMESPACE)
+SMOKE_TEST_INGRESS_HOST ?= $(DEPLOY_INGRESS_HOST)
+SMOKE_TEST_OUTPUT ?= reports/smoke-test-plan.md
+SMOKE_TEST_VALUES ?= reports/smoke-test-values.yaml
+SMOKE_TEST_EVIDENCE ?=
+SMOKE_TEST_EXECUTE ?= false
+RELEASE_RUNBOOK_CONFIG ?= config/release-runbook.yaml
+RELEASE_RUNBOOK_PROFILE ?=
+RELEASE_RUNBOOK_TAG ?= $(RELEASE_TAG)
+RELEASE_RUNBOOK_RELEASE_EVIDENCE ?= $(RELEASE_VERIFY_REPORT)
+RELEASE_RUNBOOK_CHANGE_TICKET ?= $(CHANGE_MANAGEMENT_TICKET)
+RELEASE_RUNBOOK_APPROVAL_EVIDENCE ?= $(CHANGE_MANAGEMENT_APPROVAL_EVIDENCE)
+RELEASE_RUNBOOK_ROLLBACK_PLAN ?= $(CHANGE_MANAGEMENT_ROLLBACK_PLAN)
+RELEASE_RUNBOOK_SMOKE_TEST_PLAN ?= $(SMOKE_TEST_OUTPUT)
+RELEASE_RUNBOOK_CUTOVER_GATE_PLAN ?= $(CUTOVER_GATES_OUTPUT)
+RELEASE_RUNBOOK_ENVIRONMENT_EVIDENCE ?= $(ENV_PROFILE_EVIDENCE)
+RELEASE_RUNBOOK_OUTPUT ?= reports/release-runbook-plan.md
+RELEASE_RUNBOOK_VALUES ?= reports/release-runbook-values.yaml
+RELEASE_RUNBOOK_EXECUTE ?= false
+CLUSTER_UPGRADE_CONFIG ?= config/cluster-upgrade.yaml
+CLUSTER_UPGRADE_PROFILE ?=
+CLUSTER_UPGRADE_CURRENT_KUBERNETES ?=
+CLUSTER_UPGRADE_TARGET_KUBERNETES ?=
+CLUSTER_UPGRADE_CURRENT_RKE2 ?=
+CLUSTER_UPGRADE_TARGET_RKE2 ?= $(MIGRATION_RKE2_VERSION)
+CLUSTER_UPGRADE_CLUSTER_DOCTOR ?= $(CLUSTER_DOCTOR_OUTPUT)
+CLUSTER_UPGRADE_ETCD_SNAPSHOT ?=
+CLUSTER_UPGRADE_BACKUP_RESTORE_EVIDENCE ?= $(BACKUP_OUTPUT)
+CLUSTER_UPGRADE_MAINTENANCE_WINDOW ?= $(CHANGE_MANAGEMENT_WINDOW)
+CLUSTER_UPGRADE_CAPACITY_EVIDENCE ?= $(CAPACITY_PREFLIGHT_OUTPUT)
+CLUSTER_UPGRADE_NODE_HEALTH_EVIDENCE ?= $(CLUSTER_DOCTOR_OUTPUT)
+CLUSTER_UPGRADE_ROLLBACK_PLAN ?= $(CHANGE_MANAGEMENT_ROLLBACK_PLAN)
+CLUSTER_UPGRADE_ADDON_COMPATIBILITY ?=
+CLUSTER_UPGRADE_SMOKE_TEST_PLAN ?= $(SMOKE_TEST_OUTPUT)
+CLUSTER_UPGRADE_INVENTORY_REVIEW ?=
+CLUSTER_UPGRADE_RELEASE_NOTES_REVIEW ?=
+CLUSTER_UPGRADE_OWNER_APPROVAL ?=
+CLUSTER_UPGRADE_OUTPUT ?= reports/cluster-upgrade-plan.md
+CLUSTER_UPGRADE_VALUES ?= reports/cluster-upgrade-values.yaml
+CLUSTER_UPGRADE_EXECUTE ?= false
 RELEASE_TAG ?= $(shell git describe --tags --exact-match 2>/dev/null)
 RELEASE_VERIFY_REPORT ?= reports/release-evidence-verification.md
 IMAGE_PROMOTION_REGISTRY ?= private-registry.example.invalid/platform
@@ -318,6 +384,25 @@ CHANGE_MANAGEMENT_POST_CHANGE_REVIEW ?= false
 CHANGE_MANAGEMENT_REGULATORY_EVIDENCE ?= false
 CHANGE_MANAGEMENT_OUTPUT ?= reports/change-management-plan.md
 CHANGE_MANAGEMENT_VALUES ?= reports/change-management-values.yaml
+CUTOVER_GATES_CONFIG ?= config/cutover-gates.yaml
+CUTOVER_GATES_PROFILE ?=
+CUTOVER_GATES_NAMESPACE ?= $(MIGRATION_NAMESPACE)
+CUTOVER_GATES_INGRESS_HOST ?= $(DEPLOY_INGRESS_HOST)
+CUTOVER_GATES_IMPORT_OUTPUT ?= $(MIGRATION_OUTPUT)
+CUTOVER_CHANGE_TICKET ?= $(CHANGE_MANAGEMENT_TICKET)
+CUTOVER_APPROVAL_EVIDENCE ?= $(CHANGE_MANAGEMENT_APPROVAL_EVIDENCE)
+CUTOVER_ROLLBACK_PLAN ?= $(CHANGE_MANAGEMENT_ROLLBACK_PLAN)
+CUTOVER_SMOKE_TEST_PLAN ?= $(SMOKE_TEST_OUTPUT)
+CUTOVER_RELEASE_EVIDENCE ?= $(RELEASE_VERIFY_REPORT)
+CUTOVER_REGISTRY_EVIDENCE ?= $(REGISTRY_PROMOTION_OUTPUT)
+CUTOVER_BACKUP_RESTORE_EVIDENCE ?= $(BACKUP_OUTPUT)
+CUTOVER_DATABASE_RESTORE_EVIDENCE ?= $(DB_MIGRATION_OUTPUT)
+CUTOVER_RESTORE_POINT_EVIDENCE ?=
+CUTOVER_DNS_TLS_EVIDENCE ?= false
+CUTOVER_OWNER_HANDOFF ?= false
+CUTOVER_POST_CUTOVER_WINDOW ?=
+CUTOVER_GATES_OUTPUT ?= reports/cutover-gate-plan.md
+CUTOVER_GATES_VALUES ?= reports/cutover-gate-values.yaml
 DISASTER_RECOVERY_CONFIG ?= config/disaster-recovery.yaml
 DISASTER_RECOVERY_PROFILE ?=
 DISASTER_RECOVERY_RTO_RPO ?=
@@ -340,7 +425,7 @@ DISASTER_RECOVERY_POST_DRILL_REVIEW ?= false
 DISASTER_RECOVERY_OUTPUT ?= reports/disaster-recovery-plan.md
 DISASTER_RECOVERY_VALUES ?= reports/disaster-recovery-values.yaml
 
-.PHONY: help validate image-policy image-promotion-plan registry-promotion-plan runtime-hardening-plan gitops-delivery-plan progressive-delivery-plan scaling-policy-plan network-connectivity-plan access-governance-plan compliance-evidence-plan incident-response-plan change-management-plan disaster-recovery-plan lint configure backup-plan observability-plan cluster-doctor cluster-repair lab-deploy-plan image-cache-plan database-migration-plan edge-migration-plan environment-profile-plan import-check import-plan import-preflight import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig configure-edge-ports install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace recover-helm-release deploy deploy-auto deploy-dry-run package-chart release-evidence verify-release-evidence status observability-status docker-up docker-down docker-status policy clean
+.PHONY: help setup-local doctor-local ci-contract private-data-audit operator-ready validate image-policy image-promotion-plan registry-promotion-plan runtime-hardening-plan gitops-delivery-plan progressive-delivery-plan scaling-policy-plan network-connectivity-plan access-governance-plan compliance-evidence-plan incident-response-plan change-management-plan cutover-gate-plan smoke-test-plan release-runbook-plan cluster-upgrade-plan disaster-recovery-plan lint configure backup-plan observability-plan cluster-doctor cluster-repair lab-deploy-plan capacity-preflight image-cache-plan database-migration-plan edge-migration-plan environment-profile-plan import-check import-plan import-preflight import-recovery-plan import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig configure-edge-ports install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace recover-helm-release deploy deploy-auto deploy-dry-run package-chart release-evidence verify-release-evidence status observability-status docker-up docker-down docker-status policy clean
 
 HELM_DEPLOY_SET_ARGS = \
 	--set namespace.create=false \
@@ -389,6 +474,30 @@ endef
 help:
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage: make <target> [ENV=prod ENGINE=rke2 INGRESS=traefik WEB=nginx DB=postgresql OBS=disabled TOPOLOGY=three-node-ha]\n\nTargets:\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  %-22s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
+setup-local: ## Create or update the local Python virtualenv for validation and operator tooling.
+	$(PYTHON) $(LOCAL_SETUP_SCRIPT) --venv "$(VENV)"
+
+doctor-local: ## Diagnose local workstation/operator prerequisites and write a public-safe report.
+	mkdir -p reports
+	$(PYTHON) $(LOCAL_DOCTOR_SCRIPT) --report "$(LOCAL_DOCTOR_REPORT)"
+
+ci-contract: ## Validate GitHub/GitLab CI lane pins, actions, and gate commands.
+	mkdir -p reports
+	$(PYTHON) $(CI_CONTRACT_SCRIPT) --report "$(CI_CONTRACT_REPORT)"
+
+private-data-audit: ## Scan tracked repository content for secret/private-data leakage and write a public-safe report.
+	mkdir -p reports
+	$(PYTHON) $(PRIVATE_DATA_AUDIT_SCRIPT) --report "$(PRIVATE_DATA_AUDIT_REPORT)"
+
+operator-ready: ## One-command local readiness check before cluster deploy, import, or release work.
+	$(MAKE) setup-local
+	$(MAKE) doctor-local
+	$(MAKE) ci-contract
+	$(MAKE) private-data-audit
+	$(MAKE) capacity-preflight
+	$(MAKE) validate
+	$(MAKE) lint
+
 $(PYTHON_DEPS_STAMP): requirements-ci.txt requirements-ci-modern.txt
 	mkdir -p .ansible
 	@$(install_python_deps)
@@ -400,6 +509,8 @@ python-deps: $(PYTHON_DEPS_STAMP) ## Install Python/Ansible dependencies compati
 	fi
 
 validate: python-deps ## Validate YAML, Helm chart structure, scripts, and config catalogs.
+	$(PYTHON) $(CI_CONTRACT_SCRIPT)
+	$(PYTHON) $(PRIVATE_DATA_AUDIT_SCRIPT)
 	$(PYTHON) scripts/validate.py
 	$(PYTHON) scripts/images/validate-images.py
 
@@ -450,13 +561,29 @@ change-management-plan: ## Generate a public-safe change management and maintena
 	mkdir -p reports
 	$(PYTHON) scripts/change_management_plan.py --config "$(CHANGE_MANAGEMENT_CONFIG)" --profile "$(CHANGE_MANAGEMENT_PROFILE)" --change-ticket "$(CHANGE_MANAGEMENT_TICKET)" --approval-evidence "$(CHANGE_MANAGEMENT_APPROVAL_EVIDENCE)" --risk-assessment "$(CHANGE_MANAGEMENT_RISK_ASSESSMENT)" --impact-assessment "$(CHANGE_MANAGEMENT_IMPACT_ASSESSMENT)" --maintenance-window "$(CHANGE_MANAGEMENT_WINDOW)" --rollback-plan "$(CHANGE_MANAGEMENT_ROLLBACK_PLAN)" --smoke-test-plan "$(CHANGE_MANAGEMENT_SMOKE_TEST_PLAN)" --output "$(CHANGE_MANAGEMENT_OUTPUT)" --overrides "$(CHANGE_MANAGEMENT_VALUES)" $(if $(filter true,$(CHANGE_MANAGEMENT_FREEZE_CHECK)),--freeze-check,) $(if $(filter true,$(CHANGE_MANAGEMENT_STAKEHOLDER_NOTICE)),--stakeholder-notice,) $(if $(filter true,$(CHANGE_MANAGEMENT_POST_CHANGE_REVIEW)),--post-change-review,) $(if $(filter true,$(CHANGE_MANAGEMENT_REGULATORY_EVIDENCE)),--regulatory-evidence,) $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
 
+cutover-gate-plan: ## Generate a public-safe production cutover and smoke-test gate plan.
+	mkdir -p reports
+	$(PYTHON) scripts/cutover_gate_plan.py --config "$(CUTOVER_GATES_CONFIG)" --profile "$(CUTOVER_GATES_PROFILE)" --namespace "$(CUTOVER_GATES_NAMESPACE)" --ingress-host "$(CUTOVER_GATES_INGRESS_HOST)" --import-output "$(CUTOVER_GATES_IMPORT_OUTPUT)" --change-ticket "$(CUTOVER_CHANGE_TICKET)" --approval-evidence "$(CUTOVER_APPROVAL_EVIDENCE)" --rollback-plan "$(CUTOVER_ROLLBACK_PLAN)" --smoke-test-plan "$(CUTOVER_SMOKE_TEST_PLAN)" --release-evidence "$(CUTOVER_RELEASE_EVIDENCE)" --registry-evidence "$(CUTOVER_REGISTRY_EVIDENCE)" --backup-restore-evidence "$(CUTOVER_BACKUP_RESTORE_EVIDENCE)" --database-restore-evidence "$(CUTOVER_DATABASE_RESTORE_EVIDENCE)" --restore-point-evidence "$(CUTOVER_RESTORE_POINT_EVIDENCE)" --post-cutover-window "$(CUTOVER_POST_CUTOVER_WINDOW)" --output "$(CUTOVER_GATES_OUTPUT)" --overrides "$(CUTOVER_GATES_VALUES)" $(if $(filter true,$(CUTOVER_DNS_TLS_EVIDENCE)),--dns-tls-evidence,) $(if $(filter true,$(CUTOVER_OWNER_HANDOFF)),--owner-handoff,) $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
+smoke-test-plan: ## Generate a public-safe post-migration smoke-test and health-probe plan.
+	mkdir -p reports
+	$(PYTHON) scripts/smoke_test_plan.py --config "$(SMOKE_TEST_CONFIG)" --profile "$(SMOKE_TEST_PROFILE)" --namespace "$(SMOKE_TEST_NAMESPACE)" --ingress-host "$(SMOKE_TEST_INGRESS_HOST)" --evidence "$(SMOKE_TEST_EVIDENCE)" --output "$(SMOKE_TEST_OUTPUT)" --overrides "$(SMOKE_TEST_VALUES)" $(if $(filter true,$(SMOKE_TEST_EXECUTE)),--execute,) $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
+release-runbook-plan: ## Generate a public-safe release runbook and evidence gate plan.
+	mkdir -p reports
+	$(PYTHON) scripts/release_runbook_plan.py --config "$(RELEASE_RUNBOOK_CONFIG)" --profile "$(RELEASE_RUNBOOK_PROFILE)" --release-tag "$(RELEASE_RUNBOOK_TAG)" --release-evidence "$(RELEASE_RUNBOOK_RELEASE_EVIDENCE)" --change-ticket "$(RELEASE_RUNBOOK_CHANGE_TICKET)" --approval-evidence "$(RELEASE_RUNBOOK_APPROVAL_EVIDENCE)" --rollback-plan "$(RELEASE_RUNBOOK_ROLLBACK_PLAN)" --smoke-test-plan "$(RELEASE_RUNBOOK_SMOKE_TEST_PLAN)" --cutover-gate-plan "$(RELEASE_RUNBOOK_CUTOVER_GATE_PLAN)" --environment-evidence "$(RELEASE_RUNBOOK_ENVIRONMENT_EVIDENCE)" --output "$(RELEASE_RUNBOOK_OUTPUT)" --overrides "$(RELEASE_RUNBOOK_VALUES)" $(if $(filter true,$(RELEASE_RUNBOOK_EXECUTE)),--execute,) $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
+cluster-upgrade-plan: ## Generate a public-safe cluster upgrade and version-skew guardrail plan.
+	mkdir -p reports
+	$(PYTHON) scripts/cluster_upgrade_plan.py --config "$(CLUSTER_UPGRADE_CONFIG)" --profile "$(CLUSTER_UPGRADE_PROFILE)" --current-kubernetes "$(CLUSTER_UPGRADE_CURRENT_KUBERNETES)" --target-kubernetes "$(CLUSTER_UPGRADE_TARGET_KUBERNETES)" --current-rke2 "$(CLUSTER_UPGRADE_CURRENT_RKE2)" --target-rke2 "$(CLUSTER_UPGRADE_TARGET_RKE2)" --cluster-doctor "$(CLUSTER_UPGRADE_CLUSTER_DOCTOR)" --etcd-snapshot "$(CLUSTER_UPGRADE_ETCD_SNAPSHOT)" --backup-restore-evidence "$(CLUSTER_UPGRADE_BACKUP_RESTORE_EVIDENCE)" --maintenance-window "$(CLUSTER_UPGRADE_MAINTENANCE_WINDOW)" --capacity-evidence "$(CLUSTER_UPGRADE_CAPACITY_EVIDENCE)" --node-health-evidence "$(CLUSTER_UPGRADE_NODE_HEALTH_EVIDENCE)" --rollback-plan "$(CLUSTER_UPGRADE_ROLLBACK_PLAN)" --addon-compatibility "$(CLUSTER_UPGRADE_ADDON_COMPATIBILITY)" --smoke-test-plan "$(CLUSTER_UPGRADE_SMOKE_TEST_PLAN)" --inventory-review "$(CLUSTER_UPGRADE_INVENTORY_REVIEW)" --release-notes-review "$(CLUSTER_UPGRADE_RELEASE_NOTES_REVIEW)" --owner-approval "$(CLUSTER_UPGRADE_OWNER_APPROVAL)" --output "$(CLUSTER_UPGRADE_OUTPUT)" --overrides "$(CLUSTER_UPGRADE_VALUES)" $(if $(filter true,$(CLUSTER_UPGRADE_EXECUTE)),--execute,) $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
 disaster-recovery-plan: ## Generate a public-safe disaster recovery and business continuity plan.
 	mkdir -p reports
 	$(PYTHON) scripts/disaster_recovery_plan.py --config "$(DISASTER_RECOVERY_CONFIG)" --profile "$(DISASTER_RECOVERY_PROFILE)" --rto-rpo "$(DISASTER_RECOVERY_RTO_RPO)" --dependency-map "$(DISASTER_RECOVERY_DEPENDENCY_MAP)" --criticality-map "$(DISASTER_RECOVERY_CRITICALITY_MAP)" --backup-replication "$(DISASTER_RECOVERY_BACKUP_REPLICATION)" --data-replication "$(DISASTER_RECOVERY_DATA_REPLICATION)" --cross-zone-evidence "$(DISASTER_RECOVERY_CROSS_ZONE_EVIDENCE)" --database-restore-evidence "$(DISASTER_RECOVERY_DATABASE_RESTORE_EVIDENCE)" --etcd-restore-evidence "$(DISASTER_RECOVERY_ETCD_RESTORE_EVIDENCE)" --namespace-restore-evidence "$(DISASTER_RECOVERY_NAMESPACE_RESTORE_EVIDENCE)" --application-smoke-test "$(DISASTER_RECOVERY_APPLICATION_SMOKE_TEST)" --runbook-source "$(DISASTER_RECOVERY_RUNBOOK_SOURCE)" --comms-plan "$(DISASTER_RECOVERY_COMMS_PLAN)" --manual-workaround "$(DISASTER_RECOVERY_MANUAL_WORKAROUND)" --supplier-contacts "$(DISASTER_RECOVERY_SUPPLIER_CONTACTS)" --drill-evidence "$(DISASTER_RECOVERY_DRILL_EVIDENCE)" --rto-evidence "$(DISASTER_RECOVERY_RTO_EVIDENCE)" --output "$(DISASTER_RECOVERY_OUTPUT)" --overrides "$(DISASTER_RECOVERY_VALUES)" $(if $(filter true,$(DISASTER_RECOVERY_POST_DRILL_REVIEW)),--post-drill-review,) $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
 
-lint: ## Run local static checks that mirror the CI static gate.
-	yamllint .
-	shellcheck $$(git ls-files '*.sh')
+lint: python-deps ## Run local static checks that mirror the CI static gate.
+	$(YAMLLINT) .
+	$(SHELLCHECK) $$(git ls-files '*.sh')
 
 configure: ## Update selected runtime defaults in Helm values.
 	$(PYTHON) scripts/configure.py --engine $(ENGINE) --ingress-controller $(INGRESS) --webserver $(WEB) --database $(DB) --observability $(OBS) --values $(VALUES)
@@ -480,6 +607,10 @@ lab-deploy-plan: ## Generate a public-safe lab capacity plan and first-wave valu
 	mkdir -p reports
 	$(PYTHON) scripts/lab_deploy_plan.py --values "$(VALUES)" --capacity "$(LAB_CAPACITY_CONFIG)" --profile "$(LAB_DEPLOY_PROFILE)" --node-count "$(LAB_DEPLOY_NODE_COUNT)" --node-cpu "$(LAB_DEPLOY_NODE_CPU)" --node-memory "$(LAB_DEPLOY_NODE_MEMORY)" --utilization-limit "$(LAB_DEPLOY_UTILIZATION_LIMIT)" --max-pods "$(LAB_DEPLOY_MAX_PODS)" --max-databases "$(LAB_DEPLOY_MAX_DATABASES)" --batch-size "$(LAB_DEPLOY_BATCH_SIZE)" --output "$(LAB_DEPLOY_OUTPUT)" --overrides "$(LAB_DEPLOY_VALUES)"
 
+capacity-preflight: ## Fail fast on unsafe lab/production capacity assumptions before deploy or import.
+	mkdir -p reports
+	$(PYTHON) scripts/capacity_preflight.py --values "$(VALUES)" --capacity "$(LAB_CAPACITY_CONFIG)" --environment-profiles "$(ENV_PROFILE_CONFIG)" --capacity-profile "$(LAB_DEPLOY_PROFILE)" --environment-profile "$(CAPACITY_PREFLIGHT_ENV_PROFILE)" --node-count "$(LAB_DEPLOY_NODE_COUNT)" --node-cpu "$(LAB_DEPLOY_NODE_CPU)" --node-memory "$(LAB_DEPLOY_NODE_MEMORY)" --utilization-limit "$(LAB_DEPLOY_UTILIZATION_LIMIT)" --max-pods "$(LAB_DEPLOY_MAX_PODS)" --max-databases "$(LAB_DEPLOY_MAX_DATABASES)" --max-imported-workloads "$(CAPACITY_PREFLIGHT_MAX_IMPORTED_WORKLOADS)" --import-batch "$(CAPACITY_PREFLIGHT_IMPORT_BATCH)" --capacity-evidence "$(CAPACITY_PREFLIGHT_EVIDENCE)" --output "$(CAPACITY_PREFLIGHT_OUTPUT)" --strict
+
 image-cache-plan: ## Generate a public-safe image cache, preload, and cleanup plan.
 	mkdir -p reports
 	$(PYTHON) scripts/image_cache_plan.py --config "$(IMAGE_CACHE_CONFIG)" --profile "$(IMAGE_CACHE_PROFILE)" --output "$(IMAGE_CACHE_OUTPUT)" --image-mode "$(MIGRATION_IMAGE_MODE)" --private-dir "$(MIGRATION_PRIVATE_DIR)" --image-output-dir "$(MIGRATION_IMAGE_OUTPUT_DIR)" --rke2-image-dir "$(MIGRATION_RKE2_IMAGE_DIR)" --rke2-nodes "$(MIGRATION_RKE2_NODES)" --registry "$(MIGRATION_REGISTRY)" --container-tool "$(MIGRATION_CONTAINER_TOOL)" --image-tag "$(MIGRATION_IMAGE_TAG)" --cleanup-operator-images "$(MIGRATION_CLEANUP_OPERATOR_IMAGES)" --prune-operator-cache "$(MIGRATION_PRUNE_OPERATOR_CACHE)" --rke2-import-images "$(MIGRATION_RKE2_IMPORT_IMAGES)" $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
@@ -494,7 +625,7 @@ edge-migration-plan: ## Generate a public-safe ingress and edge migration plan.
 
 environment-profile-plan: ## Generate a public-safe environment profile plan and Helm values overlay.
 	mkdir -p reports
-	$(PYTHON) scripts/environment_profile_plan.py --config "$(ENV_PROFILE_CONFIG)" --topologies config/deployment-topologies.yaml --profile "$(ENV_PROFILE)" --output "$(ENV_PROFILE_OUTPUT)" --overrides "$(ENV_PROFILE_VALUES)" $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+	$(PYTHON) scripts/environment_profile_plan.py --config "$(ENV_PROFILE_CONFIG)" --topologies config/deployment-topologies.yaml --profile "$(ENV_PROFILE)" --output "$(ENV_PROFILE_OUTPUT)" --overrides "$(ENV_PROFILE_VALUES)" --evidence-output "$(ENV_PROFILE_EVIDENCE)" $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
 
 import-check: python-deps ## Check an external Compose project before importing or migrating it.
 	@if [ -z "$(PROJECT_PATH)" ]; then \
@@ -516,6 +647,10 @@ import-preflight: ## Run cluster health preflight before import actions.
 	fi
 	$(MAKE) operator-kubeconfig
 	$(MAKE) import-migrate MIGRATION_STAGE=preflight MIGRATION_EXECUTE=true
+
+import-recovery-plan: ## Generate a public-safe import resume, cleanup, and rollback plan.
+	mkdir -p "$(MIGRATION_OUTPUT)"
+	$(PYTHON) scripts/import_recovery_plan.py --output "$(IMPORT_RECOVERY_OUTPUT)" --migration-output "$(MIGRATION_OUTPUT)" --private-dir "$(MIGRATION_PRIVATE_DIR)" --state-file "$(MIGRATION_STATE_FILE)" --namespace "$(MIGRATION_NAMESPACE)" --profile "$(MIGRATION_PROFILE)" --image-mode "$(MIGRATION_IMAGE_MODE)" --import-batch "$(MIGRATION_IMPORT_BATCH)" --resume "$(MIGRATION_RESUME)" --force-rerun "$(MIGRATION_FORCE_RERUN)" --cleanup-operator-images "$(MIGRATION_CLEANUP_OPERATOR_IMAGES)" --prune-operator-cache "$(MIGRATION_PRUNE_OPERATOR_CACHE)" --rke2-import-images "$(MIGRATION_RKE2_IMPORT_IMAGES)" $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
 
 import-migrate: python-deps ## Generate or execute guarded migration automation for an external Compose project.
 	@if [ -z "$(PROJECT_PATH)" ]; then \
@@ -628,7 +763,7 @@ package-chart: install-helm ## Package the Helm chart into dist/.
 
 release-evidence: package-chart ## Generate rendered manifest, SPDX SBOM, and checksums for a release.
 	$(HELM) template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f $(VALUES) > dist/rendered.yaml
-	$(PYTHON) scripts/release/generate_sbom.py --chart helm/urban-platform-infra --dist dist --rendered dist/rendered.yaml --sbom dist/urban-platform-infra.spdx.json --checksums dist/SHA256SUMS
+	$(PYTHON) scripts/release/generate_sbom.py --chart helm/urban-platform-infra --dist dist --rendered dist/rendered.yaml --sbom dist/urban-platform-infra.spdx.json --manifest dist/release-evidence.json --checksums dist/SHA256SUMS
 	$(PYTHON) scripts/release/verify_release_evidence.py --chart helm/urban-platform-infra --policy config/supply-chain-policy.yaml --tag "$(RELEASE_TAG)" --report "$(RELEASE_VERIFY_REPORT)"
 
 verify-release-evidence: ## Verify existing release evidence without rebuilding artifacts.

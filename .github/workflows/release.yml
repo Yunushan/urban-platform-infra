@@ -30,6 +30,7 @@ env:
   DIST_DIR: dist
   RENDERED_MANIFEST: dist/rendered.yaml
   SBOM_FILE: dist/urban-platform-infra.spdx.json
+  RELEASE_MANIFEST: dist/release-evidence.json
   CHECKSUM_FILE: dist/SHA256SUMS
 
 jobs:
@@ -93,6 +94,7 @@ jobs:
             --dist "${DIST_DIR}" \
             --rendered "${RENDERED_MANIFEST}" \
             --sbom "${SBOM_FILE}" \
+            --manifest "${RELEASE_MANIFEST}" \
             --checksums "${CHECKSUM_FILE}"
 
       - name: Attest release artifact provenance
@@ -114,4 +116,5 @@ jobs:
             ${{ env.DIST_DIR }}/*.tgz
             ${{ env.RENDERED_MANIFEST }}
             ${{ env.SBOM_FILE }}
+            ${{ env.RELEASE_MANIFEST }}
             ${{ env.CHECKSUM_FILE }}

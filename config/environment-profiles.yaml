@@ -19,6 +19,10 @@ profiles:
     complianceEvidenceProfile: lab-evidence
     incidentResponseProfile: lab-readiness
     changeManagementProfile: lab-change
+    cutoverGateProfile: lab-smoke
+    smokeTestProfile: lab-smoke
+    releaseRunbookProfile: lab-release
+    clusterUpgradeProfile: lab-upgrade
     disasterRecoveryProfile: lab-dr
     backupProfile: disabled
     observabilityProfile: disabled
@@ -29,6 +33,23 @@ profiles:
     requirePrivateRegistry: false
     requireRestoreDrill: false
     requireReleaseEvidence: false
+    evidenceBundle:
+      output: reports/environment-profile-evidence-bundle.md
+      publicReports:
+        - reports/environment-profile-plan.md
+        - reports/capacity-preflight.md
+        - reports/lab-deploy-plan.md
+        - reports/image-cache-plan.md
+        - reports/import-migration/import-preflight.md
+        - reports/import-migration/import-capacity.md
+        - reports/import-migration/import-recovery-plan.md
+        - reports/cutover-gate-plan.md
+        - reports/smoke-test-plan.md
+        - reports/release-runbook-plan.md
+        - reports/cluster-upgrade-plan.md
+      privateEvidence:
+        - lab operator approval
+        - smoke-test endpoint list
     helmValues:
       global:
         environment: lab
@@ -83,6 +104,22 @@ profiles:
         enabled: false
         profile: lab-change
         mode: lab
+      cutoverGates:
+        enabled: false
+        profile: lab-smoke
+        mode: lab
+      smokeTesting:
+        enabled: false
+        profile: lab-smoke
+        mode: lab
+      releaseRunbook:
+        enabled: false
+        profile: lab-release
+        mode: lab
+      clusterUpgrade:
+        enabled: false
+        profile: lab-upgrade
+        mode: lab
       disasterRecovery:
         enabled: false
         profile: lab-dr
@@ -135,6 +172,10 @@ profiles:
     complianceEvidenceProfile: staging-control-review
     incidentResponseProfile: staging-drill
     changeManagementProfile: staging-approval
+    cutoverGateProfile: staging-cutover
+    smokeTestProfile: staging-smoke
+    releaseRunbookProfile: staging-release
+    clusterUpgradeProfile: staging-upgrade
     disasterRecoveryProfile: staging-rehearsal
     backupProfile: rehearsal
     observabilityProfile: standard
@@ -145,6 +186,27 @@ profiles:
     requirePrivateRegistry: true
     requireRestoreDrill: true
     requireReleaseEvidence: false
+    evidenceBundle:
+      output: reports/environment-profile-evidence-bundle.md
+      publicReports:
+        - reports/environment-profile-plan.md
+        - reports/capacity-preflight.md
+        - reports/image-promotion-plan.md
+        - reports/registry-promotion-plan.md
+        - reports/database-migration-plan.md
+        - reports/edge-migration-plan.md
+        - reports/backup-plan.md
+        - reports/observability-plan.md
+        - reports/change-management-plan.md
+        - reports/disaster-recovery-plan.md
+        - reports/cutover-gate-plan.md
+        - reports/smoke-test-plan.md
+        - reports/release-runbook-plan.md
+        - reports/cluster-upgrade-plan.md
+      privateEvidence:
+        - staging DNS/TLS ownership
+        - staging restore rehearsal approval
+        - staging smoke-test endpoint list
     helmValues:
       global:
         environment: staging
@@ -199,6 +261,22 @@ profiles:
         enabled: false
         profile: staging-approval
         mode: approval
+      cutoverGates:
+        enabled: false
+        profile: staging-cutover
+        mode: staging
+      smokeTesting:
+        enabled: false
+        profile: staging-smoke
+        mode: staging
+      releaseRunbook:
+        enabled: false
+        profile: staging-release
+        mode: staging
+      clusterUpgrade:
+        enabled: false
+        profile: staging-upgrade
+        mode: staging
       disasterRecovery:
         enabled: false
         profile: staging-rehearsal
@@ -251,6 +329,10 @@ profiles:
     complianceEvidenceProfile: production-audit-pack
     incidentResponseProfile: production-oncall
     changeManagementProfile: production-cab
+    cutoverGateProfile: production-cutover
+    smokeTestProfile: production-smoke
+    releaseRunbookProfile: production-release
+    clusterUpgradeProfile: production-upgrade
     disasterRecoveryProfile: production-dr
     backupProfile: production
     observabilityProfile: production
@@ -261,6 +343,38 @@ profiles:
     requirePrivateRegistry: true
     requireRestoreDrill: true
     requireReleaseEvidence: true
+    evidenceBundle:
+      output: reports/environment-profile-evidence-bundle.md
+      publicReports:
+        - reports/environment-profile-plan.md
+        - reports/capacity-preflight.md
+        - reports/image-promotion-plan.md
+        - reports/registry-promotion-plan.md
+        - reports/release-evidence-verification.md
+        - reports/database-migration-plan.md
+        - reports/edge-migration-plan.md
+        - reports/backup-plan.md
+        - reports/observability-plan.md
+        - reports/compliance-evidence-plan.md
+        - reports/incident-response-plan.md
+        - reports/change-management-plan.md
+        - reports/disaster-recovery-plan.md
+        - reports/import-migration/import-preflight.md
+        - reports/import-migration/import-capacity.md
+        - reports/import-migration/import-recovery-plan.md
+        - reports/import-migration/post-migration-check.md
+        - reports/cutover-gate-plan.md
+        - reports/smoke-test-plan.md
+        - reports/release-runbook-plan.md
+        - reports/cluster-upgrade-plan.md
+      privateEvidence:
+        - production change ticket and approvals
+        - production DNS/TLS ownership
+        - production registry or preload evidence
+        - production database restore evidence
+        - production backup restore evidence
+        - production rollback owner
+        - production post-cutover observation owner
     helmValues:
       global:
         environment: production
@@ -315,6 +429,22 @@ profiles:
         enabled: false
         profile: production-cab
         mode: cab
+      cutoverGates:
+        enabled: false
+        profile: production-cutover
+        mode: production
+      smokeTesting:
+        enabled: false
+        profile: production-smoke
+        mode: production
+      releaseRunbook:
+        enabled: false
+        profile: production-release
+        mode: production
+      clusterUpgrade:
+        enabled: false
+        profile: production-upgrade
+        mode: production
       disasterRecovery:
         enabled: false
         profile: production-dr
@@ -339,10 +469,17 @@ requirements:
   - capacity plan reviewed for small nodes
   - optional capabilities disabled until baseline is healthy
   - import batches used for large Compose projects
+  - lab smoke-test plan reviewed
+  - lab release runbook reviewed
+  - lab cluster upgrade plan reviewed
   staging:
   - private registry or preload strategy tested
   - ingress DNS and TLS route tested
   - backup and restore rehearsal completed
+  - staging smoke-test plan reviewed
+  - staging release runbook reviewed
+  - staging cluster upgrade plan reviewed
+  - staging cutover evidence bundle reviewed
   production:
   - private registry digest pins ready
   - database target map reviewed
@@ -350,3 +487,7 @@ requirements:
   - observability and SLO coverage reviewed
   - release evidence verified
   - strict database migration enabled
+  - production smoke-test evidence reviewed
+  - production cluster upgrade evidence reviewed
+  - production release runbook reviewed
+  - production cutover evidence bundle reviewed

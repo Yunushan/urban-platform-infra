@@ -35,7 +35,11 @@
   <a href="docs/storage-tiers.md">Storage Tiers</a> •
   <a href="docs/platform-capabilities.md">Capabilities</a> •
   <a href="docs/backup-restore.md">Backup/Restore</a> •
+  <a href="docs/local-toolchain.md">Local Toolchain</a> •
+  <a href="docs/ci-validation.md">CI Validation</a> •
+  <a href="docs/operator-workflows.md">Operator Workflows</a> •
   <a href="docs/project-import.md">Project Import</a> •
+  <a href="docs/import-recovery.md">Import Recovery</a> •
   <a href="docs/three-node-rke2-tarball-deploy.md">3-Node Deploy</a> •
   <a href="docs/secrets-management.md">Secrets</a> •
   <a href="docs/secret-provider-adapters.md">Secret Providers</a> •
@@ -51,6 +55,10 @@
   <a href="docs/compliance-evidence.md">Compliance Evidence</a> •
   <a href="docs/incident-response.md">Incident Response</a> •
   <a href="docs/change-management.md">Change Management</a> •
+  <a href="docs/cutover-gates.md">Cutover Gates</a> •
+  <a href="docs/smoke-tests.md">Smoke Tests</a> •
+  <a href="docs/release-runbook.md">Release Runbook</a> •
+  <a href="docs/cluster-upgrade.md">Cluster Upgrade</a> •
   <a href="docs/disaster-recovery.md">Disaster Recovery</a> •
   <a href="docs/observability-slo.md">SLOs</a> •
   <a href="docs/platform-support.md">Platform Support</a> •
@@ -80,8 +88,7 @@ cp inventories/example/hosts.yml inventories/prod/hosts.yml
 cp .env.example .env
 $EDITOR inventories/prod/hosts.yml .env
 
-make validate
-make lint
+make operator-ready
 make preflight ENV=prod ENGINE=rke2
 make bootstrap-check ENV=prod ENGINE=rke2
 make install-cluster-check ENV=prod ENGINE=rke2
@@ -93,6 +100,8 @@ make status
 ```
 
 For deploying a previously packaged application archive onto three local RKE2 nodes, use the sanitized runbook in [`docs/three-node-rke2-tarball-deploy.md`](docs/three-node-rke2-tarball-deploy.md). It covers image build/preload, private inventory setup, RKE2 bootstrap, Helm deployment, and verification without committing real node addresses or credentials.
+
+For local workstation setup and validation, run `make operator-ready`. It prepares the local Python toolchain, writes public-safe readiness and capacity reports, checks CI workflow contracts, audits private-data exposure, and runs validation/lint without exposing private operator data. See [`docs/operator-workflows.md`](docs/operator-workflows.md) and [`docs/local-toolchain.md`](docs/local-toolchain.md).
 
 Existing Compose project compatibility check:
 
@@ -119,9 +128,12 @@ make access-governance-plan ACCESS_GOVERNANCE_PROFILE=lab-audit IMPORT_REDACT=tr
 make compliance-evidence-plan COMPLIANCE_EVIDENCE_PROFILE=lab-evidence IMPORT_REDACT=true
 make incident-response-plan INCIDENT_RESPONSE_PROFILE=lab-readiness IMPORT_REDACT=true
 make change-management-plan CHANGE_MANAGEMENT_PROFILE=lab-change IMPORT_REDACT=true
+make smoke-test-plan SMOKE_TEST_PROFILE=lab-smoke IMPORT_REDACT=true
 make disaster-recovery-plan DISASTER_RECOVERY_PROFILE=lab-dr IMPORT_REDACT=true
 make release-evidence RELEASE_TAG=v0.1.0
 make verify-release-evidence RELEASE_TAG=v0.1.0
+make release-runbook-plan RELEASE_RUNBOOK_PROFILE=lab-release IMPORT_REDACT=true
+make cluster-upgrade-plan CLUSTER_UPGRADE_PROFILE=lab-upgrade IMPORT_REDACT=true
 ```
 
 The read-only checker discovers Compose files, compares service images, ports,
@@ -178,11 +190,23 @@ and maintenance-window plan for ticket, approval, risk, impact, freeze,
 stakeholder notice, rollback, smoke-test, deployment evidence, and post-change
 review gates without creating tickets, mutating calendars, or printing private
 approvers.
+`make smoke-test-plan` writes a disabled-by-default post-migration smoke-test
+and health-probe plan for Kubernetes rollout, HTTP/TLS routes, TCP services,
+database connections, messaging connections, synthetic checks, and private
+owner-reviewed evidence without probing private endpoints from CI.
 `make disaster-recovery-plan` writes a disabled-by-default disaster recovery
 and business continuity plan for RTO/RPO, dependency maps, backup replication,
 restore drills, failover runbooks, continuity communications, manual
 workarounds, supplier ownership, and post-drill review without printing private
 recovery sites or drill evidence.
+`make release-runbook-plan` writes a disabled-by-default release runbook and
+evidence gate plan that connects release artifacts, change approval, rollback,
+smoke-test, cutover, and environment evidence before production promotion
+without publishing, deploying, approving, or switching traffic.
+`make cluster-upgrade-plan` writes a disabled-by-default cluster upgrade and
+version-skew guardrail plan for RKE2/Kubernetes target pins, etcd snapshots,
+add-on compatibility, maintenance windows, rollback, and post-upgrade smoke
+tests without draining nodes, restarting services, or mutating inventories.
 `make database-migration-plan` writes a public-safe
 `reports/database-migration-plan.md` so operators can review target-map
 readiness, PostgreSQL-family dump/restore behavior, optional-engine scaffolding,
@@ -194,10 +218,11 @@ conversion, TLS mode, HTTP redirect, source allowlist, and backend-Service
 readiness before generated route candidates are applied.
 `make environment-profile-plan` writes a public-safe
 `reports/environment-profile-plan.md` plus
-`reports/environment-profile-values.yaml`, aligning lab/staging/production
+`reports/environment-profile-values.yaml` and
+`reports/environment-profile-evidence-bundle.md`, aligning lab/staging/production
 intent across topology, Helm values, import profile, image mode, database
-migration strictness, edge routing, backups, observability, and release
-requirements before any mutating command runs.
+migration strictness, edge routing, backups, observability, smoke tests, cutover gates, and
+release requirements before any mutating command runs.
 `MIGRATION_PROFILE=lab` is the default and writes a
 lab-safe values overlay plus small imported workload resource limits for
 constrained clusters; use `MIGRATION_PROFILE=production` only after capacity and
@@ -208,8 +233,21 @@ actions and writes `reports/import-migration/import-preflight.md` plus
 oversized Compose projects start with a bounded first batch instead of applying
 every generated workload at once. `MIGRATION_RESUME=true` records completed
 mutation stages in a private state file so retry runs skip successful batch
-stages. Execution still requires explicit operator opt-in. See
-[`docs/project-import.md`](docs/project-import.md).
+stages. Run `make import-recovery-plan IMPORT_REDACT=true` before forcing a
+rerun; it writes a public-safe recovery and cleanup plan. Execution still
+requires explicit operator opt-in. See [`docs/project-import.md`](docs/project-import.md)
+and [`docs/import-recovery.md`](docs/import-recovery.md).
+Before a production traffic switch, run
+`make smoke-test-plan SMOKE_TEST_PROFILE=production-smoke IMPORT_REDACT=true`
+and then
+`make cutover-gate-plan CUTOVER_GATES_PROFILE=production-cutover IMPORT_REDACT=true`,
+then
+`make release-runbook-plan RELEASE_RUNBOOK_PROFILE=production-release IMPORT_REDACT=true`.
+It confirms import, release, registry/preload, backup, database restore,
+DNS/TLS, smoke-test, rollback, change-approval, and final release evidence
+readiness without modifying traffic. See [`docs/smoke-tests.md`](docs/smoke-tests.md),
+[`docs/cutover-gates.md`](docs/cutover-gates.md), and
+[`docs/release-runbook.md`](docs/release-runbook.md).
 
 Local Docker profile:
 
@@ -252,6 +290,9 @@ By default the Kubernetes profile deploys:
 | Compliance evidence | Disabled by default | Optional control mapping, evidence index, audit-pack, retention, checksum, and attestation readiness planning |
 | Incident response | Disabled by default | Optional alert routing, escalation, paging, runbook, communication, drill, and post-incident readiness planning |
 | Change management | Disabled by default | Optional ticket, approval, maintenance-window, freeze, rollback, smoke-test, and post-change review readiness planning |
+| Smoke tests | Disabled by default | Optional post-migration rollout, HTTP/TLS, TCP, database, messaging, synthetic, and evidence readiness planning |
+| Release runbook | Disabled by default | Optional release artifact, change approval, rollback, smoke-test, cutover, and evidence gate planning |
+| Cluster upgrade | Disabled by default | Optional RKE2/Kubernetes version-skew, etcd snapshot, add-on compatibility, rollback, and smoke-test planning |
 | Disaster recovery | Disabled by default | Optional RTO/RPO, dependency mapping, backup replication, restore drill, failover, and business continuity readiness planning |
 | Observability | Disabled by default | Elasticsearch, Kibana, Grafana, Loki, ClickHouse, Logstash, Prometheus, and OpenTelemetry are opt-in |
 | Optional observability | Elastic ECK `9.4.1`, Grafana Loki, OpenSearch, Graylog, ClickHouse | Switchable by Helmfile env flags and values/profile |
@@ -338,7 +379,11 @@ Supported database profiles are defined in [`config/databases.catalog.yaml`](con
 19. Run `make scaling-policy-plan` before enabling HPA, VPA, KEDA, or cluster autoscaler automation. Keep runtime autoscaling disabled until metrics, SLO alerts, capacity reports, and load-test evidence are reviewed.
 20. Run `make network-connectivity-plan` before tightening egress, removing shared lab web access, or enabling Linkerd/Istio. Keep service mesh disabled until DNS, TLS, health probes, capacity, and rollback ownership are reviewed.
 21. Run `make access-governance-plan` before enabling OIDC/SSO, broad RBAC changes, tenant namespaces, or break-glass procedures. Keep user/group mappings and identity URLs outside public reports.
-22. Release only signed/evidenced chart artifacts with `make release-evidence`, SHA-256 checksums, SBOM metadata, and GitHub artifact attestations.
+22. Run `make smoke-test-plan` before production cutover. Keep private endpoints, database DSNs, synthetic monitors, and result evidence outside public reports.
+23. Run `make cutover-gate-plan` before production traffic switch. Keep DNS, TLS, smoke-test endpoints, tickets, approvals, and rollback evidence in private systems; the public report is a readiness gate, not a traffic switch.
+24. Run `make release-runbook-plan RELEASE_RUNBOOK_PROFILE=production-release IMPORT_REDACT=true` before production promotion. Keep private approval indexes, change records, rollback owners, and evidence attachments outside public reports.
+25. Run `make cluster-upgrade-plan CLUSTER_UPGRADE_PROFILE=production-upgrade IMPORT_REDACT=true` before changing RKE2 or Kubernetes versions. Keep node health, etcd snapshot, release notes, and owner approvals in private systems.
+26. Release only signed/evidenced chart artifacts with `make release-evidence`, SHA-256 checksums, SBOM metadata, and GitHub artifact attestations.
 
 ## License
 

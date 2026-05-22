@@ -3,10 +3,15 @@
 ## Deploy
 
 ```bash
-make validate
+make operator-ready
 make install-operators
 make deploy
 ```
+
+For the common one-command readiness and operator flows, start with
+[`docs/operator-workflows.md`](operator-workflows.md). It keeps the local
+readiness, cluster health, lab deployment, project import, and release evidence
+paths in one public-safe place.
 
 The deployment target installs Helm and Helmfile when missing, applies the
 templated operator Helmfile, waits for CNPG and ECK CRDs, then installs the
@@ -53,8 +58,10 @@ manually uninstalling stuck releases or deleting Pending PVCs:
 
 ```bash
 make environment-profile-plan ENV_PROFILE=lab IMPORT_REDACT=true
+make capacity-preflight
+make lab-deploy-plan
 make deploy-auto \
-  HELM_EXTRA_ARGS="-f reports/environment-profile-values.yaml" \
+  HELM_EXTRA_ARGS="-f reports/environment-profile-values.yaml -f reports/lab-deploy-values.yaml" \
   OPERATOR_KUBECONFIG="$OPERATOR_KUBECONFIG" \
   KUBECONFIG="$KUBECONFIG" \
   DEPLOY_INGRESS_HOST="$DEPLOY_INGRESS_HOST" \
@@ -79,6 +86,10 @@ before deploy/import work starts. It writes
 defaults, migration profile, image mode, database strictness, edge routing,
 backup, observability, optional capabilities, and release evidence requirements
 together in one public-safe report.
+`make capacity-preflight` writes `reports/capacity-preflight.md` and fails
+before cluster mutation when the selected lab/production assumptions exceed
+CPU, memory, pod-count, batch, or evidence guardrails. `make lab-deploy-plan`
+writes `reports/lab-deploy-values.yaml` for the first bounded lab wave.
 `import-auto` also defaults to `MIGRATION_PROFILE=lab`. That profile writes
 `reports/import-migration/lab-profile-values.yaml` and applies small resource
 requests/limits to generated imported workloads. Keep this profile for
@@ -148,6 +159,12 @@ Before enforcing production change approvals or maintenance windows, run
 risk, impact, freeze-check, stakeholder notice, rollback, smoke-test,
 deployment evidence, and post-change review readiness without creating tickets
 or printing private approver details.
+Before production traffic switch, run `make cutover-gate-plan`. It writes
+`reports/cutover-gate-plan.md` and `reports/cutover-gate-values.yaml`,
+confirming import preflight, capacity, recovery, release evidence,
+registry/preload, backup, database restore, DNS/TLS, smoke-test, rollback,
+approval, observation window, and owner handoff readiness without modifying DNS,
+approving tickets, switching ingress routes, or running customer-facing tests.
 Before claiming disaster recovery or business continuity readiness, run
 `make disaster-recovery-plan`. It writes
 `reports/disaster-recovery-plan.md` and
@@ -187,6 +204,11 @@ default. Successful service-secret, image, database, and manifest stages are
 recorded in the private `MIGRATION_STATE_FILE` and summarized publicly in
 `reports/import-migration/import-resume.md`; reruns skip completed scopes unless
 `MIGRATION_FORCE_RERUN=true` is set.
+After a failed or interrupted import, run `make import-recovery-plan
+IMPORT_REDACT=true` before forcing a rerun. It writes
+`reports/import-migration/import-recovery-plan.md` with resume status, operator
+cache cleanup guidance, node-side image retention boundaries, database dump
+retention guidance, and generated-manifest rollback boundaries.
 When the SSH user needs sudo for RKE2 token or kubeconfig discovery,
 `deploy-auto` prompts once on the terminal and reuses that password only for the
 current run. Set `MIGRATION_BECOME_PASSWORD_PROMPT=false` for non-interactive

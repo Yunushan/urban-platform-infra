@@ -210,6 +210,101 @@ def generate_overlay(profile: dict[str, Any], overlay_path: Path) -> None:
     overlay_path.write_text("\n".join(content), encoding="utf-8")
 
 
+def display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT)).replace("\\", "/")
+    except ValueError:
+        return str(path)
+
+
+def resolve_public_report(path: str) -> Path:
+    value = Path(path)
+    return value if value.is_absolute() else ROOT / value
+
+
+def evidence_bundle_config(profile: dict[str, Any]) -> dict[str, Any]:
+    value = profile.get("evidenceBundle", {})
+    return value if isinstance(value, dict) else {}
+
+
+def evidence_bundle_rows(profile: dict[str, Any], assumed_present: set[str] | None = None) -> list[tuple[str, bool]]:
+    assumed_present = assumed_present or set()
+    bundle = evidence_bundle_config(profile)
+    reports = bundle.get("publicReports", [])
+    if not isinstance(reports, list):
+        return []
+    rows = []
+    for item in reports:
+        report = str(item)
+        rows.append((report, report in assumed_present or resolve_public_report(report).exists()))
+    return rows
+
+
+def private_evidence_items(profile: dict[str, Any]) -> list[str]:
+    bundle = evidence_bundle_config(profile)
+    items = bundle.get("privateEvidence", [])
+    if not isinstance(items, list):
+        return []
+    return [str(item) for item in items]
+
+
+def generate_evidence_bundle(args: argparse.Namespace, profile: dict[str, Any], output_path: Path) -> None:
+    rows = evidence_bundle_rows(profile)
+    private_items = private_evidence_items(profile)
+    missing = [report for report, present in rows if not present]
+    result = "WARN" if missing else "PASS"
+    lines = [
+        "# Environment Profile Evidence Bundle",
+        "",
+        "This report is public-safe. It lists expected public reports and private evidence categories only; it does not include node addresses, DNS names, registry credentials, database DSNs, tickets, approver names, or secret values.",
+        "",
+        f"- Profile: `{args.profile}`",
+        f"- Environment: `{profile.get('environment', args.profile)}`",
+        f"- Cutover gate profile: `{profile.get('cutoverGateProfile', '-')}`",
+        f"- Smoke-test profile: `{profile.get('smokeTestProfile', '-')}`",
+        f"- Release runbook profile: `{profile.get('releaseRunbookProfile', '-')}`",
+        f"- Cluster upgrade profile: `{profile.get('clusterUpgradeProfile', '-')}`",
+        f"- Generated values overlay: `{args.overrides}`",
+        f"- Evidence bundle output: `{display_path(output_path)}`",
+        f"- Result: `{result}`",
+        "",
+        "## Public Reports",
+        "",
+        "| Report | Present |",
+        "|---|---|",
+    ]
+    for report, present in rows:
+        lines.append(f"| `{report}` | `{bool_text(present)}` |")
+    if not rows:
+        lines.append("| `-` | `false` |")
+    lines.extend(["", "## Private Evidence Categories", ""])
+    if private_items:
+        lines.extend(f"- {item}" for item in private_items)
+    else:
+        lines.append("- No private evidence categories declared for this profile.")
+    lines.extend(
+        [
+            "",
+            "## Operator Commands",
+            "",
+            "```bash",
+            f"make environment-profile-plan ENV_PROFILE={args.profile} IMPORT_REDACT=true",
+            f"make smoke-test-plan SMOKE_TEST_PROFILE={profile.get('smokeTestProfile', 'lab-smoke')} IMPORT_REDACT=true",
+            f"make cutover-gate-plan CUTOVER_GATES_PROFILE={profile.get('cutoverGateProfile', 'lab-smoke')} IMPORT_REDACT=true",
+            f"make release-runbook-plan RELEASE_RUNBOOK_PROFILE={profile.get('releaseRunbookProfile', 'lab-release')} IMPORT_REDACT=true",
+            f"make cluster-upgrade-plan CLUSTER_UPGRADE_PROFILE={profile.get('clusterUpgradeProfile', 'lab-upgrade')} IMPORT_REDACT=true",
+            "```",
+            "",
+            "## Notes",
+            "",
+            "- Treat missing public reports as planning gaps before deploy, import, or cutover.",
+            "- Keep private evidence in the approved operator evidence store; this bundle is only a public-safe index.",
+        ]
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def generate_report(args: argparse.Namespace, config: dict[str, Any], topologies: dict[str, Any], profile: dict[str, Any]) -> str:
     topology_name = str(profile.get("topology", ""))
     topology = topology_config(topologies, topology_name)
@@ -219,6 +314,8 @@ def generate_report(args: argparse.Namespace, config: dict[str, Any], topologies
     findings = profile_findings(args.profile, profile, topology)
     result = "FAIL" if any(item.startswith("ERROR:") for item in findings) else ("WARN" if any(item.startswith("WARN:") for item in findings) else "PASS")
     helm_values = profile.get("helmValues", {}) if isinstance(profile.get("helmValues"), dict) else {}
+    evidence_rows = evidence_bundle_rows(profile, assumed_present={args.output})
+    private_items = private_evidence_items(profile)
 
     lines = [
         "# Environment Profile Plan",
@@ -245,6 +342,10 @@ def generate_report(args: argparse.Namespace, config: dict[str, Any], topologies
         f"- Compliance evidence profile: `{profile.get('complianceEvidenceProfile', '-')}`",
         f"- Incident response profile: `{profile.get('incidentResponseProfile', '-')}`",
         f"- Change management profile: `{profile.get('changeManagementProfile', '-')}`",
+        f"- Cutover gate profile: `{profile.get('cutoverGateProfile', '-')}`",
+        f"- Smoke-test profile: `{profile.get('smokeTestProfile', '-')}`",
+        f"- Release runbook profile: `{profile.get('releaseRunbookProfile', '-')}`",
+        f"- Cluster upgrade profile: `{profile.get('clusterUpgradeProfile', '-')}`",
         f"- Disaster recovery profile: `{profile.get('disasterRecoveryProfile', '-')}`",
         f"- Backup profile: `{profile.get('backupProfile', '-')}`",
         f"- Observability profile: `{profile.get('observabilityProfile', '-')}`",
@@ -256,6 +357,7 @@ def generate_report(args: argparse.Namespace, config: dict[str, Any], topologies
         f"- Require restore drill: `{bool_text(profile.get('requireRestoreDrill', False))}`",
         f"- Require release evidence: `{bool_text(profile.get('requireReleaseEvidence', False))}`",
         f"- Generated values overlay: `{args.overrides}`",
+        f"- Evidence bundle: `{args.evidence_output}`",
         f"- Result: `{result}`",
         "",
         "## Generated Helm Intent",
@@ -281,6 +383,14 @@ def generate_report(args: argparse.Namespace, config: dict[str, Any], topologies
         f"- `incidentResponse.mode`: `{display_value(nested(helm_values, 'incidentResponse', 'mode', default='-'))}`",
         f"- `changeManagement.profile`: `{display_value(nested(helm_values, 'changeManagement', 'profile', default='-'))}`",
         f"- `changeManagement.mode`: `{display_value(nested(helm_values, 'changeManagement', 'mode', default='-'))}`",
+        f"- `cutoverGates.profile`: `{display_value(nested(helm_values, 'cutoverGates', 'profile', default='-'))}`",
+        f"- `cutoverGates.mode`: `{display_value(nested(helm_values, 'cutoverGates', 'mode', default='-'))}`",
+        f"- `smokeTesting.profile`: `{display_value(nested(helm_values, 'smokeTesting', 'profile', default='-'))}`",
+        f"- `smokeTesting.mode`: `{display_value(nested(helm_values, 'smokeTesting', 'mode', default='-'))}`",
+        f"- `releaseRunbook.profile`: `{display_value(nested(helm_values, 'releaseRunbook', 'profile', default='-'))}`",
+        f"- `releaseRunbook.mode`: `{display_value(nested(helm_values, 'releaseRunbook', 'mode', default='-'))}`",
+        f"- `clusterUpgrade.profile`: `{display_value(nested(helm_values, 'clusterUpgrade', 'profile', default='-'))}`",
+        f"- `clusterUpgrade.mode`: `{display_value(nested(helm_values, 'clusterUpgrade', 'mode', default='-'))}`",
         f"- `disasterRecovery.profile`: `{display_value(nested(helm_values, 'disasterRecovery', 'profile', default='-'))}`",
         f"- `disasterRecovery.mode`: `{display_value(nested(helm_values, 'disasterRecovery', 'mode', default='-'))}`",
         f"- `observability.profile`: `{display_value(nested(helm_values, 'observability', 'profile', default='-'))}`",
@@ -295,6 +405,18 @@ def generate_report(args: argparse.Namespace, config: dict[str, Any], topologies
     if not requirements:
         lines.append("- No additional requirements declared for this profile.")
 
+    lines.extend(["", "## Evidence Bundle", ""])
+    lines.append(f"- Output: `{args.evidence_output}`")
+    lines.append(f"- Public reports: `{len(evidence_rows)}`")
+    lines.append(f"- Private evidence categories: `{len(private_items)}`")
+    lines.append("")
+    lines.append("| Public report | Present |")
+    lines.append("|---|---|")
+    for report, present in evidence_rows:
+        lines.append(f"| `{report}` | `{bool_text(present)}` |")
+    if not evidence_rows:
+        lines.append("| `-` | `false` |")
+
     lines.extend(["", "## Findings", ""])
     for finding in findings:
         lines.append(f"- {finding}")
@@ -306,6 +428,10 @@ def generate_report(args: argparse.Namespace, config: dict[str, Any], topologies
             "",
             "```bash",
             "make environment-profile-plan ENV_PROFILE=lab IMPORT_REDACT=true",
+            "make smoke-test-plan SMOKE_TEST_PROFILE=lab-smoke IMPORT_REDACT=true",
+            "make cutover-gate-plan CUTOVER_GATES_PROFILE=lab-smoke IMPORT_REDACT=true",
+            "make release-runbook-plan RELEASE_RUNBOOK_PROFILE=lab-release IMPORT_REDACT=true",
+            "make cluster-upgrade-plan CLUSTER_UPGRADE_PROFILE=lab-upgrade IMPORT_REDACT=true",
             "make deploy-auto HELM_EXTRA_ARGS=\"-f reports/environment-profile-values.yaml\"",
             "make import-auto PROJECT_PATH=/path/to/compose-project MIGRATION_PROFILE=lab MIGRATION_IMAGE_MODE=preload",
             "```",
@@ -321,6 +447,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--profile", default="")
     parser.add_argument("--output", default=str(ROOT / "reports/environment-profile-plan.md"))
     parser.add_argument("--overrides", default=str(ROOT / "reports/environment-profile-values.yaml"))
+    parser.add_argument("--evidence-output", default="")
     parser.add_argument("--redact-sensitive", action="store_true")
     args = parser.parse_args(argv)
 
@@ -336,18 +463,28 @@ def main(argv: list[str] | None = None) -> int:
     overrides_path = Path(args.overrides)
     if not overrides_path.is_absolute():
         overrides_path = (ROOT / overrides_path).resolve()
+    args.output = display_path(output_path)
+    args.overrides = display_path(overrides_path)
 
     config = load_yaml_file(config_path)
     topologies = load_yaml_file(topologies_path)
     default_profile = str(config.get("defaultProfile", "lab"))
     args.profile = args.profile or default_profile
     profile = profile_config(config, args.profile)
+    bundle = evidence_bundle_config(profile)
+    evidence_output = args.evidence_output or str(bundle.get("output", "reports/environment-profile-evidence-bundle.md"))
+    evidence_output_path = Path(evidence_output)
+    if not evidence_output_path.is_absolute():
+        evidence_output_path = (ROOT / evidence_output_path).resolve()
+    args.evidence_output = display_path(evidence_output_path)
     generate_overlay(profile, overrides_path)
     report = generate_report(args, config, topologies, profile)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(report, encoding="utf-8")
+    generate_evidence_bundle(args, profile, evidence_output_path)
     print(f"Environment profile plan written: {output_path}")
     print(f"Environment profile values overlay written: {overrides_path}")
+    print(f"Environment profile evidence bundle written: {evidence_output_path}")
     return 0
 
 

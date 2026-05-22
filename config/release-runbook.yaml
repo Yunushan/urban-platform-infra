@@ -1,0 +1,120 @@
+defaultProfile: disabled
+enabledByDefault: false
+profiles:
+  disabled:
+    description: Keep committed chart defaults and do not enable release runbook automation.
+    enabled: false
+    mode: baseline
+    execution:
+      enabled: false
+      publisher: none
+      deployer: none
+    gates:
+      requireReleaseTag: false
+      requireCleanWorktree: false
+      requireArtifactEvidence: false
+      requireSbom: false
+      requireChecksums: false
+      requireAttestation: false
+      requireChangeApproval: false
+      requireSmokeTestPlan: false
+      requireCutoverGate: false
+      requireRollbackPlan: false
+    evidence:
+      requirePublicBundle: false
+      requirePrivateApprovalIndex: false
+      requireOwnerReview: false
+  lab-release:
+    description: Lab release rehearsal with public-safe artifact and rollback checklist.
+    enabled: false
+    mode: lab
+    execution:
+      enabled: false
+      publisher: none
+      deployer: none
+    gates:
+      requireReleaseTag: false
+      requireCleanWorktree: true
+      requireArtifactEvidence: true
+      requireSbom: true
+      requireChecksums: true
+      requireAttestation: false
+      requireChangeApproval: false
+      requireSmokeTestPlan: true
+      requireCutoverGate: false
+      requireRollbackPlan: true
+    evidence:
+      requirePublicBundle: true
+      requirePrivateApprovalIndex: false
+      requireOwnerReview: false
+  staging-release:
+    description: Staging release rehearsal with artifacts, change review, smoke tests, and cutover readiness.
+    enabled: false
+    mode: staging
+    execution:
+      enabled: false
+      publisher: none
+      deployer: gitops
+    gates:
+      requireReleaseTag: true
+      requireCleanWorktree: true
+      requireArtifactEvidence: true
+      requireSbom: true
+      requireChecksums: true
+      requireAttestation: true
+      requireChangeApproval: true
+      requireSmokeTestPlan: true
+      requireCutoverGate: true
+      requireRollbackPlan: true
+    evidence:
+      requirePublicBundle: true
+      requirePrivateApprovalIndex: true
+      requireOwnerReview: true
+  production-release:
+    description: Production release runbook gate before promotion, deploy approval, and cutover.
+    enabled: false
+    mode: production
+    execution:
+      enabled: false
+      publisher: none
+      deployer: gitops
+    gates:
+      requireReleaseTag: true
+      requireCleanWorktree: true
+      requireArtifactEvidence: true
+      requireSbom: true
+      requireChecksums: true
+      requireAttestation: true
+      requireChangeApproval: true
+      requireSmokeTestPlan: true
+      requireCutoverGate: true
+      requireRollbackPlan: true
+    evidence:
+      requirePublicBundle: true
+      requirePrivateApprovalIndex: true
+      requireOwnerReview: true
+controller:
+  report: reports/release-runbook-plan.md
+  overrides: reports/release-runbook-values.yaml
+publicArtifacts:
+  - reports/release-evidence-verification.md
+  - reports/environment-profile-evidence-bundle.md
+  - reports/change-management-plan.md
+  - reports/smoke-test-plan.md
+  - reports/cutover-gate-plan.md
+  - reports/disaster-recovery-plan.md
+runbookSections:
+  - release tag and chart version
+  - artifact evidence verification
+  - SBOM, checksum, and attestation review
+  - private approval index
+  - change approval and maintenance window
+  - rollback plan and owner
+  - smoke-test and cutover gate linkage
+  - post-release observation and evidence archive
+guardrails:
+  - Keep release runbook automation disabled by default in committed Helm values.
+  - Do not publish tags, approve changes, deploy workloads, or switch traffic from this public-safe planning command.
+  - Do not print private repository URLs, ticket URLs, approver names, registry paths, node names, DNS names, or customer identifiers.
+  - Store private approval evidence, attestation verification logs, and release owner decisions only in approved private systems.
+  - Treat this gate as release readiness evidence, not as production deployment approval by itself.

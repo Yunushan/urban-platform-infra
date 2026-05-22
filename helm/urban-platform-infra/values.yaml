@@ -288,6 +288,125 @@ changeManagement:
   reports:
     plan: reports/change-management-plan.md
     overrides: reports/change-management-values.yaml
+cutoverGates:
+  enabled: false
+  profile: disabled
+  mode: baseline
+  trafficSwitch:
+    enabled: false
+    method: none
+    requireIngressHost: false
+    requireDnsTlsEvidence: false
+  preCutover:
+    requireImportPreflight: false
+    requireCapacityReport: false
+    requireReleaseEvidence: false
+    requireRegistryEvidence: false
+    requireBackupRestoreEvidence: false
+    requireDatabaseRestoreEvidence: false
+    requireChangeTicket: false
+    requireApprovalEvidence: false
+  smokeTests:
+    enabled: false
+    requireSmokeTestPlan: false
+    requirePostMigrationCheck: false
+    requireSyntheticChecks: false
+  rollback:
+    enabled: false
+    requireRollbackPlan: false
+    requireRecoveryPlan: false
+    requireRestorePoint: false
+  postCutover:
+    enabled: false
+    requireObservationWindow: false
+    requireOwnerHandoff: false
+  reports:
+    plan: reports/cutover-gate-plan.md
+    overrides: reports/cutover-gate-values.yaml
+smokeTesting:
+  enabled: false
+  profile: disabled
+  mode: baseline
+  execution:
+    enabled: false
+    runner: none
+    namespace: urban-platform
+    serviceAccountName: ''
+  probes:
+    kubernetesRollout: false
+    httpRoutes: false
+    tcpServices: false
+    databaseConnections: false
+    messagingConnections: false
+    externalSynthetic: false
+  evidence:
+    requirePlan: false
+    requireResults: false
+    requireOwnerReview: false
+  reports:
+    plan: reports/smoke-test-plan.md
+    overrides: reports/smoke-test-values.yaml
+releaseRunbook:
+  enabled: false
+  profile: disabled
+  mode: baseline
+  execution:
+    enabled: false
+    publisher: none
+    deployer: none
+  gates:
+    requireReleaseTag: false
+    requireCleanWorktree: false
+    requireArtifactEvidence: false
+    requireSbom: false
+    requireChecksums: false
+    requireAttestation: false
+    requireChangeApproval: false
+    requireSmokeTestPlan: false
+    requireCutoverGate: false
+    requireRollbackPlan: false
+  evidence:
+    requirePublicBundle: false
+    requirePrivateApprovalIndex: false
+    requireOwnerReview: false
+  reports:
+    plan: reports/release-runbook-plan.md
+    overrides: reports/release-runbook-values.yaml
+clusterUpgrade:
+  enabled: false
+  profile: disabled
+  mode: baseline
+  engine: rke2
+  orchestration:
+    enabled: false
+    strategy: none
+    drainNodes: false
+    restartServices: false
+  versions:
+    currentKubernetes: ''
+    targetKubernetes: ''
+    currentRke2: ''
+    targetRke2: ''
+    maxMinorSkew: 0
+  gates:
+    requirePinnedVersion: false
+    requireSupportedSkew: false
+    requireEtcdSnapshot: false
+    requireBackupRestore: false
+    requireMaintenanceWindow: false
+    requireCapacityHeadroom: false
+    requireNodeHealth: false
+    requireRollbackPlan: false
+    requireAddOnCompatibility: false
+    requirePostUpgradeSmokeTest: false
+  evidence:
+    requireClusterDoctor: false
+    requireInventoryReview: false
+    requireReleaseNotesReview: false
+    requireOwnerApproval: false
+  reports:
+    plan: reports/cluster-upgrade-plan.md
+    overrides: reports/cluster-upgrade-values.yaml
 disasterRecovery:
   enabled: false
   profile: disabled

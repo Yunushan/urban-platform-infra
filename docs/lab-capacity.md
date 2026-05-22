@@ -11,11 +11,14 @@ application service at once.
 Generate the public-safe lab capacity plan:
 
 ```bash
+make capacity-preflight
 make lab-deploy-plan
 ```
 
 The command writes:
 
+- `reports/capacity-preflight.md`: public-safe fail-fast capacity guard for
+  deploy/import intent
 - `reports/lab-deploy-plan.md`: public-safe capacity and progressive deploy
   report
 - `reports/lab-deploy-values.yaml`: optional first-wave lab override
@@ -33,6 +36,7 @@ make lab-deploy-plan \
 Then, after review, a first-wave lab deploy can use the generated override:
 
 ```bash
+make capacity-preflight
 make deploy-auto HELM_EXTRA_ARGS="-f reports/lab-deploy-values.yaml"
 ```
 
@@ -66,6 +70,8 @@ Use small waves instead of a single all-at-once deployment:
 - Enable only a small database subset first.
 - Use `MIGRATION_IMPORT_BATCH=1`, then continue with later batches after each
   health check passes.
+- Keep `MIGRATION_IMPORT_BATCH=auto` for `import-auto`; never use `all` on a
+  constrained lab until capacity has been proven.
 
 ## Production Difference
 
@@ -73,3 +79,12 @@ Production should not use the generated lab override. It needs a real capacity
 plan, HA replicas, private-registry image promotion, backup/restore evidence,
 monitoring CRDs, and database target maps reviewed before `MIGRATION_PROFILE`
 is changed to `production`.
+
+For production dry runs, pass a private evidence path to the preflight and keep
+that evidence outside the repository:
+
+```bash
+make capacity-preflight \
+  CAPACITY_PREFLIGHT_ENV_PROFILE=production \
+  CAPACITY_PREFLIGHT_EVIDENCE=/path/to/private/capacity-evidence.md
+```

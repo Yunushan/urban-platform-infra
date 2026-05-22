@@ -336,7 +336,7 @@ def database_names(components: list[Component]) -> list[str]:
     return [item.name for item in components if item.category == "database"]
 
 
-def progressive_waves(profile: dict[str, Any], db_names: list[str], batch_size: int) -> list[str]:
+def progressive_waves(profile: dict[str, Any], db_names: list[str], max_databases: int, batch_size: int) -> list[str]:
     lines = [
         "| Wave | Scope | Lab rule |",
         "|---|---|---|",
@@ -345,7 +345,7 @@ def progressive_waves(profile: dict[str, Any], db_names: list[str], batch_size: 
         if isinstance(wave, dict):
             lines.append(f"| `{index}` | `{wave.get('name', 'wave')}` | {wave.get('description', '-')} |")
     if db_names:
-        lines.append(f"| `database subsets` | `{min(batch_size, len(db_names))}` database(s) first | Keep the rest disabled until app connectivity is proven. |")
+        lines.append(f"| `database subsets` | `{min(max_databases, len(db_names))}` database(s) first | Keep the rest disabled until app connectivity is proven. |")
     lines.append(f"| `imported workloads` | `{batch_size}` service(s) per batch | Use `MIGRATION_IMPORT_BATCH=1`, then continue batch-by-batch. |")
     return lines
 
@@ -475,7 +475,7 @@ def main() -> int:
         "",
         "## Progressive Waves",
         "",
-        *progressive_waves(profile, db_names, batch_size),
+        *progressive_waves(profile, db_names, max_databases, batch_size),
         "",
         "## Estimated Components",
         "",

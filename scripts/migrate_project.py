@@ -1871,6 +1871,7 @@ def write_migration_state_report(args: argparse.Namespace, service_pairs: list[t
     output.mkdir(parents=True, exist_ok=True)
     state = read_migration_state(args)
     completed = state.get("completed", {})
+    completed_count = len(completed) if isinstance(completed, dict) else 0
     state_path = "<private-state-file>" if args.redact_sensitive else str(migration_state_path(args))
     lines = [
         "# Import Resume State",
@@ -1880,6 +1881,8 @@ def write_migration_state_report(args: argparse.Namespace, service_pairs: list[t
         f"- Resume enabled: `{str(args.resume).lower()}`",
         f"- Force rerun: `{str(args.force_rerun).lower()}`",
         f"- State file: `{state_path}`",
+        f"- State updated at: `{state.get('updatedAt', '-')}`",
+        f"- Completed state entries: `{completed_count}`",
         "",
         "## Selected Scope",
         "",
@@ -1898,6 +1901,12 @@ def write_migration_state_report(args: argparse.Namespace, service_pairs: list[t
             "- `MIGRATION_RESUME=true` skips completed stateful mutation stages.",
             "- `MIGRATION_FORCE_RERUN=true` reruns stages even when state says they completed.",
             "- `MIGRATION_STATE_FILE` can point at another private state file for isolated rehearsals.",
+            "",
+            "## Recovery Plan",
+            "",
+            "- Run `make import-recovery-plan IMPORT_REDACT=true` after any failed or interrupted import to review resume status, cleanup boundaries, and rollback boundaries.",
+            "- Prefer `MIGRATION_FORCE_RERUN=true` for intentional stage retries instead of deleting the private state file.",
+            "- Use `MIGRATION_STATE_FILE=/path/to/private/rehearsal-state.yaml` for isolated rehearsals that should not share resume history.",
             "",
         ]
     )
@@ -2475,6 +2484,7 @@ def generate_bundle(
         "- The default `lab` migration profile writes `lab-profile-values.yaml`, forces imported workloads to one replica, and adds small resource requests/limits to imported workloads.",
         "- Lab imports can run in batches. `MIGRATION_IMPORT_BATCH=auto` selects the first batch when the generated workload set is larger than the configured batch size.",
         "- Resume is enabled by default. Completed secret, image, database, and manifest stages are recorded in the private `MIGRATION_STATE_FILE` and summarized in `import-resume.md`.",
+        "- Recovery planning is plan-only by default. Run `make import-recovery-plan IMPORT_REDACT=true` to write `import-recovery-plan.md`, then review resume status, cleanup boundaries, and rollback boundaries before forcing a rerun.",
         "- Use `MIGRATION_PROFILE=production` only after cluster capacity, storage, backups, and strict database migration behavior are ready.",
         "- Generated output must stay in `reports/` or another ignored/private directory.",
         "",

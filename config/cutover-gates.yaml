@@ -1,0 +1,155 @@
+defaultProfile: disabled
+enabledByDefault: false
+profiles:
+  disabled:
+    description: Keep committed chart defaults and do not enable cutover automation.
+    enabled: false
+    mode: baseline
+    trafficSwitch:
+      enabled: false
+      method: none
+      requireIngressHost: false
+      requireDnsTlsEvidence: false
+    preCutover:
+      requireImportPreflight: false
+      requireCapacityReport: false
+      requireReleaseEvidence: false
+      requireRegistryEvidence: false
+      requireBackupRestoreEvidence: false
+      requireDatabaseRestoreEvidence: false
+      requireChangeTicket: false
+      requireApprovalEvidence: false
+    smokeTests:
+      enabled: false
+      requireSmokeTestPlan: false
+      requirePostMigrationCheck: false
+      requireSyntheticChecks: false
+    rollback:
+      enabled: false
+      requireRollbackPlan: false
+      requireRecoveryPlan: false
+      requireRestorePoint: false
+    postCutover:
+      enabled: false
+      requireObservationWindow: false
+      requireOwnerHandoff: false
+  lab-smoke:
+    description: Lab smoke-test readiness without public traffic cutover.
+    enabled: false
+    mode: lab
+    trafficSwitch:
+      enabled: false
+      method: none
+      requireIngressHost: false
+      requireDnsTlsEvidence: false
+    preCutover:
+      requireImportPreflight: true
+      requireCapacityReport: true
+      requireReleaseEvidence: false
+      requireRegistryEvidence: false
+      requireBackupRestoreEvidence: false
+      requireDatabaseRestoreEvidence: false
+      requireChangeTicket: false
+      requireApprovalEvidence: false
+    smokeTests:
+      enabled: false
+      requireSmokeTestPlan: true
+      requirePostMigrationCheck: true
+      requireSyntheticChecks: false
+    rollback:
+      enabled: false
+      requireRollbackPlan: true
+      requireRecoveryPlan: true
+      requireRestorePoint: false
+    postCutover:
+      enabled: false
+      requireObservationWindow: false
+      requireOwnerHandoff: false
+  staging-cutover:
+    description: Staging cutover rehearsal with DNS/TLS, smoke tests, and rollback evidence.
+    enabled: false
+    mode: staging
+    trafficSwitch:
+      enabled: false
+      method: ingress-dns
+      requireIngressHost: true
+      requireDnsTlsEvidence: true
+    preCutover:
+      requireImportPreflight: true
+      requireCapacityReport: true
+      requireReleaseEvidence: true
+      requireRegistryEvidence: true
+      requireBackupRestoreEvidence: true
+      requireDatabaseRestoreEvidence: true
+      requireChangeTicket: true
+      requireApprovalEvidence: false
+    smokeTests:
+      enabled: false
+      requireSmokeTestPlan: true
+      requirePostMigrationCheck: true
+      requireSyntheticChecks: true
+    rollback:
+      enabled: false
+      requireRollbackPlan: true
+      requireRecoveryPlan: true
+      requireRestorePoint: true
+    postCutover:
+      enabled: false
+      requireObservationWindow: true
+      requireOwnerHandoff: true
+  production-cutover:
+    description: Production cutover readiness gate for approved traffic switch.
+    enabled: false
+    mode: production
+    trafficSwitch:
+      enabled: false
+      method: ingress-dns
+      requireIngressHost: true
+      requireDnsTlsEvidence: true
+    preCutover:
+      requireImportPreflight: true
+      requireCapacityReport: true
+      requireReleaseEvidence: true
+      requireRegistryEvidence: true
+      requireBackupRestoreEvidence: true
+      requireDatabaseRestoreEvidence: true
+      requireChangeTicket: true
+      requireApprovalEvidence: true
+    smokeTests:
+      enabled: false
+      requireSmokeTestPlan: true
+      requirePostMigrationCheck: true
+      requireSyntheticChecks: true
+    rollback:
+      enabled: false
+      requireRollbackPlan: true
+      requireRecoveryPlan: true
+      requireRestorePoint: true
+    postCutover:
+      enabled: false
+      requireObservationWindow: true
+      requireOwnerHandoff: true
+controller:
+  report: reports/cutover-gate-plan.md
+  overrides: reports/cutover-gate-values.yaml
+publicArtifacts:
+  - reports/import-migration/import-preflight.md
+  - reports/import-migration/import-capacity.md
+  - reports/import-migration/import-recovery-plan.md
+  - reports/import-migration/post-migration-check.md
+  - reports/release-evidence-verification.md
+requiredChecks:
+  - Kubernetes API and node readiness preflight passed
+  - capacity report reviewed for selected batch or production scope
+  - production images promoted through registry or preload evidence
+  - database restore and extension validation completed
+  - DNS, TLS, and ingress backend smoke checks reviewed
+  - rollback plan, restore point, and recovery plan reviewed
+  - change ticket, approvals, and maintenance window reviewed for production
+  - post-cutover observation owner and handoff identified
+guardrails:
+  - keep cutover automation disabled by default in committed values
+  - do not switch public DNS or ingress traffic from a public-safe planning command
+  - do not print private hosts, DNS names, node names, tickets, registry paths, or database DSNs
+  - treat smoke-test and rollback evidence as private operator evidence
+  - require an explicit private approval path before production traffic switch

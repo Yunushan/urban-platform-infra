@@ -234,6 +234,18 @@
     "changeManagement": {
       "$ref": "#/$defs/changeManagement"
     },
+    "cutoverGates": {
+      "$ref": "#/$defs/cutoverGates"
+    },
+    "smokeTesting": {
+      "$ref": "#/$defs/smokeTesting"
+    },
+    "releaseRunbook": {
+      "$ref": "#/$defs/releaseRunbook"
+    },
+    "clusterUpgrade": {
+      "$ref": "#/$defs/clusterUpgrade"
+    },
     "disasterRecovery": {
       "$ref": "#/$defs/disasterRecovery"
     },
@@ -976,6 +988,10 @@
     "complianceEvidence",
     "incidentResponse",
     "changeManagement",
+    "cutoverGates",
+    "smokeTesting",
+    "releaseRunbook",
+    "clusterUpgrade",
     "disasterRecovery",
     "namespace",
     "webserver",
@@ -2493,6 +2509,679 @@
         "changeControl",
         "maintenanceWindow",
         "rollout",
+        "evidence",
+        "reports"
+      ]
+    },
+    "cutoverGates": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Production cutover and smoke-test gate intent",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "lab-smoke",
+            "staging-cutover",
+            "production-cutover"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "baseline",
+            "lab",
+            "staging",
+            "production"
+          ]
+        },
+        "trafficSwitch": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "method": {
+              "type": "string",
+              "enum": [
+                "none",
+                "ingress-dns",
+                "ingress-weight",
+                "load-balancer"
+              ]
+            },
+            "requireIngressHost": {
+              "type": "boolean"
+            },
+            "requireDnsTlsEvidence": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "method",
+            "requireIngressHost",
+            "requireDnsTlsEvidence"
+          ]
+        },
+        "preCutover": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requireImportPreflight": {
+              "type": "boolean"
+            },
+            "requireCapacityReport": {
+              "type": "boolean"
+            },
+            "requireReleaseEvidence": {
+              "type": "boolean"
+            },
+            "requireRegistryEvidence": {
+              "type": "boolean"
+            },
+            "requireBackupRestoreEvidence": {
+              "type": "boolean"
+            },
+            "requireDatabaseRestoreEvidence": {
+              "type": "boolean"
+            },
+            "requireChangeTicket": {
+              "type": "boolean"
+            },
+            "requireApprovalEvidence": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "requireImportPreflight",
+            "requireCapacityReport",
+            "requireReleaseEvidence",
+            "requireRegistryEvidence",
+            "requireBackupRestoreEvidence",
+            "requireDatabaseRestoreEvidence",
+            "requireChangeTicket",
+            "requireApprovalEvidence"
+          ]
+        },
+        "smokeTests": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requireSmokeTestPlan": {
+              "type": "boolean"
+            },
+            "requirePostMigrationCheck": {
+              "type": "boolean"
+            },
+            "requireSyntheticChecks": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "requireSmokeTestPlan",
+            "requirePostMigrationCheck",
+            "requireSyntheticChecks"
+          ]
+        },
+        "rollback": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requireRollbackPlan": {
+              "type": "boolean"
+            },
+            "requireRecoveryPlan": {
+              "type": "boolean"
+            },
+            "requireRestorePoint": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "requireRollbackPlan",
+            "requireRecoveryPlan",
+            "requireRestorePoint"
+          ]
+        },
+        "postCutover": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requireObservationWindow": {
+              "type": "boolean"
+            },
+            "requireOwnerHandoff": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "requireObservationWindow",
+            "requireOwnerHandoff"
+          ]
+        },
+        "reports": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": "string"
+            },
+            "overrides": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "plan",
+            "overrides"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "profile",
+        "mode",
+        "trafficSwitch",
+        "preCutover",
+        "smokeTests",
+        "rollback",
+        "postCutover",
+        "reports"
+      ]
+    },
+    "smokeTesting": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Post-migration smoke-test and health-probe intent",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "lab-smoke",
+            "staging-smoke",
+            "production-smoke"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "baseline",
+            "lab",
+            "staging",
+            "production"
+          ]
+        },
+        "execution": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "runner": {
+              "type": "string",
+              "enum": [
+                "none",
+                "kubectl",
+                "kubernetes-job",
+                "external-monitor"
+              ]
+            },
+            "namespace": {
+              "type": "string"
+            },
+            "serviceAccountName": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "enabled",
+            "runner",
+            "namespace",
+            "serviceAccountName"
+          ]
+        },
+        "probes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kubernetesRollout": {
+              "type": "boolean"
+            },
+            "httpRoutes": {
+              "type": "boolean"
+            },
+            "tcpServices": {
+              "type": "boolean"
+            },
+            "databaseConnections": {
+              "type": "boolean"
+            },
+            "messagingConnections": {
+              "type": "boolean"
+            },
+            "externalSynthetic": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kubernetesRollout",
+            "httpRoutes",
+            "tcpServices",
+            "databaseConnections",
+            "messagingConnections",
+            "externalSynthetic"
+          ]
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requirePlan": {
+              "type": "boolean"
+            },
+            "requireResults": {
+              "type": "boolean"
+            },
+            "requireOwnerReview": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "requirePlan",
+            "requireResults",
+            "requireOwnerReview"
+          ]
+        },
+        "reports": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": "string"
+            },
+            "overrides": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "plan",
+            "overrides"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "profile",
+        "mode",
+        "execution",
+        "probes",
+        "evidence",
+        "reports"
+      ]
+    },
+    "releaseRunbook": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Release runbook and evidence gate intent",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "lab-release",
+            "staging-release",
+            "production-release"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "baseline",
+            "lab",
+            "staging",
+            "production"
+          ]
+        },
+        "execution": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "publisher": {
+              "type": "string",
+              "enum": [
+                "none",
+                "github-release",
+                "gitlab-release",
+                "registry"
+              ]
+            },
+            "deployer": {
+              "type": "string",
+              "enum": [
+                "none",
+                "helm",
+                "helmfile",
+                "gitops"
+              ]
+            }
+          },
+          "required": [
+            "enabled",
+            "publisher",
+            "deployer"
+          ]
+        },
+        "gates": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requireReleaseTag": {
+              "type": "boolean"
+            },
+            "requireCleanWorktree": {
+              "type": "boolean"
+            },
+            "requireArtifactEvidence": {
+              "type": "boolean"
+            },
+            "requireSbom": {
+              "type": "boolean"
+            },
+            "requireChecksums": {
+              "type": "boolean"
+            },
+            "requireAttestation": {
+              "type": "boolean"
+            },
+            "requireChangeApproval": {
+              "type": "boolean"
+            },
+            "requireSmokeTestPlan": {
+              "type": "boolean"
+            },
+            "requireCutoverGate": {
+              "type": "boolean"
+            },
+            "requireRollbackPlan": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "requireReleaseTag",
+            "requireCleanWorktree",
+            "requireArtifactEvidence",
+            "requireSbom",
+            "requireChecksums",
+            "requireAttestation",
+            "requireChangeApproval",
+            "requireSmokeTestPlan",
+            "requireCutoverGate",
+            "requireRollbackPlan"
+          ]
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requirePublicBundle": {
+              "type": "boolean"
+            },
+            "requirePrivateApprovalIndex": {
+              "type": "boolean"
+            },
+            "requireOwnerReview": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "requirePublicBundle",
+            "requirePrivateApprovalIndex",
+            "requireOwnerReview"
+          ]
+        },
+        "reports": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": "string"
+            },
+            "overrides": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "plan",
+            "overrides"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "profile",
+        "mode",
+        "execution",
+        "gates",
+        "evidence",
+        "reports"
+      ]
+    },
+    "clusterUpgrade": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Cluster upgrade and version-skew guardrail intent",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "lab-upgrade",
+            "staging-upgrade",
+            "production-upgrade"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "baseline",
+            "lab",
+            "staging",
+            "production"
+          ]
+        },
+        "engine": {
+          "type": "string",
+          "enum": [
+            "rke2"
+          ]
+        },
+        "orchestration": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "strategy": {
+              "type": "string",
+              "enum": [
+                "none",
+                "manual-plan",
+                "rolling-control-plane",
+                "blue-green-cluster"
+              ]
+            },
+            "drainNodes": {
+              "type": "boolean"
+            },
+            "restartServices": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "strategy",
+            "drainNodes",
+            "restartServices"
+          ]
+        },
+        "versions": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "currentKubernetes": {
+              "type": "string"
+            },
+            "targetKubernetes": {
+              "type": "string"
+            },
+            "currentRke2": {
+              "type": "string"
+            },
+            "targetRke2": {
+              "type": "string"
+            },
+            "maxMinorSkew": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "currentKubernetes",
+            "targetKubernetes",
+            "currentRke2",
+            "targetRke2",
+            "maxMinorSkew"
+          ]
+        },
+        "gates": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requirePinnedVersion": {
+              "type": "boolean"
+            },
+            "requireSupportedSkew": {
+              "type": "boolean"
+            },
+            "requireEtcdSnapshot": {
+              "type": "boolean"
+            },
+            "requireBackupRestore": {
+              "type": "boolean"
+            },
+            "requireMaintenanceWindow": {
+              "type": "boolean"
+            },
+            "requireCapacityHeadroom": {
+              "type": "boolean"
+            },
+            "requireNodeHealth": {
+              "type": "boolean"
+            },
+            "requireRollbackPlan": {
+              "type": "boolean"
+            },
+            "requireAddOnCompatibility": {
+              "type": "boolean"
+            },
+            "requirePostUpgradeSmokeTest": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "requirePinnedVersion",
+            "requireSupportedSkew",
+            "requireEtcdSnapshot",
+            "requireBackupRestore",
+            "requireMaintenanceWindow",
+            "requireCapacityHeadroom",
+            "requireNodeHealth",
+            "requireRollbackPlan",
+            "requireAddOnCompatibility",
+            "requirePostUpgradeSmokeTest"
+          ]
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requireClusterDoctor": {
+              "type": "boolean"
+            },
+            "requireInventoryReview": {
+              "type": "boolean"
+            },
+            "requireReleaseNotesReview": {
+              "type": "boolean"
+            },
+            "requireOwnerApproval": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "requireClusterDoctor",
+            "requireInventoryReview",
+            "requireReleaseNotesReview",
+            "requireOwnerApproval"
+          ]
+        },
+        "reports": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": "string"
+            },
+            "overrides": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "plan",
+            "overrides"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "profile",
+        "mode",
+        "engine",
+        "orchestration",
+        "versions",
+        "gates",
         "evidence",
         "reports"
       ]

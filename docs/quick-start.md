@@ -3,7 +3,7 @@
 ```bash
 cp inventories/example/hosts.yml inventories/prod/hosts.yml
 cp .env.example .env
-make validate
+make operator-ready
 make preflight ENV=prod ENGINE=rke2
 make bootstrap-check ENV=prod ENGINE=rke2
 make install-cluster-check ENV=prod ENGINE=rke2
@@ -16,6 +16,13 @@ make deploy ENV=prod
 `make deploy` installs Helm and Helmfile on the operator machine if they are
 missing, installs the required operator CRDs, waits for the default CNPG and ECK
 CRDs, then runs the chart upgrade/install.
+
+`make operator-ready` creates the repository virtualenv from the pinned CI
+requirements, writes public-safe local prerequisite and private-data audit
+reports, checks the GitHub/GitLab workflow lane pins, writes a capacity
+preflight report, then runs validation and lint. On native Windows, use this
+workflow for inspection and validation, then use WSL or a Linux operator host
+for mutating cluster operations.
 
 The install/deploy targets repair the operator kubeconfig automatically for
 RKE2. They copy it from the first server and rewrite `127.0.0.1:6443` to the

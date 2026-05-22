@@ -127,6 +127,10 @@ jobs:
           cache-dependency-path: ${{ matrix.requirements-file }}
       - name: Install Python dependencies
         run: pip install -r "${{ matrix.requirements-file }}"
+      - name: Validate CI contract
+        run: python3 scripts/tools/validate_ci_contract.py
+      - name: Audit private data guardrails
+        run: python3 scripts/tools/private_data_audit.py
       - name: Validate repository
         run: |
           python3 scripts/validate.py

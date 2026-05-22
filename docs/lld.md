@@ -28,6 +28,11 @@ reports, secret values, and database target details outside Git.
 | `scripts/compliance_evidence_plan.py` | Compliance evidence and audit-pack readiness planning |
 | `scripts/incident_response_plan.py` | Incident response and operational readiness planning |
 | `scripts/change_management_plan.py` | Change management and maintenance-window readiness planning |
+| `scripts/cutover_gate_plan.py` | Production cutover and smoke-test gate readiness planning |
+| `scripts/smoke_test_plan.py` | Post-migration smoke-test and health-probe readiness planning |
+| `scripts/release_runbook_plan.py` | Release runbook and evidence gate readiness planning |
+| `scripts/cluster_upgrade_plan.py` | Cluster upgrade and version-skew guardrail planning |
+| `scripts/environment_profile_plan.py` | Environment profile overlay and evidence bundle planning |
 | `scripts/disaster_recovery_plan.py` | Disaster recovery and business continuity readiness planning |
 | `scripts/tools/ensure-kubeconfig.sh` | Operator kubeconfig repair and RKE2 discovery |
 | `scripts/tools/helmfile-sync-retry.sh` | Helmfile retries, API checks, pending release recovery |
@@ -380,6 +385,49 @@ overlays do not create tickets, mutate calendars, approve changes, or expose
 approver rosters. Production integrations belong in private overlays after
 approval ownership, maintenance windows, rollback plans, smoke tests, evidence,
 and post-change review procedures are proven.
+
+## Release Runbook Design
+
+Release runbook gating is represented as a disabled-by-default intent layer.
+`config/release-runbook.yaml` defines disabled, lab release, staging release,
+and production release profiles. The planner writes a public-safe report plus a
+Helm values overlay:
+
+```text
+make release-runbook-plan
+  -> select profile
+  -> validate release artifacts, approvals, rollback, smoke-test, and cutover gates
+  -> write reports/release-runbook-plan.md
+  -> write reports/release-runbook-values.yaml
+```
+
+The Helm chart keeps `releaseRunbook.enabled=false` by default. Public overlays
+do not publish a release, approve a change, deploy a chart, or switch traffic.
+Production integrations belong in private release systems after artifact
+evidence, private approval indexes, rollback plans, smoke-test evidence,
+cutover gates, and owner reviews are proven.
+
+## Cluster Upgrade Design
+
+Cluster upgrade gating is represented as a disabled-by-default intent layer.
+`config/cluster-upgrade.yaml` defines disabled, lab upgrade, staging upgrade,
+and production upgrade profiles. The planner writes a public-safe report plus a
+Helm values overlay:
+
+```text
+make cluster-upgrade-plan
+  -> select profile
+  -> validate RKE2 target pin, Kubernetes version skew, snapshots, and rollback gates
+  -> write reports/cluster-upgrade-plan.md
+  -> write reports/cluster-upgrade-values.yaml
+```
+
+The Helm chart keeps `clusterUpgrade.enabled=false` and
+`clusterUpgrade.orchestration.enabled=false` by default. Public overlays do not
+drain nodes, restart RKE2, patch inventories, mutate HAProxy/Keepalived, or
+change Kubernetes versions. Production upgrades belong in private operator
+runbooks after etcd snapshot evidence, add-on compatibility, maintenance
+windows, node health, rollback, and post-upgrade smoke tests are proven.
 
 ## Disaster Recovery Design
 

@@ -4,6 +4,7 @@ policy:
     requireChartVersionMatchesTag: true
     requireChecksums: true
     requireSbom: true
+    requireReleaseManifest: true
     requireGithubArtifactAttestations: true
     requireOidcForSigning: true
   releaseVerification:
@@ -12,6 +13,7 @@ policy:
     verifyTagMatchesChartVersion: true
     verifyChecksumContents: true
     verifySbomJson: true
+    verifyReleaseManifestJson: true
     publicSafetyScan: true
   githubActions:
     disallowFloatingRefs:
@@ -29,4 +31,5 @@ policy:
     chartPackage: dist/urban-platform-infra-<version>.tgz
     renderedManifest: dist/rendered.yaml
     sbom: dist/urban-platform-infra.spdx.json
+    releaseManifest: dist/release-evidence.json
     checksums: dist/SHA256SUMS

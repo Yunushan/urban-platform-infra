@@ -33,6 +33,10 @@ Switches are handled in `values.yaml`:
 - `complianceEvidence`: disabled-by-default evidence and audit-pack intent. Use `make compliance-evidence-plan` before collecting private evidence, mapping controls, packaging audit artifacts, or enabling retention automation.
 - `incidentResponse`: disabled-by-default incident response intent. Use `make incident-response-plan` before enabling paging, alert-routing, communication, runbook, drill, or post-incident review integrations.
 - `changeManagement`: disabled-by-default change management and maintenance-window intent. Use `make change-management-plan` before enabling ticket, approval, freeze-check, rollback, smoke-test, deployment-evidence, or post-change review integrations.
+- `cutoverGates`: disabled-by-default production cutover and smoke-test gate intent. Use `make cutover-gate-plan` before traffic switch to review import, release, registry/preload, database, DNS/TLS, smoke-test, rollback, and approval evidence.
+- `smokeTesting`: disabled-by-default post-migration smoke-test and health-probe intent. Use `make smoke-test-plan` before enabling rollout, HTTP/TLS, TCP, database, messaging, synthetic, or owner-reviewed result probes.
+- `releaseRunbook`: disabled-by-default release runbook and evidence gate intent. Use `make release-runbook-plan` before production promotion to review artifact evidence, change approval, rollback, smoke-test, cutover, and owner-review readiness.
+- `clusterUpgrade`: disabled-by-default cluster upgrade and version-skew guardrail intent. Use `make cluster-upgrade-plan` before changing RKE2 or Kubernetes versions to review target pins, etcd snapshots, add-on compatibility, rollback, and smoke-test readiness.
 - `disasterRecovery`: disabled-by-default disaster recovery and business continuity intent. Use `make disaster-recovery-plan` before enabling recovery-site, replication, restore-drill, failover, DNS cutover, continuity, or post-drill review integrations.
 - `ingress.host`: optional canonical host. When it is empty, the chart uses `global.cluster.domain` for HTTPS routes and the self-signed certificate.
 

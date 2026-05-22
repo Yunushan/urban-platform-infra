@@ -48,6 +48,11 @@ Operator machine
   +-- evidence planning: control mapping, audit-pack, retention, and export gates
   +-- incident planning: alert routes, escalation, runbooks, drills, and review gates
   +-- change planning: tickets, approvals, maintenance windows, freeze checks, and rollback gates
+  +-- cutover planning: DNS/TLS, smoke tests, rollback, approvals, and observation gates
+  +-- smoke-test planning: rollout, service, ingress, database, and messaging probes
+  +-- release runbook planning: artifacts, approvals, rollback, smoke-test, and cutover gates
+  +-- cluster upgrade planning: RKE2 pins, version skew, snapshots, add-ons, and rollback gates
+  +-- environment evidence bundles: public report index plus private evidence categories
   +-- recovery planning: RTO/RPO, restore drills, failover runbooks, and continuity gates
   |
   v
@@ -164,6 +169,24 @@ tickets, CAB approvals, maintenance windows, freeze calendars, stakeholder
 notices, rollback plans, smoke-test evidence, deployment evidence, and
 post-change reviews stay private while operators use the public-safe change
 management plan to prove release readiness.
+
+Smoke-test automation is optional and disabled by default. Kubernetes rollout
+checks, Service DNS checks, HTTP/TLS route checks, TCP backend probes, database
+connection checks, messaging connection checks, synthetic monitors, and
+owner-reviewed result evidence stay private while operators use the public-safe
+smoke-test plan to prove post-migration readiness.
+
+Release runbook automation is optional and disabled by default. Release artifact
+evidence, SBOM/checksum/attestation review, private change approvals, rollback
+plans, smoke-test plans, cutover gates, environment evidence bundles, and owner
+reviews stay private while operators use the public-safe release runbook plan
+to prove production promotion readiness.
+
+Cluster upgrade automation is optional and disabled by default. RKE2 target
+pins, Kubernetes version skew, etcd snapshot evidence, add-on compatibility,
+maintenance windows, node health, rollback plans, and post-upgrade smoke tests
+stay private while operators use the public-safe cluster upgrade plan to prove
+upgrade readiness before any node drain, service restart, or version change.
 
 Disaster recovery automation is optional and disabled by default. RTO/RPO
 objectives, dependency maps, backup replication, recovery sites, restore drill
@@ -356,6 +379,8 @@ Do not commit:
 - [Scaling Policy](scaling-policy.md)
 - [Network Connectivity](network-connectivity.md)
 - [Access Governance](access-governance.md)
+- [Release Runbook](release-runbook.md)
+- [Cluster Upgrade](cluster-upgrade.md)
 - [Operations](operations.md)
 - [Secrets Management](secrets-management.md)
 - [Supply Chain](supply-chain.md)

@@ -21,6 +21,7 @@ DEFAULT_RELEASE_ARTIFACTS = {
     "chartPackage": "dist/urban-platform-infra-<version>.tgz",
     "renderedManifest": "dist/rendered.yaml",
     "sbom": "dist/urban-platform-infra.spdx.json",
+    "releaseManifest": "dist/release-evidence.json",
     "checksums": "dist/SHA256SUMS",
 }
 PRIVATE_TEXT_PATTERNS = [
@@ -144,6 +145,54 @@ def verify_sbom(sbom_path: Path, expected_artifacts: list[Path], errors: list[st
             warnings.append(f"SBOM does not list artifact `{rel}` as a package file.")
 
 
+def verify_release_manifest(
+    manifest_path: Path,
+    metadata: dict[str, str],
+    expected_artifacts: dict[str, Path],
+    errors: list[str],
+) -> None:
+    try:
+        document = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        errors.append(f"Release manifest is not valid JSON: {exc}")
+        return
+    if document.get("schemaVersion") != "urban-platform.release-evidence/v1":
+        errors.append("Release manifest missing schemaVersion urban-platform.release-evidence/v1.")
+    if document.get("publicSafe") is not True:
+        errors.append("Release manifest must declare publicSafe=true.")
+    chart = document.get("chart", {})
+    if not isinstance(chart, dict):
+        errors.append("Release manifest missing chart metadata.")
+        return
+    for key in ["name", "version", "appVersion"]:
+        if chart.get(key) != metadata.get(key):
+            errors.append(f"Release manifest chart `{key}` does not match Chart.yaml.")
+    artifacts = document.get("artifacts", [])
+    if not isinstance(artifacts, list) or not artifacts:
+        errors.append("Release manifest has no artifact records.")
+        return
+    records_by_path = {
+        str(record.get("path", "")): record
+        for record in artifacts
+        if isinstance(record, dict)
+    }
+    required_manifest_artifacts = {
+        "chartPackage": expected_artifacts["chartPackage"],
+        "renderedManifest": expected_artifacts["renderedManifest"],
+        "spdxSbom": expected_artifacts["sbom"],
+    }
+    for kind, path in required_manifest_artifacts.items():
+        rel = relative_path(path)
+        record = records_by_path.get(rel)
+        if not record:
+            errors.append(f"Release manifest does not list `{rel}`.")
+            continue
+        if record.get("kind") != kind:
+            errors.append(f"Release manifest artifact `{rel}` has kind `{record.get('kind')}`, expected `{kind}`.")
+        if path.exists() and record.get("sha256") != sha256(path):
+            errors.append(f"Release manifest checksum mismatch for `{rel}`.")
+
+
 def write_report(path: Path, lines: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -167,6 +216,7 @@ def main() -> int:
     chart_package = expected["chartPackage"]
     rendered = expected["renderedManifest"]
     sbom = expected["sbom"]
+    manifest = expected["releaseManifest"]
     checksums = expected["checksums"]
 
     errors: list[str] = []
@@ -199,6 +249,7 @@ def main() -> int:
         "chart package": chart_package,
         "rendered manifest": rendered,
         "SPDX SBOM": sbom,
+        "release manifest": manifest,
         "checksums": checksums,
     }
     for label, path in required.items():
@@ -225,6 +276,8 @@ def main() -> int:
 
     if sbom.exists():
         verify_sbom(sbom, [chart_package, rendered], errors, warnings)
+    if manifest.exists():
+        verify_release_manifest(manifest, metadata, expected, errors)
 
     if not args.no_public_safety_scan:
         for label, path in required.items():

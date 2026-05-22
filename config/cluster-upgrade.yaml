@@ -1,0 +1,154 @@
+defaultProfile: disabled
+enabledByDefault: false
+profiles:
+  disabled:
+    description: Keep committed chart defaults and do not enable cluster upgrade automation.
+    enabled: false
+    mode: baseline
+    engine: rke2
+    orchestration:
+      enabled: false
+      strategy: none
+      drainNodes: false
+      restartServices: false
+    versions:
+      currentKubernetes: ''
+      targetKubernetes: ''
+      currentRke2: ''
+      targetRke2: ''
+      maxMinorSkew: 0
+    gates:
+      requirePinnedVersion: false
+      requireSupportedSkew: false
+      requireEtcdSnapshot: false
+      requireBackupRestore: false
+      requireMaintenanceWindow: false
+      requireCapacityHeadroom: false
+      requireNodeHealth: false
+      requireRollbackPlan: false
+      requireAddOnCompatibility: false
+      requirePostUpgradeSmokeTest: false
+    evidence:
+      requireClusterDoctor: false
+      requireInventoryReview: false
+      requireReleaseNotesReview: false
+      requireOwnerApproval: false
+  lab-upgrade:
+    description: Lab upgrade rehearsal for one selected cluster version step.
+    enabled: false
+    mode: lab
+    engine: rke2
+    orchestration:
+      enabled: false
+      strategy: manual-plan
+      drainNodes: false
+      restartServices: false
+    versions:
+      currentKubernetes: ''
+      targetKubernetes: ''
+      currentRke2: ''
+      targetRke2: ''
+      maxMinorSkew: 1
+    gates:
+      requirePinnedVersion: true
+      requireSupportedSkew: true
+      requireEtcdSnapshot: true
+      requireBackupRestore: false
+      requireMaintenanceWindow: false
+      requireCapacityHeadroom: true
+      requireNodeHealth: true
+      requireRollbackPlan: true
+      requireAddOnCompatibility: true
+      requirePostUpgradeSmokeTest: true
+    evidence:
+      requireClusterDoctor: true
+      requireInventoryReview: false
+      requireReleaseNotesReview: true
+      requireOwnerApproval: false
+  staging-upgrade:
+    description: Staging upgrade rehearsal with add-on, backup, smoke-test, and rollback evidence.
+    enabled: false
+    mode: staging
+    engine: rke2
+    orchestration:
+      enabled: false
+      strategy: rolling-control-plane
+      drainNodes: false
+      restartServices: false
+    versions:
+      currentKubernetes: ''
+      targetKubernetes: ''
+      currentRke2: ''
+      targetRke2: ''
+      maxMinorSkew: 1
+    gates:
+      requirePinnedVersion: true
+      requireSupportedSkew: true
+      requireEtcdSnapshot: true
+      requireBackupRestore: true
+      requireMaintenanceWindow: true
+      requireCapacityHeadroom: true
+      requireNodeHealth: true
+      requireRollbackPlan: true
+      requireAddOnCompatibility: true
+      requirePostUpgradeSmokeTest: true
+    evidence:
+      requireClusterDoctor: true
+      requireInventoryReview: true
+      requireReleaseNotesReview: true
+      requireOwnerApproval: true
+  production-upgrade:
+    description: Production cluster upgrade readiness gate before changing RKE2 or Kubernetes versions.
+    enabled: false
+    mode: production
+    engine: rke2
+    orchestration:
+      enabled: false
+      strategy: rolling-control-plane
+      drainNodes: false
+      restartServices: false
+    versions:
+      currentKubernetes: ''
+      targetKubernetes: ''
+      currentRke2: ''
+      targetRke2: ''
+      maxMinorSkew: 1
+    gates:
+      requirePinnedVersion: true
+      requireSupportedSkew: true
+      requireEtcdSnapshot: true
+      requireBackupRestore: true
+      requireMaintenanceWindow: true
+      requireCapacityHeadroom: true
+      requireNodeHealth: true
+      requireRollbackPlan: true
+      requireAddOnCompatibility: true
+      requirePostUpgradeSmokeTest: true
+    evidence:
+      requireClusterDoctor: true
+      requireInventoryReview: true
+      requireReleaseNotesReview: true
+      requireOwnerApproval: true
+controller:
+  report: reports/cluster-upgrade-plan.md
+  overrides: reports/cluster-upgrade-values.yaml
+  status: plan-only
+  mutatesCluster: false
+supportedEngines:
+  - rke2
+supportedStrategies:
+  - none
+  - manual-plan
+  - rolling-control-plane
+  - blue-green-cluster
+versionSkewPolicy:
+  kubernetesMinorStep: one-minor-at-a-time
+  rke2VersionFormat: vMAJOR.MINOR.PATCH+rke2rN
+  requireTargetPin: true
+  requireReleaseNotesReview: true
+guardrails:
+  - Keep cluster upgrade automation disabled by default in committed Helm values.
+  - Do not drain nodes, restart RKE2, mutate HAProxy, or change Kubernetes versions from this public-safe planning command.
+  - Keep node names, private API endpoints, kubeconfigs, maintenance tickets, and owner approvals out of public reports.
+  - Require etcd snapshot and restore evidence before production RKE2 upgrade approval.
+  - Review cert-manager, CloudNativePG, ECK, ingress, CNI, CSI, and policy add-on compatibility before upgrade.

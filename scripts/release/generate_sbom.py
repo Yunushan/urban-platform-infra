@@ -70,8 +70,14 @@ def package_for(path: Path, chart_name: str, chart_version: str) -> dict[str, ob
     }
 
 
-def release_artifacts(dist: Path, rendered: Path | None, sbom: Path | None, checksums: Path | None) -> list[Path]:
-    excluded = {path.resolve() for path in [sbom, checksums] if path is not None}
+def release_artifacts(
+    dist: Path,
+    rendered: Path | None,
+    sbom: Path | None,
+    checksums: Path | None,
+    manifest: Path | None = None,
+) -> list[Path]:
+    excluded = {path.resolve() for path in [sbom, checksums, manifest] if path is not None}
     artifacts = sorted(dist.glob('*.tgz'))
     if rendered is not None and rendered.exists():
         artifacts.append(rendered)
@@ -80,10 +86,12 @@ def release_artifacts(dist: Path, rendered: Path | None, sbom: Path | None, chec
     return [path for path in artifacts if path.resolve() not in excluded]
 
 
-def write_checksums(paths: list[Path], sbom: Path | None, checksums: Path) -> None:
+def write_checksums(paths: list[Path], sbom: Path | None, manifest: Path | None, checksums: Path) -> None:
     checksum_targets = [*paths]
     if sbom is not None and sbom.exists():
         checksum_targets.append(sbom)
+    if manifest is not None and manifest.exists():
+        checksum_targets.append(manifest)
     lines = [
         f'{sha256(path)}  {relative_path(path)}'
         for path in sorted(checksum_targets, key=lambda item: relative_path(item))
@@ -91,9 +99,16 @@ def write_checksums(paths: list[Path], sbom: Path | None, checksums: Path) -> No
     checksums.write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
 
-def build_sbom(chart: Path, dist: Path, rendered: Path | None, sbom: Path, checksums: Path | None) -> None:
+def build_sbom(
+    chart: Path,
+    dist: Path,
+    rendered: Path | None,
+    sbom: Path,
+    checksums: Path | None,
+    manifest: Path | None = None,
+) -> None:
     metadata = read_chart_metadata(chart)
-    artifacts = release_artifacts(dist, rendered, sbom, checksums)
+    artifacts = release_artifacts(dist, rendered, sbom, checksums, manifest)
     packages = [
         {
             'name': metadata['name'],
@@ -140,6 +155,42 @@ def build_sbom(chart: Path, dist: Path, rendered: Path | None, sbom: Path, check
     sbom.write_text(json.dumps(document, indent=2, sort_keys=True) + '\n', encoding='utf-8')
 
 
+def artifact_record(path: Path, kind: str) -> dict[str, str]:
+    return {
+        'kind': kind,
+        'path': relative_path(path),
+        'sha256': sha256(path),
+    }
+
+
+def build_release_manifest(
+    chart: Path,
+    dist: Path,
+    rendered: Path | None,
+    sbom: Path,
+    checksums: Path | None,
+    manifest: Path,
+) -> None:
+    metadata = read_chart_metadata(chart)
+    artifacts = release_artifacts(dist, rendered, sbom, checksums, manifest)
+    records = [artifact_record(path, 'chartPackage' if path.suffix == '.tgz' else 'renderedManifest') for path in artifacts]
+    if sbom.exists():
+        records.append(artifact_record(sbom, 'spdxSbom'))
+    document = {
+        'schemaVersion': 'urban-platform.release-evidence/v1',
+        'chart': {
+            'name': metadata['name'],
+            'version': metadata['version'],
+            'appVersion': metadata['appVersion'],
+            'path': relative_path(chart),
+        },
+        'created': dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z'),
+        'publicSafe': True,
+        'artifacts': sorted(records, key=lambda item: (item['kind'], item['path'])),
+    }
+    manifest.write_text(json.dumps(document, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description='Generate release SBOM and checksum evidence.')
     parser.add_argument('--chart', default='helm/urban-platform-infra')
@@ -147,6 +198,7 @@ def main() -> int:
     parser.add_argument('--rendered')
     parser.add_argument('--sbom')
     parser.add_argument('--checksums')
+    parser.add_argument('--manifest')
     parser.add_argument('--print-chart-version', action='store_true')
     args = parser.parse_args()
 
@@ -163,12 +215,17 @@ def main() -> int:
     rendered = (ROOT / args.rendered).resolve() if args.rendered else None
     sbom = (ROOT / args.sbom).resolve()
     checksums = (ROOT / args.checksums).resolve()
+    manifest = (ROOT / args.manifest).resolve() if args.manifest else None
     sbom.parent.mkdir(parents=True, exist_ok=True)
     checksums.parent.mkdir(parents=True, exist_ok=True)
+    if manifest is not None:
+        manifest.parent.mkdir(parents=True, exist_ok=True)
 
-    build_sbom(chart, dist, rendered, sbom, checksums)
-    artifacts = release_artifacts(dist, rendered, sbom, checksums)
-    write_checksums(artifacts, sbom, checksums)
+    build_sbom(chart, dist, rendered, sbom, checksums, manifest)
+    if manifest is not None:
+        build_release_manifest(chart, dist, rendered, sbom, checksums, manifest)
+    artifacts = release_artifacts(dist, rendered, sbom, checksums, manifest)
+    write_checksums(artifacts, sbom, manifest, checksums)
     return 0
 
 

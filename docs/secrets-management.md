@@ -24,6 +24,32 @@ The secret inventory lives in `config/secrets.contract.yaml`. It defines:
 
 The contract intentionally does not include values.
 
+## Private Data Audit
+
+Run a public-safe audit before opening pull requests, publishing reports, or
+sharing repository snapshots:
+
+```bash
+make private-data-audit
+```
+
+The audit writes `reports/private-data-audit.md`. It reports categories,
+repository-relative paths, and line numbers only; it does not print matched
+secret values, private IPs, kubeconfig content, or disclosure-prone names. The
+gate checks:
+
+- high-confidence token and private-key patterns,
+- private-looking infrastructure address patterns,
+- kubeconfig-like documents,
+- decrypted secret artifact naming patterns,
+- non-placeholder files under `secrets/` and `inventories/prod/`,
+- original disclosure-prone service identifiers.
+
+Use `python scripts/tools/private_data_audit.py --include-untracked` when you
+want to scan untracked non-ignored files before sharing a working tree snapshot.
+Ignored directories such as `reports/`, `dist/`, `.git/`, `.venv/`, and
+`node_modules/` remain excluded by default.
+
 ## Provider Adapters
 
 Secret provider adapter profiles live in

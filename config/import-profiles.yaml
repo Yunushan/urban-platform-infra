@@ -35,6 +35,7 @@ profiles:
     - reports/import-migration/import-batches.md
     - reports/import-migration/import-batches.yaml
     - reports/import-migration/import-resume.md
+    - reports/import-migration/import-recovery-plan.md
     - reports/import-migration/import-profile.md
     - reports/import-migration/lab-profile-values.yaml
     preflight:

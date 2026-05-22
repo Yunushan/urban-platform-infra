@@ -78,10 +78,11 @@ the Compose project, Docker, Kubernetes, and the RKE2 nodes.
 `make environment-profile-plan` should be the first public-safe planning command
 for a lab, staging, or production migration. It writes
 `reports/environment-profile-plan.md` and
-`reports/environment-profile-values.yaml`, aligning `MIGRATION_PROFILE`,
+`reports/environment-profile-values.yaml`, plus
+`reports/environment-profile-evidence-bundle.md`, aligning `MIGRATION_PROFILE`,
 `MIGRATION_IMAGE_MODE`, database migration strictness, edge routing, backup,
-observability, optional capabilities, and release evidence requirements before
-the mutating import command runs.
+observability, optional capabilities, cutover gates, and release evidence
+requirements before the mutating import command runs.
 
 If the API, VIP, HAProxy, Keepalived, SSH/sudo, or kubeconfig path is unclear,
 run `make cluster-doctor` first. It writes `reports/cluster-doctor.md` with
@@ -111,6 +112,11 @@ yet. In production mode, `MIGRATION_IMPORT_BATCH=all` and
 `MIGRATION_PREFLIGHT_REQUIRE_INGRESS_ENDPOINT=true` are the defaults.
 The bundle also writes `reports/import-migration/import-resume.md`, a public-safe
 view of which stateful stages are pending or completed for the selected batch.
+After a failed or interrupted run, use `make import-recovery-plan
+IMPORT_REDACT=true` to write
+`reports/import-migration/import-recovery-plan.md`, which summarizes resume
+status, safe retry controls, Cleanup Boundaries, and rollback boundaries before
+any force-rerun decision.
 
 For lab deploys before import, run `make lab-deploy-plan`. It estimates the
 committed platform defaults against a small-node budget and writes
@@ -183,6 +189,17 @@ make import-auto PROJECT_PATH=/path/to/compose-project \
 Use `MIGRATION_RESUME=false` for a one-off run that ignores the state file. Use
 `MIGRATION_STATE_FILE=/var/lib/urban-platform/private/<name>.yaml` when you want
 separate lab rehearsals to keep separate resume histories.
+
+For a public-safe recovery view before retrying, run:
+
+```bash
+make import-recovery-plan IMPORT_REDACT=true
+```
+
+The generated `import-recovery-plan.md` is plan-only. It explains resume status,
+operator cache cleanup, node-side image retention, database dump retention,
+generated-manifest rollback boundaries, and the exact retry knobs to use without
+printing private state keys or operator paths when redaction is enabled.
 
 Use `MIGRATION_PROFILE=production` only after capacity, registry/preload,
 storage, backup, and database migration plans are ready. Production mode does

@@ -1,0 +1,98 @@
+defaultProfile: disabled
+enabledByDefault: false
+profiles:
+  disabled:
+    description: No active post-migration probes.
+    enabled: false
+    mode: baseline
+    execution:
+      enabled: false
+      runner: none
+    checks:
+      requireKubernetesRollout: false
+      requireHttpRoutes: false
+      requireTcpServices: false
+      requireDatabaseConnections: false
+      requireMessagingConnections: false
+      requireExternalSynthetic: false
+    evidence:
+      requirePlan: false
+      requireResults: false
+      requireOwnerReview: false
+  lab-smoke:
+    description: Constrained lab smoke-test plan for first-wave imports.
+    enabled: false
+    mode: lab
+    execution:
+      enabled: false
+      runner: none
+    checks:
+      requireKubernetesRollout: true
+      requireHttpRoutes: false
+      requireTcpServices: true
+      requireDatabaseConnections: false
+      requireMessagingConnections: false
+      requireExternalSynthetic: false
+    evidence:
+      requirePlan: true
+      requireResults: false
+      requireOwnerReview: false
+  staging-smoke:
+    description: Non-production integration smoke-test plan before route promotion.
+    enabled: false
+    mode: staging
+    execution:
+      enabled: false
+      runner: external-monitor
+    checks:
+      requireKubernetesRollout: true
+      requireHttpRoutes: true
+      requireTcpServices: true
+      requireDatabaseConnections: true
+      requireMessagingConnections: true
+      requireExternalSynthetic: false
+    evidence:
+      requirePlan: true
+      requireResults: true
+      requireOwnerReview: true
+  production-smoke:
+    description: Production cutover smoke-test plan and post-migration health gate.
+    enabled: false
+    mode: production
+    execution:
+      enabled: false
+      runner: external-monitor
+    checks:
+      requireKubernetesRollout: true
+      requireHttpRoutes: true
+      requireTcpServices: true
+      requireDatabaseConnections: true
+      requireMessagingConnections: true
+      requireExternalSynthetic: true
+    evidence:
+      requirePlan: true
+      requireResults: true
+      requireOwnerReview: true
+controller:
+  report: reports/smoke-test-plan.md
+  overrides: reports/smoke-test-values.yaml
+checkCatalog:
+  - id: kubernetes-rollout
+    description: kubernetes rollout status for generated Deployments and StatefulSets.
+  - id: service-dns
+    description: ClusterIP Service DNS resolution and endpoint readiness.
+  - id: ingress-http-tls
+    description: Ingress HTTP and TLS route check through the selected ingress class.
+  - id: tcp-backends
+    description: TCP backend port reachability for imported services.
+  - id: database-connection
+    description: PostgreSQL, PostGIS, and TimescaleDB connection plus extension checks.
+  - id: messaging-connection
+    description: Redis and Kafka messaging connection checks.
+  - id: external-synthetic
+    description: Private external synthetic transaction from an approved runner.
+guardrails:
+  - Keep smoke testing disabled by default in committed Helm values.
+  - Do not print private URLs, IPs, credentials, tokens, DSNs, service names, or customer identifiers.
+  - Run active probes only from a trusted operator workstation or private runner.
+  - Do not treat smoke tests as traffic-switch approval by themselves.
