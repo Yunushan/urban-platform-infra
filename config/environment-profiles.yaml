@@ -466,28 +466,28 @@ profiles:
         defaultInstances: 3
 requirements:
   lab:
-  - capacity plan reviewed for small nodes
-  - optional capabilities disabled until baseline is healthy
-  - import batches used for large Compose projects
-  - lab smoke-test plan reviewed
-  - lab release runbook reviewed
-  - lab cluster upgrade plan reviewed
+    - capacity plan reviewed for small nodes
+    - optional capabilities disabled until baseline is healthy
+    - import batches used for large Compose projects
+    - lab smoke-test plan reviewed
+    - lab release runbook reviewed
+    - lab cluster upgrade plan reviewed
   staging:
-  - private registry or preload strategy tested
-  - ingress DNS and TLS route tested
-  - backup and restore rehearsal completed
-  - staging smoke-test plan reviewed
-  - staging release runbook reviewed
-  - staging cluster upgrade plan reviewed
-  - staging cutover evidence bundle reviewed
+    - private registry or preload strategy tested
+    - ingress DNS and TLS route tested
+    - backup and restore rehearsal completed
+    - staging smoke-test plan reviewed
+    - staging release runbook reviewed
+    - staging cluster upgrade plan reviewed
+    - staging cutover evidence bundle reviewed
   production:
-  - private registry digest pins ready
-  - database target map reviewed
-  - backup restore drill passed
-  - observability and SLO coverage reviewed
-  - release evidence verified
-  - strict database migration enabled
-  - production smoke-test evidence reviewed
-  - production cluster upgrade evidence reviewed
-  - production release runbook reviewed
-  - production cutover evidence bundle reviewed
+    - private registry digest pins ready
+    - database target map reviewed
+    - backup restore drill passed
+    - observability and SLO coverage reviewed
+    - release evidence verified
+    - strict database migration enabled
+    - production smoke-test evidence reviewed
+    - production cluster upgrade evidence reviewed
+    - production release runbook reviewed
+    - production cutover evidence bundle reviewed
