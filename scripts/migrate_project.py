@@ -44,9 +44,28 @@ MEMORY_QUANTITY_RE = re.compile(r"^([0-9]+)(Ki|Mi|Gi|Ti)?$")
 CPU_QUANTITY_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(m)?$")
 PRIVATE_IPV4_RE = re.compile(r"\b(?:10|192\.168|172\.(?:1[6-9]|2[0-9]|3[01]))(?:\.[0-9]{1,3}){2}\b")
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
+MANIFEST_GENERATOR_VERSION = 2
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
+BACKGROUND_WORKLOAD_HINTS = {
+    "automation",
+    "batch",
+    "consumer",
+    "cron",
+    "job",
+    "listener",
+    "polling",
+    "processor",
+    "queue",
+    "scheduler",
+    "worker",
+}
+BACKGROUND_WORKLOAD_PHRASES = {
+    "camera-traffic-counts",
+    "loop-analytics",
+    "traffic-counts-loop",
+}
 OPTIONAL_DATABASE_PORTS = {
     "mysql": 3306,
     "mariadb": 3306,
@@ -650,6 +669,48 @@ def kubernetes_workload_name(record: import_project.ServiceRecord) -> str:
     return image_artifact_name(record)
 
 
+def compose_service_dns_alias(record: import_project.ServiceRecord) -> str:
+    safe = re.sub(r"[^a-z0-9-]+", "-", record.name.lower()).strip("-")
+    safe = re.sub(r"-+", "-", safe) or "service"
+    if len(safe) <= 63:
+        return safe
+    digest = hashlib.sha256(record.name.encode("utf-8")).hexdigest()[:8]
+    return f"{safe[:54].strip('-')}-{digest}".strip("-")
+
+
+def service_identity_text(record: import_project.ServiceRecord, service: dict[str, Any]) -> str:
+    parts = [record.name, record.kind]
+    if record.image is not None:
+        parts.append(record.image.display)
+    for key in ("command", "entrypoint"):
+        value = service.get(key)
+        if isinstance(value, list):
+            parts.extend(str(item) for item in value)
+        elif value is not None:
+            parts.append(str(value))
+    build = service.get("build")
+    if isinstance(build, dict):
+        context = build.get("context")
+        dockerfile = build.get("dockerfile")
+        if context is not None:
+            parts.append(str(context))
+        if dockerfile is not None:
+            parts.append(str(dockerfile))
+    elif build is not None:
+        parts.append(str(build))
+    return " ".join(parts).lower()
+
+
+def should_generate_tcp_probes(record: import_project.ServiceRecord, service: dict[str, Any]) -> bool:
+    text = service_identity_text(record, service)
+    tokens = set(re.split(r"[^a-z0-9]+", text))
+    if tokens.intersection(BACKGROUND_WORKLOAD_HINTS):
+        return False
+    if any(phrase in text for phrase in BACKGROUND_WORKLOAD_PHRASES):
+        return False
+    return True
+
+
 def image_for_kubernetes_manifest(args: argparse.Namespace, record: import_project.ServiceRecord) -> str | None:
     def manifest_image(image: str) -> str:
         if args.image_mode == "preload" and not args.registry and not image.startswith("localhost/"):
@@ -870,11 +931,46 @@ def nginx_configmap_mount_manifests(
     return manifests, volumes, volume_mounts
 
 
+def kubernetes_service_manifest(
+    *,
+    name: str,
+    namespace: str,
+    labels: dict[str, str],
+    ports: list[int],
+    annotations: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {"name": name, "namespace": namespace, "labels": labels}
+    if annotations:
+        metadata["annotations"] = annotations
+    return {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": metadata,
+        "spec": {
+            "type": "ClusterIP",
+            "selector": labels,
+            "ports": [
+                {
+                    "name": kubernetes_service_port_name(port),
+                    "port": port,
+                    "targetPort": port,
+                    "protocol": "TCP",
+                }
+                for port in ports
+            ],
+        },
+    }
+
+
 def kubernetes_workload_manifests(
     args: argparse.Namespace,
     service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
 ) -> list[dict[str, Any]]:
     manifests: list[dict[str, Any]] = []
+    workload_inputs: list[tuple[import_project.ServiceRecord, dict[str, Any], str, list[int]]] = []
+    generated_names: set[str] = set()
+    alias_counts: dict[str, int] = {}
+
     for record, service in service_pairs:
         if not should_generate_kubernetes_workload(args, record, service):
             continue
@@ -882,7 +978,15 @@ def kubernetes_workload_manifests(
         ports = kubernetes_container_ports(record, service)
         if not image or not ports:
             continue
+        workload_inputs.append((record, service, image, ports))
+        generated_names.add(kubernetes_workload_name(record))
+        alias = compose_service_dns_alias(record)
+        alias_counts[alias] = alias_counts.get(alias, 0) + 1
+
+    for record, service, image, ports in workload_inputs:
         name = kubernetes_workload_name(record)
+        generate_tcp_probes = should_generate_tcp_probes(record, service)
+        probe_mode = "tcp" if generate_tcp_probes else "disabled-background-service"
         labels = {
             "app.kubernetes.io/name": name,
             "app.kubernetes.io/part-of": "urban-platform-import",
@@ -898,9 +1002,10 @@ def kubernetes_workload_manifests(
             "image": image,
             "imagePullPolicy": "IfNotPresent",
             "ports": [{"name": kubernetes_service_port_name(port), "containerPort": port, "protocol": "TCP"} for port in ports],
-            "readinessProbe": {"tcpSocket": {"port": ports[0]}, "initialDelaySeconds": 15, "periodSeconds": 10},
-            "livenessProbe": {"tcpSocket": {"port": ports[0]}, "initialDelaySeconds": 45, "periodSeconds": 20},
         }
+        if generate_tcp_probes:
+            container["readinessProbe"] = {"tcpSocket": {"port": ports[0]}, "initialDelaySeconds": 15, "periodSeconds": 10}
+            container["livenessProbe"] = {"tcpSocket": {"port": ports[0]}, "initialDelaySeconds": 45, "periodSeconds": 20}
         if env:
             container["env"] = env
         if secret_entries(service):
@@ -917,51 +1022,47 @@ def kubernetes_workload_manifests(
         }
         if volumes:
             pod_spec["volumes"] = volumes
-        manifests.extend(
-            config_map_manifests
-            + [
-                {
-                    "apiVersion": "apps/v1",
-                    "kind": "Deployment",
-                    "metadata": {
-                        "name": name,
-                        "namespace": args.namespace,
-                        "labels": labels,
-                        "annotations": {
-                            "urban-platform.io/compose-file": record.file,
-                            "urban-platform.io/compose-service": record.name,
-                            "urban-platform.io/migration-profile": args.profile,
-                        },
-                    },
-                    "spec": {
-                        "replicas": 1,
-                        "selector": {"matchLabels": labels},
-                        "template": {
-                            "metadata": {"labels": labels},
-                            "spec": pod_spec,
-                        },
-                    },
+        annotations = {
+            "urban-platform.io/compose-file": record.file,
+            "urban-platform.io/compose-service": record.name,
+            "urban-platform.io/migration-profile": args.profile,
+            "urban-platform.io/probe-mode": probe_mode,
+        }
+        deployment = {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": {
+                "name": name,
+                "namespace": args.namespace,
+                "labels": labels,
+                "annotations": annotations,
+            },
+            "spec": {
+                "replicas": 1,
+                "selector": {"matchLabels": labels},
+                "template": {
+                    "metadata": {"labels": labels, "annotations": {"urban-platform.io/probe-mode": probe_mode}},
+                    "spec": pod_spec,
                 },
-                {
-                    "apiVersion": "v1",
-                    "kind": "Service",
-                    "metadata": {"name": name, "namespace": args.namespace, "labels": labels},
-                    "spec": {
-                        "type": "ClusterIP",
-                        "selector": labels,
-                        "ports": [
-                            {
-                                "name": kubernetes_service_port_name(port),
-                                "port": port,
-                                "targetPort": port,
-                                "protocol": "TCP",
-                            }
-                            for port in ports
-                        ],
+            },
+        }
+        primary_service = kubernetes_service_manifest(name=name, namespace=args.namespace, labels=labels, ports=ports)
+        manifests.extend(config_map_manifests + [deployment, primary_service])
+
+        alias = compose_service_dns_alias(record)
+        if alias != name and alias_counts.get(alias) == 1 and alias not in generated_names:
+            manifests.append(
+                kubernetes_service_manifest(
+                    name=alias,
+                    namespace=args.namespace,
+                    labels=labels,
+                    ports=ports,
+                    annotations={
+                        "urban-platform.io/compose-service-alias": record.name,
+                        "urban-platform.io/alias-target": name,
                     },
-                },
-            ]
-        )
+                )
+            )
     return manifests
 
 
@@ -1844,6 +1945,7 @@ def migration_stage_scope(args: argparse.Namespace, stage: str, service_pairs: l
         "registry": args.registry if stage in {"images", "manifests"} else "",
         "ingressHost": args.ingress_host if stage == "manifests" else "",
         "tlsEnabled": bool(args.tls_cert_file or args.tls_key_file) if stage == "manifests" else False,
+        "manifestGeneratorVersion": MANIFEST_GENERATOR_VERSION if stage == "manifests" else "",
         "databaseTargets": str(database_target_path) if stage == "databases" else "",
         "databaseTargetsFingerprint": file_fingerprint(database_target_path) if stage == "databases" else "",
         "skipUnavailableDatabases": args.skip_unavailable_databases if stage == "databases" else "",

@@ -535,6 +535,8 @@ application and nginx-like services:
 - ConfigMaps for supported nginx configuration binds
 - Deployments with one replica
 - ClusterIP Services for exposed container ports
+- Unique Compose service DNS aliases for internal dependencies such as
+  service-name based database, cache, or gateway references
 - Traefik Ingress candidates for converted edge routes
 
 Generated resources are labeled:
@@ -546,6 +548,12 @@ app.kubernetes.io/managed-by: urban-platform-import
 
 Docker socket services are skipped by default. They should be replaced with
 Kubernetes-native monitoring or least-privilege integrations.
+
+The importer only adds synthetic TCP readiness and liveness probes for
+listener-style services. Background workers, consumers, schedulers, and polling
+services are annotated with
+`urban-platform.io/probe-mode: disabled-background-service` and are not
+restarted just because they do not expose a TCP listener.
 
 ## Image Migration Design
 
