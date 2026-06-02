@@ -230,11 +230,12 @@ cutover plans are ready. `import-auto` runs a cluster preflight before migration
 actions and writes `reports/import-migration/import-preflight.md` plus
 `reports/import-migration/import-capacity.md`, `import-batches.md`, and
 `import-batches.yaml`. Lab imports default to `MIGRATION_IMPORT_BATCH=auto`, so
-oversized Compose projects start with a bounded first batch instead of applying
-every generated workload at once. `MIGRATION_RESUME=true` records completed
-mutation stages in a private state file so retry runs skip successful batch
-stages. Run `make import-recovery-plan IMPORT_REDACT=true` before forcing a
-rerun; it writes a public-safe recovery and cleanup plan. Execution still
+oversized Compose projects run the first pending bounded batch instead of
+applying every generated workload at once. `MIGRATION_RESUME=true` records
+completed mutation stages in a private state file so retry runs skip successful
+batch stages and advance to the next pending batch. Run
+`make import-recovery-plan IMPORT_REDACT=true` before forcing a rerun; it writes
+a public-safe recovery and cleanup plan. Execution still
 requires explicit operator opt-in. See [`docs/project-import.md`](docs/project-import.md)
 and [`docs/import-recovery.md`](docs/import-recovery.md).
 Before a production traffic switch, run

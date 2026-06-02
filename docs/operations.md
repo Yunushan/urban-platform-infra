@@ -198,12 +198,12 @@ imported workload CPU/memory requests against cluster allocatable capacity and
 limits lab imports to a small workload count by default. The same flow writes
 `reports/import-migration/import-batches.md` and
 `reports/import-migration/import-batches.yaml`; lab mode defaults to
-`MIGRATION_IMPORT_BATCH=auto`, so an oversized import runs the first bounded
-application batch instead of every generated workload. Resume is enabled by
-default. Successful service-secret, image, database, and manifest stages are
+`MIGRATION_IMPORT_BATCH=auto`, so an oversized import runs the first pending
+bounded application batch instead of every generated workload. Resume is enabled
+by default. Successful service-secret, image, database, and manifest stages are
 recorded in the private `MIGRATION_STATE_FILE` and summarized publicly in
-`reports/import-migration/import-resume.md`; reruns skip completed scopes unless
-`MIGRATION_FORCE_RERUN=true` is set.
+`reports/import-migration/import-resume.md`; reruns skip completed scopes and
+advance to the next pending batch unless `MIGRATION_FORCE_RERUN=true` is set.
 After a failed or interrupted import, run `make import-recovery-plan
 IMPORT_REDACT=true` before forcing a rerun. It writes
 `reports/import-migration/import-recovery-plan.md` with resume status, operator

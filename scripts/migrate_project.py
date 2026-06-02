@@ -1864,6 +1864,54 @@ def filter_service_pairs_for_import_batch(
     ]
 
 
+def auto_batch_stage_names(stage: str) -> list[str]:
+    if stage in {"secrets", "images", "manifests"}:
+        return [stage]
+    if stage == "all":
+        return ["secrets", "images", "manifests"]
+    return []
+
+
+def resolve_auto_import_batch(args: argparse.Namespace, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]]) -> None:
+    if str(args.import_batch or "").strip().lower() != "auto":
+        return
+    pending_stage_names = auto_batch_stage_names(args.stage)
+    if not pending_stage_names:
+        return
+
+    original_batch = args.import_batch
+    try:
+        plan = import_batch_plan(args, service_pairs)
+        total_batches = plan["totalBatches"]
+        if total_batches <= 1:
+            return
+
+        state = read_migration_state(args)
+        completed = state.get("completed", {})
+        if not isinstance(completed, dict):
+            completed = {}
+
+        for batch in range(1, total_batches + 1):
+            args.import_batch = str(batch)
+            pending = [
+                stage_name
+                for stage_name in pending_stage_names
+                if migration_stage_scope(args, stage_name, service_pairs)["key"] not in completed
+            ]
+            if pending:
+                print(
+                    f"MIGRATION_IMPORT_BATCH=auto selected batch {batch}/{total_batches}; "
+                    f"pending stage(s): {', '.join(pending)}."
+                )
+                return
+
+        args.import_batch = str(total_batches)
+        print(f"MIGRATION_IMPORT_BATCH=auto found all workload batches complete; keeping batch {total_batches}/{total_batches}.")
+    except Exception:
+        args.import_batch = original_batch
+        raise
+
+
 def migration_state_path(args: argparse.Namespace) -> Path:
     state_file = args.state_file or str(Path(args.private_dir).expanduser() / "migration-state.yaml")
     return Path(state_file).expanduser()
@@ -2105,13 +2153,13 @@ def write_import_batch_plan(
             "",
             "## Run Control",
             "",
-            "- `MIGRATION_IMPORT_BATCH=auto` selects the first batch only when multiple batches exist.",
+            "- `MIGRATION_IMPORT_BATCH=auto` selects the first batch with pending secret, image, or manifest work.",
             "- `MIGRATION_IMPORT_BATCH=all` disables batching and imports every generated workload.",
             "- Set `MIGRATION_IMPORT_BATCH=<number>` to run one explicit batch.",
         ]
     )
     if next_batch is not None:
-        md_lines.append(f"- Next batch: run again with `MIGRATION_IMPORT_BATCH={next_batch}`.")
+        md_lines.append(f"- Next batch: rerun `make import-auto` with `MIGRATION_IMPORT_BATCH=auto`, or set `MIGRATION_IMPORT_BATCH={next_batch}` explicitly.")
     yaml_doc = {
         "profile": args.profile,
         "batchSize": plan["batchSize"],
@@ -2584,8 +2632,8 @@ def generate_bundle(
         "- Database restore uses the private `MIGRATION_DB_TARGETS` file. The generated map targets CloudNativePG app secrets when platform database instances exist.",
         "- Registry login is used only with image mode `registry`. Image mode `preload` avoids registry login by writing image archives and optionally copying them to RKE2 nodes.",
         "- The default `lab` migration profile writes `lab-profile-values.yaml`, forces imported workloads to one replica, and adds small resource requests/limits to imported workloads.",
-        "- Lab imports can run in batches. `MIGRATION_IMPORT_BATCH=auto` selects the first batch when the generated workload set is larger than the configured batch size.",
-        "- Resume is enabled by default. Completed secret, image, database, and manifest stages are recorded in the private `MIGRATION_STATE_FILE` and summarized in `import-resume.md`.",
+        "- Lab imports can run in batches. `MIGRATION_IMPORT_BATCH=auto` selects the first batch with pending secret, image, or manifest work.",
+        "- Resume is enabled by default. Completed secret, image, database, and manifest stages are recorded in the private `MIGRATION_STATE_FILE` and summarized in `import-resume.md`; reruns advance to the next pending import batch.",
         "- Recovery planning is plan-only by default. Run `make import-recovery-plan IMPORT_REDACT=true` to write `import-recovery-plan.md`, then review resume status, cleanup boundaries, and rollback boundaries before forcing a rerun.",
         "- Use `MIGRATION_PROFILE=production` only after cluster capacity, storage, backups, and strict database migration behavior are ready.",
         "- Generated output must stay in `reports/` or another ignored/private directory.",
@@ -3491,6 +3539,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     project_path, compose_files, service_pairs, findings, values = load_context(args)
+    resolve_auto_import_batch(args, service_pairs)
     if args.auto_prepare and args.stage != "prepare":
         stage_prepare(args, project_path, compose_files, service_pairs, findings, values)
     if args.stage == "prepare":

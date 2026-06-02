@@ -105,10 +105,11 @@ them with cluster allocatable CPU/memory, and stops a lab import when the
 workload count is above `MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS` (`40` by
 default). The same run writes `reports/import-migration/import-batches.md` and
 `reports/import-migration/import-batches.yaml`; in lab mode
-`MIGRATION_IMPORT_BATCH=auto` selects batch `1` when the generated workload set
-is larger than `MIGRATION_BATCH_SIZE`. In lab mode, ingress DNS/TLS endpoint
-reachability is reported as a warning by default because the route may not exist
-yet. In production mode, `MIGRATION_IMPORT_BATCH=all` and
+`MIGRATION_IMPORT_BATCH=auto` selects the first batch with pending secret,
+image, or manifest work when the generated workload set is larger than
+`MIGRATION_BATCH_SIZE`. In lab mode, ingress DNS/TLS endpoint reachability is
+reported as a warning by default because the route may not exist yet. In
+production mode, `MIGRATION_IMPORT_BATCH=all` and
 `MIGRATION_PREFLIGHT_REQUIRE_INGRESS_ENDPOINT=true` are the defaults.
 The bundle also writes `reports/import-migration/import-resume.md`, a public-safe
 view of which stateful stages are pending or completed for the selected batch.
@@ -151,14 +152,15 @@ global because databases are shared dependencies controlled by
 `registry` and unavailable database sources fail the run unless explicitly
 overridden.
 
-To run later lab batches after the first automatic batch:
+To run later lab batches after the first automatic batch, rerun the same
+`import-auto` command. Resume state skips completed batch stages and
+`MIGRATION_IMPORT_BATCH=auto` advances to the next pending batch:
 
 ```bash
 make import-auto PROJECT_PATH=/path/to/compose-project \
   IMPORT_REDACT=true \
   MIGRATION_ALLOW_SECRET_MATERIAL=true \
   MIGRATION_IMAGE_MODE=preload \
-  MIGRATION_IMPORT_BATCH=2 \
   MIGRATION_RKE2_NODES=node-01,node-02,node-03
 ```
 
