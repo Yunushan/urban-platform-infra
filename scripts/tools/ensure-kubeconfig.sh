@@ -987,6 +987,9 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
     printf '    ansible_user: %s\n' "$(yaml_quote "${ansible_user_for_nodes}")"
     printf '    ansible_python_interpreter: /usr/bin/python3\n'
     printf '    ansible_remote_tmp: %s\n' "$(yaml_quote "/tmp/.ansible-${ansible_user_for_nodes}/tmp")"
+    if [ -n "${MIGRATION_SSH_KEY:-}" ]; then
+      printf '    ansible_ssh_private_key_file: %s\n' "$(yaml_quote "${MIGRATION_SSH_KEY}")"
+    fi
     if [ -n "${become_password}" ]; then
       printf '    ansible_become_password: %s\n' "$(yaml_quote "${become_password}")"
     fi
