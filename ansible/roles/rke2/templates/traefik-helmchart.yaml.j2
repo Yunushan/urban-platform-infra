@@ -1,5 +1,6 @@
 apiVersion: helm.cattle.io/v1
 kind: HelmChart
+{% set traefik_exposure = rke2_traefik_exposure | default('hostPort') %}
 metadata:
   name: traefik
   namespace: kube-system
@@ -22,10 +23,14 @@ spec:
         ingressClass: traefik
     service:
       enabled: true
-      type: ClusterIP
+      type: "{{ (traefik_exposure == 'nodePort') | ternary('NodePort', 'ClusterIP') }}"
     ports:
       web:
+{% if traefik_exposure == 'nodePort' %}
+        nodePort: {{ rke2_traefik_web_node_port | default(30080) }}
+{% else %}
         hostPort: 80
+{% endif %}
         expose:
           default: true
         exposedPort: 80
@@ -35,7 +40,11 @@ spec:
             scheme: https
             permanent: true
       websecure:
+{% if traefik_exposure == 'nodePort' %}
+        nodePort: {{ rke2_traefik_websecure_node_port | default(30443) }}
+{% else %}
         hostPort: 443
+{% endif %}
         expose:
           default: true
         exposedPort: 443

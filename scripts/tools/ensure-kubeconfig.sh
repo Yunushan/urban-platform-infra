@@ -920,7 +920,10 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
 
     if [ "${existing_kubeconfig_ready}" = "true" ]; then
       rm -f "${original_kubeconfig}"
-      if rke2_version_drift_detected "${rke2_nodes[@]}"; then
+      if [ "${OPERATOR_KUBECONFIG_FORCE_REPAIR:-false}" = "true" ]; then
+        echo "Existing operator kubeconfig is ready, but OPERATOR_KUBECONFIG_FORCE_REPAIR=true was requested."
+        repair_required_due_to_version_drift=true
+      elif rke2_version_drift_detected "${rke2_nodes[@]}"; then
         if ! auto_repair_cluster_enabled; then
           echo "Existing operator kubeconfig is ready, but installed RKE2 does not match MIGRATION_RKE2_VERSION." >&2
           echo "Enable MIGRATION_AUTO_REPAIR_CLUSTER=true or run the cluster upgrade/rebuild workflow before importing workloads." >&2
@@ -1052,6 +1055,16 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
     printf '    rke2_version: %s\n' "$(yaml_quote "${rke2_version}")"
     printf '    kubernetes_api_vip_port: %s\n' "${kubernetes_api_port}"
     if [ "${use_load_balancers}" = "true" ]; then
+      printf '    rke2_traefik_exposure: nodePort\n'
+      printf '    rke2_traefik_web_node_port: 30080\n'
+      printf '    rke2_traefik_websecure_node_port: 30443\n'
+      printf '    edge_extra_tcp_services:\n'
+      printf '      - name: traefik_http\n'
+      printf '        external_port: 80\n'
+      printf '        backend_port: 30080\n'
+      printf '      - name: traefik_https\n'
+      printf '        external_port: 443\n'
+      printf '        backend_port: 30443\n'
       printf '    keepalived_auth_pass: %s\n' "$(yaml_quote "${keepalived_auth_pass}")"
       printf '    keepalived_interface: %s\n' "$(yaml_quote "${keepalived_interface}")"
     fi

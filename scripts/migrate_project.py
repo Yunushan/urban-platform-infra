@@ -3094,8 +3094,6 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
     if args.image_mode == "preload":
         archive_dir.mkdir(parents=True, exist_ok=True)
         print("Preload mode stages each image on the operator, then streams it to the RKE2 nodes.")
-        if args.cleanup_operator_images:
-            cleanup_operator_archives(archive_dir)
     skipped: list[str] = []
     failed: list[str] = []
     generated_images: list[str] = []
@@ -3113,6 +3111,7 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
         target_image = local_import_image(args, record)
         image_refs = containerd_import_image_refs(target_image)
         compose_path = relative_compose_file(project_path, record.file)
+        archive_path = archive_dir / image_archive_name(record) if args.image_mode == "preload" else None
         retry_build: tuple[Path, str] | None = None
         try:
             if preload_streaming and all_preload_nodes_have_image(args, image_refs):
@@ -3136,6 +3135,25 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
             elif record.image:
                 source_ready, source_cleanup_images = ensure_source_image(args, record)
                 if not source_ready:
+                    if archive_path is not None and archive_path.exists():
+                        print(
+                            f"Source image {record.image.display} is unavailable; "
+                            f"reusing existing preload archive {archive_path}."
+                        )
+                        if preload_streaming:
+                            copied = preload_archives_to_nodes(
+                                args,
+                                [archive_path],
+                                stale_archive_names if not preload_initialized else set(),
+                                image_refs,
+                            )
+                            archives_copied = archives_copied or copied
+                            preload_initialized = True
+                            if copied and args.cleanup_operator_images and archive_path.exists():
+                                archive_path.unlink()
+                        else:
+                            generated_archives.append(archive_path)
+                        continue
                     skipped.append(f"{record.file}::{record.name} ({record.image.display})")
                     continue
                 pulled_source_images.extend(source_cleanup_images)
@@ -3144,7 +3162,7 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
             if args.image_mode == "registry":
                 run_command(container_command(args, "push", target_image))
             elif args.image_mode == "preload":
-                archive_path = archive_dir / image_archive_name(record)
+                assert archive_path is not None
                 if preload_streaming and all_preload_nodes_have_image(args, image_refs):
                     print(f"Image {image_refs[0]} is already present on all RKE2 nodes; skipping local archive save and upload.")
                     if archive_path.exists():
@@ -3181,6 +3199,12 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
         print("Skipped image candidates:")
         for item in skipped:
             print(f"- {item}")
+        raise SystemExit(
+            "Image migration skipped required selected candidate(s). "
+            "Stopping before workload rollout so Kubernetes is not left in ImagePullBackOff. "
+            "Make the source image available on the operator, keep the Compose build context present, "
+            "or rerun intentionally with MIGRATION_IMAGE_MODE=skip for a routing-only transition."
+        )
     if failed:
         print("Failed image candidates:")
         for item in failed:
