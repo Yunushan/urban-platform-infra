@@ -44,7 +44,7 @@ MEMORY_QUANTITY_RE = re.compile(r"^([0-9]+)(Ki|Mi|Gi|Ti)?$")
 CPU_QUANTITY_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(m)?$")
 PRIVATE_IPV4_RE = re.compile(r"\b(?:10|192\.168|172\.(?:1[6-9]|2[0-9]|3[01]))(?:\.[0-9]{1,3}){2}\b")
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 3
+MANIFEST_GENERATOR_VERSION = 4
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -894,16 +894,14 @@ def merge_container_env(env: list[dict[str, str]], defaults: dict[str, str]) -> 
 
 
 def default_import_environment(record: import_project.ServiceRecord, service: dict[str, Any]) -> dict[str, str]:
-    defaults: dict[str, str] = {}
-    if service_looks_like_dotnet(record, service):
-        defaults.update(
-            {
-                # Imported Compose projects often run many .NET apps per node.
-                # Disabling config reload prevents FileSystemWatcher inotify exhaustion.
-                "DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE": "false",
-                "ASPNETCORE_HOSTBUILDER__RELOADCONFIGONCHANGE": "false",
-            }
-        )
+    # These are harmless for non-.NET workloads, and they stop imported .NET
+    # services from exhausting shared host inotify limits in dense lab clusters.
+    defaults: dict[str, str] = {
+        "DOTNET_USE_POLLING_FILE_WATCHER": "true",
+        "HOSTBUILDER__RELOADCONFIGONCHANGE": "false",
+        "DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE": "false",
+        "ASPNETCORE_HOSTBUILDER__RELOADCONFIGONCHANGE": "false",
+    }
     return defaults
 
 
@@ -1318,6 +1316,27 @@ def all_preload_nodes_have_image(args: argparse.Namespace, image_refs: list[str]
     if not targets:
         return False
     return all(remote_containerd_has_image(args, ssh_options, target, image_refs) for target in targets)
+
+
+def tune_rke2_nodes_for_import(args: argparse.Namespace) -> None:
+    if not args.execute or not args.rke2_nodes:
+        return
+    targets, ssh_options = preload_node_targets(args)
+    if not targets:
+        return
+    script = (
+        "set -e; "
+        "mkdir -p /etc/sysctl.d; "
+        "cat > /etc/sysctl.d/90-urban-platform-import.conf <<'EOF'\n"
+        "fs.inotify.max_user_instances = 8192\n"
+        "fs.inotify.max_user_watches = 1048576\n"
+        "EOF\n"
+        "sysctl -w fs.inotify.max_user_instances=8192 >/dev/null; "
+        "sysctl -w fs.inotify.max_user_watches=1048576 >/dev/null; "
+        "echo \"Applied urban-platform import runtime sysctls.\""
+    )
+    for target in targets:
+        run_remote_sudo_shell(args, ssh_options, target, script)
 
 
 def preload_archives_to_nodes(args: argparse.Namespace, archives: list[Path], stale_archive_names: set[str], image_refs: list[str] | None = None) -> bool:
@@ -1996,6 +2015,9 @@ def resolve_lab_safe_import_batch(args: argparse.Namespace, service_pairs: list[
     selected = str(args.import_batch or "").strip().lower()
     if args.profile != "lab" or selected not in {"", "0", "all"}:
         return
+    if selected == "all" and args.force_rerun:
+        print("MIGRATION_FORCE_RERUN=true with MIGRATION_IMPORT_BATCH=all; treating full lab rerun as intentional.")
+        return
     max_workloads = int(args.preflight_max_imported_workloads or 0)
     if max_workloads <= 0:
         return
@@ -2327,9 +2349,15 @@ def preflight_check_imported_capacity(
             f"Selected imported workload count `{workload_count}` exceeds lab-safe preflight limit "
             f"`{max_workloads}`. Split the import or raise `MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS` intentionally."
         )
-        errors.append(message)
-        preflight_record(lines, "ERROR", message)
-        preflight_record(capacity_lines, "ERROR", message)
+        if args.force_rerun and selected_batch is None:
+            message += " Continuing because MIGRATION_FORCE_RERUN=true and MIGRATION_IMPORT_BATCH=all were set."
+            warnings.append(message)
+            preflight_record(lines, "WARN", message)
+            preflight_record(capacity_lines, "WARN", message)
+        else:
+            errors.append(message)
+            preflight_record(lines, "ERROR", message)
+            preflight_record(capacity_lines, "ERROR", message)
     elif max_workloads > 0:
         message = f"Selected imported workload count `{workload_count}` is within configured limit `{max_workloads}`."
         preflight_record(lines, "OK", message)
@@ -3673,6 +3701,9 @@ def main(argv: list[str]) -> int:
         stage_preflight(args, values, service_pairs)
     if args.stage in {"secrets", "databases", "manifests", "all"}:
         require_kubernetes_api(args)
+    if args.stage in {"images", "manifests", "all"} and args.image_mode == "preload":
+        tune_rke2_nodes_for_import(args)
+    images_stage_ran = False
     if args.stage in {"secrets", "all"}:
         if not migration_stage_completed(args, "secrets", service_pairs):
             stage_secrets(args, service_pairs)
@@ -3681,11 +3712,15 @@ def main(argv: list[str]) -> int:
         if not migration_stage_completed(args, "images", service_pairs):
             stage_images(args, project_path, service_pairs)
             mark_migration_stage_completed(args, "images", service_pairs)
+            images_stage_ran = True
     if args.stage in {"databases", "all"}:
         if not migration_stage_completed(args, "databases", service_pairs):
             stage_databases(args, service_pairs)
             mark_migration_stage_completed(args, "databases", service_pairs)
     if args.stage in {"manifests", "all"}:
+        if args.execute and args.image_mode == "preload" and args.rke2_nodes and not images_stage_ran:
+            print("Reconciling selected preload images on RKE2 nodes before applying workload manifests.")
+            stage_images(args, project_path, service_pairs)
         if not migration_stage_completed(args, "manifests", service_pairs):
             stage_manifests(args, service_pairs, values)
             mark_migration_stage_completed(args, "manifests", service_pairs)
