@@ -501,6 +501,38 @@ discover_remote_rke2_version_from_nodes() {
   return 1
 }
 
+rke2_version_drift_detected() {
+  local requested
+  local node
+  local raw_version
+  local installed_version
+  local nodes=("$@")
+
+  requested="$(normalize_rke2_version "${MIGRATION_RKE2_VERSION:-${RKE2_VERSION:-}}")"
+  if [ -z "${requested}" ]; then
+    return 1
+  fi
+  if [ "${#nodes[@]}" -eq 0 ] && [ -n "${MIGRATION_RKE2_NODES:-}" ]; then
+    IFS=',' read -r -a nodes <<< "${MIGRATION_RKE2_NODES}"
+  fi
+  for node in "${nodes[@]}"; do
+    node="${node//[[:space:]]/}"
+    if [ -z "${node}" ]; then
+      continue
+    fi
+    raw_version="$(discover_remote_rke2_version "${node}" 2>/dev/null || true)"
+    installed_version="$(normalize_rke2_version "${raw_version}")"
+    if [ -z "${installed_version}" ]; then
+      continue
+    fi
+    if [ "${installed_version}" != "${requested}" ]; then
+      echo "Requested RKE2 version ${requested}, but ${node} is running ${installed_version}; automatic cluster reconciliation is required." >&2
+      return 0
+    fi
+  done
+  return 1
+}
+
 write_kubeconfig_from_available_node() {
   local endpoint_host="$1"
   local endpoint_port="$2"
@@ -564,7 +596,7 @@ run_cluster_repair() {
     extra_args=(${ANSIBLE_ARGS})
   fi
 
-  echo "Kubernetes API is not ready; reconciling bootstrap and RKE2 from ${INVENTORY_PATH}."
+  echo "Reconciling bootstrap and RKE2 from ${INVENTORY_PATH}."
   ANSIBLE_CONFIG="${ANSIBLE_CONFIG_PATH}" \
     "${ANSIBLE_PLAYBOOK_BIN}" \
     -i "${INVENTORY_PATH}" \
@@ -748,9 +780,20 @@ if [ "${ENGINE}" != "rke2" ]; then
   exit 0
 fi
 
+repair_required_due_to_version_drift=false
+
 if [ "${OPERATOR_KUBECONFIG_FORCE_REPAIR:-false}" != "true" ] && [ -s "${OPERATOR_KUBECONFIG_PATH}" ] && command -v kubectl >/dev/null 2>&1 && kubernetes_api_ready; then
-  echo "Existing operator kubeconfig is ready: ${OPERATOR_KUBECONFIG_PATH}"
-  exit 0
+  if rke2_version_drift_detected; then
+    if ! auto_repair_cluster_enabled; then
+      echo "Existing operator kubeconfig is ready, but installed RKE2 does not match MIGRATION_RKE2_VERSION." >&2
+      echo "Enable MIGRATION_AUTO_REPAIR_CLUSTER=true or run the cluster upgrade/rebuild workflow before importing workloads." >&2
+      exit 1
+    fi
+    repair_required_due_to_version_drift=true
+  else
+    echo "Existing operator kubeconfig is ready: ${OPERATOR_KUBECONFIG_PATH}"
+    exit 0
+  fi
 fi
 
 validate_become_password_input
@@ -877,15 +920,24 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
 
     if [ "${existing_kubeconfig_ready}" = "true" ]; then
       rm -f "${original_kubeconfig}"
-      exit 0
-    fi
-
-    install -m 0600 "${original_kubeconfig}" "${OPERATOR_KUBECONFIG_PATH}"
-    rm -f "${original_kubeconfig}"
-    if ! auto_repair_cluster_enabled; then
-      echo "Existing operator kubeconfig could not reach the Kubernetes API through the VIP, node APIs, or SSH tunnel fallback." >&2
-      echo "Set MIGRATION_SSH_USER/MIGRATION_SSH_KEY if SSH tunneling is required, or fix the VIP/API path and rerun." >&2
-      exit 1
+      if rke2_version_drift_detected "${rke2_nodes[@]}"; then
+        if ! auto_repair_cluster_enabled; then
+          echo "Existing operator kubeconfig is ready, but installed RKE2 does not match MIGRATION_RKE2_VERSION." >&2
+          echo "Enable MIGRATION_AUTO_REPAIR_CLUSTER=true or run the cluster upgrade/rebuild workflow before importing workloads." >&2
+          exit 1
+        fi
+        repair_required_due_to_version_drift=true
+      else
+        exit 0
+      fi
+    else
+      install -m 0600 "${original_kubeconfig}" "${OPERATOR_KUBECONFIG_PATH}"
+      rm -f "${original_kubeconfig}"
+      if ! auto_repair_cluster_enabled; then
+        echo "Existing operator kubeconfig could not reach the Kubernetes API through the VIP, node APIs, or SSH tunnel fallback." >&2
+        echo "Set MIGRATION_SSH_USER/MIGRATION_SSH_KEY if SSH tunneling is required, or fix the VIP/API path and rerun." >&2
+        exit 1
+      fi
     fi
   fi
 
@@ -1050,6 +1102,12 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
   fi
   echo "Operator kubeconfig endpoint candidates will use port ${kubernetes_api_port}"
   prepare_remote_ansible_tmp_dirs "${rke2_nodes[@]}"
+  if [ "${repair_required_due_to_version_drift}" = "true" ]; then
+    run_cluster_repair
+    export MIGRATION_AUTO_REPAIR_CLUSTER=false
+    echo "Retrying operator kubeconfig after automatic RKE2 version reconciliation."
+    exec bash "$0"
+  fi
   if [ -n "${explicit_cluster_vip}" ] || [ -n "${discovered_cluster_vip}" ]; then
     endpoint_candidates=("${cluster_vip}")
   else

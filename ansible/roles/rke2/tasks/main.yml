@@ -157,18 +157,46 @@
     )
   when: inventory_hostname in groups['rke2_servers']
 
+- name: Check installed RKE2 version
+  ansible.builtin.command: /usr/local/bin/rke2 --version
+  register: rke2_installed_version_check
+  changed_when: false
+  failed_when: false
+  when: not ansible_check_mode
+
+- name: Set RKE2 install requirement facts
+  ansible.builtin.set_fact:
+    rke2_installed_version: >-
+      {{
+        rke2_installed_version_check.stdout | default('')
+        | regex_search('v[0-9]+[.][0-9]+[.][0-9]+[+]rke2r[0-9]+')
+        | default('', true)
+      }}
+    rke2_install_required: >-
+      {{
+        (rke2_installed_version_check.rc | default(1)) != 0
+        or
+        (
+          rke2_installed_version_check.stdout | default('')
+          | regex_search('v[0-9]+[.][0-9]+[.][0-9]+[+]rke2r[0-9]+')
+          | default('', true)
+        ) != rke2_version
+      }}
+  when: not ansible_check_mode
+
 - name: Install RKE2 server
   ansible.builtin.shell: |
     set -euo pipefail
     curl -sfL https://get.rke2.io | sh -
   args:
     executable: /bin/bash
-    creates: /usr/local/bin/rke2
   environment:
     INSTALL_RKE2_TYPE: server
     INSTALL_RKE2_VERSION: "{{ rke2_version }}"
+  register: rke2_server_install_result
   when:
     - inventory_hostname in groups['rke2_servers']
+    - rke2_install_required | default(true) | bool
     - not ansible_check_mode
 
 - name: Install RKE2 agent
@@ -177,12 +205,13 @@
     curl -sfL https://get.rke2.io | sh -
   args:
     executable: /bin/bash
-    creates: /usr/local/bin/rke2
   environment:
     INSTALL_RKE2_TYPE: agent
     INSTALL_RKE2_VERSION: "{{ rke2_version }}"
+  register: rke2_agent_install_result
   when:
     - inventory_hostname in groups.get('rke2_agents', [])
+    - rke2_install_required | default(true) | bool
     - not ansible_check_mode
 
 - name: Check firewalld state
@@ -244,6 +273,8 @@
   ansible.builtin.set_fact:
     rke2_config_changed: >-
       {{
+        rke2_server_install_result.changed | default(false) or
+        rke2_agent_install_result.changed | default(false) or
         (
           inventory_hostname in groups['rke2_servers'] and
           (

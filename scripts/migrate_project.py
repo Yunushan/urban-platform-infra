@@ -445,6 +445,14 @@ def local_postgres_client_tools_available() -> bool:
     return shutil.which("pg_dump") is not None and shutil.which("pg_restore") is not None
 
 
+def tcp_endpoint_available(host: str, port: str, timeout: float = 2.0) -> bool:
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except (OSError, ValueError):
+        return False
+
+
 def postgres_client_container_command(
     args: argparse.Namespace,
     dump_dir: Path,
@@ -1984,6 +1992,27 @@ def resolve_auto_import_batch(args: argparse.Namespace, service_pairs: list[tupl
         raise
 
 
+def resolve_lab_safe_import_batch(args: argparse.Namespace, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]]) -> None:
+    selected = str(args.import_batch or "").strip().lower()
+    if args.profile != "lab" or selected not in {"", "0", "all"}:
+        return
+    max_workloads = int(args.preflight_max_imported_workloads or 0)
+    if max_workloads <= 0:
+        return
+    plan = import_batch_plan(args, service_pairs)
+    if plan["totalWorkloads"] <= max_workloads:
+        return
+
+    args.import_batch = "auto"
+    resolve_auto_import_batch(args, service_pairs)
+    print(
+        "MIGRATION_IMPORT_BATCH=all exceeds the lab-safe workload limit; "
+        f"automatically selected batch `{args.import_batch}`. "
+        "Use MIGRATION_PROFILE=production or raise MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS "
+        "for an intentional full import."
+    )
+
+
 def migration_state_path(args: argparse.Namespace) -> Path:
     state_file = args.state_file or str(Path(args.private_dir).expanduser() / "migration-state.yaml")
     return Path(state_file).expanduser()
@@ -3159,12 +3188,7 @@ def stage_databases(args: argparse.Namespace, service_pairs: list[tuple[import_p
         raise SystemExit("Refusing database dump/restore without --allow-secret-material.")
     dump_dir.mkdir(parents=True, exist_ok=True)
     skipped_sources: list[str] = []
-    use_local_pg_tools = local_postgres_client_tools_available()
-    if use_local_pg_tools:
-        print("Using local pg_dump/pg_restore for PostgreSQL-family migration.")
-    else:
-        print(f"Local pg_dump/pg_restore not found; using containerized PostgreSQL client image {args.postgres_client_image}.")
-        ensure_container_image(args, args.postgres_client_image, "PostgreSQL client")
+    reachable_candidates: list[tuple[import_project.ServiceRecord, dict[str, Any], str, dict[str, str], str, Path]] = []
     for record, service in candidates:
         port = published_port(record)
         env = postgres_env(service)
@@ -3173,6 +3197,27 @@ def stage_databases(args: argparse.Namespace, service_pairs: list[tuple[import_p
             continue
         alias = k8s_name(record.name)
         dump_file = dump_dir / f"{alias}.dump"
+        if args.skip_unavailable_databases and not tcp_endpoint_available("127.0.0.1", port):
+            message = f"{record.file}::{record.name} source database at 127.0.0.1:{port} is not reachable from the operator."
+            print(f"Skipping database source: {message}")
+            skipped_sources.append(message)
+            if dump_file.exists():
+                dump_file.unlink()
+            continue
+        reachable_candidates.append((record, service, port, env, alias, dump_file))
+    if not reachable_candidates:
+        if skipped_sources:
+            print("Skipped unavailable PostgreSQL-family source database(s):")
+            for item in skipped_sources:
+                print(f"- {item}")
+        return
+    use_local_pg_tools = local_postgres_client_tools_available()
+    if use_local_pg_tools:
+        print("Using local pg_dump/pg_restore for PostgreSQL-family migration.")
+    else:
+        print(f"Local pg_dump/pg_restore not found; using containerized PostgreSQL client image {args.postgres_client_image}.")
+        ensure_container_image(args, args.postgres_client_image, "PostgreSQL client")
+    for record, service, port, env, alias, dump_file in reachable_candidates:
         run_env = os.environ.copy()
         run_env["PGPASSWORD"] = env["password"]
         dump_args = [
@@ -3612,6 +3657,7 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
     project_path, compose_files, service_pairs, findings, values = load_context(args)
     resolve_auto_import_batch(args, service_pairs)
+    resolve_lab_safe_import_batch(args, service_pairs)
     if args.auto_prepare and args.stage != "prepare":
         stage_prepare(args, project_path, compose_files, service_pairs, findings, values)
     if args.stage == "prepare":
