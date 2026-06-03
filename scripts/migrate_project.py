@@ -3315,11 +3315,21 @@ def stage_databases(args: argparse.Namespace, service_pairs: list[tuple[import_p
 
 
 def ingress_host(args: argparse.Namespace, values: dict[str, Any]) -> str:
-    return str(
-        args.ingress_host
-        or values.get("ingress", {}).get("host", "")
-        or values.get("global", {}).get("cluster", {}).get("domain", "")
-    )
+    return resolve_ingress_host(args, values)
+
+
+def host_is_ip_address(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
+def ingress_rule_host(host: str) -> str:
+    if not host or host_is_ip_address(host):
+        return ""
+    return host
 
 
 def ingress_tls_secret_name(values: dict[str, Any]) -> str:
@@ -3487,6 +3497,9 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
     workload_manifests = kubernetes_workload_manifests(args, scoped_service_pairs)
     ingress_manifests: list[dict[str, Any]] = []
     host = ingress_host(args, values)
+    rule_host = ingress_rule_host(host)
+    if host and not rule_host:
+        print(f"Ingress host `{host}` is an IP address; generating hostless Traefik Ingress rules.")
     tls_enabled = bool(values.get("ingress", {}).get("tls", {}).get("enabled", True))
     tls_secret_name = ingress_tls_secret_name(values)
     for record, service in scoped_service_pairs:
@@ -3505,8 +3518,8 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
                     ]
                 }
             }
-            if host:
-                rule["host"] = host
+            if rule_host:
+                rule["host"] = rule_host
             spec: dict[str, Any] = {
                 "ingressClassName": "traefik",
                 "rules": [rule],
@@ -3516,8 +3529,8 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
                 annotations["traefik.ingress.kubernetes.io/router.middlewares"] = traefik_source_allowlist_middleware_ref(args)
             if tls_enabled:
                 tls_entry: dict[str, Any] = {"secretName": tls_secret_name}
-                if host:
-                    tls_entry["hosts"] = [host]
+                if rule_host:
+                    tls_entry["hosts"] = [rule_host]
                 spec["tls"] = [tls_entry]
                 annotations["traefik.ingress.kubernetes.io/router.tls"] = "true"
             ingress_manifests.append(
