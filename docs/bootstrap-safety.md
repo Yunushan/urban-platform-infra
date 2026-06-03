@@ -25,7 +25,7 @@ make install-cluster ENV=prod ENGINE=rke2 CONFIRM_PROD=true
 Production inventory must replace every placeholder:
 
 - `rke2_token` or `k3s_token` must come from Ansible Vault, SOPS, or another secret workflow.
-- `rke2_version` must be pinned, for example `vX.Y.Z+rke2rN`.
+- `rke2_version` must be pinned, for example `v1.36.1+rke2r2`.
 - `cluster_vip` and `cluster_domain` must point to your real control-plane endpoint.
 - `keepalived_auth_pass` must be set through a secret workflow.
 - Every host must define `ansible_host`; `node_ip` should be explicit when it differs.

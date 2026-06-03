@@ -1851,7 +1851,7 @@ for project_import_token in [
     'find_compose_files',
     'docker-compose',
     '--project-path',
-    'nginxinc/nginx-unprivileged:1.31.0',
+    'nginxinc/nginx-unprivileged:1.31.1',
     'CloudNativePG',
     'config/image-policy.yaml',
     'literal secret value',
@@ -3872,7 +3872,7 @@ runtime_image_surface_text = '\n'.join(
     ]
 )
 for current_runtime_image in [
-    'nginxinc/nginx-unprivileged:1.31.0',
+    'nginxinc/nginx-unprivileged:1.31.1',
     'traefik:v3.7.1',
     'confluentinc/cp-kafka:7.9.6',
     'confluentinc/cp-zookeeper:7.9.6',

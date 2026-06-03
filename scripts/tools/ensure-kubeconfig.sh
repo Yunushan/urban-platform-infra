@@ -905,8 +905,8 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
   rke2_version="$(normalize_rke2_version "${rke2_version}")"
   if [ -z "${rke2_version}" ]; then
     echo "Could not discover a pinned RKE2 version from any MIGRATION_RKE2_NODES host." >&2
-    echo "No node returned a version like v1.33.5+rke2r1, and this automation will not choose an unpinned latest version." >&2
-    echo "Set MIGRATION_RKE2_VERSION=vX.Y.Z+rke2rN once for a fresh cluster install." >&2
+    echo "No node returned a version like v1.36.1+rke2r2, and this automation will not choose an unpinned latest version." >&2
+    echo "Set MIGRATION_RKE2_VERSION=v1.36.1+rke2r2 once for a fresh cluster install." >&2
     exit 1
   fi
 

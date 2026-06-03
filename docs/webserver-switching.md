@@ -1,6 +1,6 @@
 # Webserver Switching
 
-Default webserver is `nginxinc/nginx-unprivileged:1.31.0`. Default ingress controller is RKE2-bundled Traefik.
+Default webserver is `nginxinc/nginx-unprivileged:1.31.1`. Default ingress controller is RKE2-bundled Traefik.
 
 ```bash
 python3 scripts/configure.py --ingress-controller traefik --webserver nginx

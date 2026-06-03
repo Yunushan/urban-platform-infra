@@ -427,7 +427,7 @@ services:
     ports:
     - 5018:5018
   nginx:
-    image: nginxinc/nginx-unprivileged:1.31.0
+    image: nginxinc/nginx-unprivileged:1.31.1
     restart: unless-stopped
     ports:
     - 80:8080

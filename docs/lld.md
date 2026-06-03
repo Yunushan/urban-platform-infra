@@ -122,7 +122,7 @@ Common Make variables:
 | `MIGRATION_SSH_USER` | SSH user for node operations | `ansible` |
 | `MIGRATION_IMAGE_MODE` | Image movement mode | `registry`, `preload`, or `skip` |
 | `MIGRATION_CLUSTER_VIP` | Kubernetes API/edge VIP override | `cluster-vip` |
-| `MIGRATION_RKE2_VERSION` | Fresh-install RKE2 version override | `vX.Y.Z+rke2rN` |
+| `MIGRATION_RKE2_VERSION` | Fresh-install RKE2 version override | `v1.36.1+rke2r2` |
 | `MIGRATION_ALLOW_SECRET_MATERIAL` | Allow literal secret import on trusted operator | `true` or `false` |
 
 Optional capability deploy flags are disabled by default. Examples include

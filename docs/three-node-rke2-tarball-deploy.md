@@ -137,7 +137,7 @@ all:
     kubernetes_api_vip_port: 7443
     rke2_registration_vip_port: 9346
     rke2_token: "<vaulted-rke2-token>"
-    rke2_version: "v<major>.<minor>.<patch>+rke2r<revision>"
+    rke2_version: "v1.36.1+rke2r2"
     rke2_ingress_controller: traefik
     rke2_traefik_source: bundled
     # Optional: use a specific upstream Traefik chart instead of the RKE2-bundled chart.

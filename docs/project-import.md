@@ -250,6 +250,8 @@ the Kubernetes API is listening but not ready, the same temporary inventory is
 used to reconcile the bootstrap and RKE2 playbooks once, then kubeconfig repair
 is retried. Three-node HA repair requires at least two SSH-reachable servers by
 default. Set `MIGRATION_AUTO_REPAIR_CLUSTER=false` to disable that repair pass.
+For current RKE2 lab imports, pin fresh installs with
+`MIGRATION_RKE2_VERSION=v1.36.1+rke2r2`.
 
 Before executing image migration, run `make image-cache-plan` with the same
 `MIGRATION_IMAGE_MODE`, `MIGRATION_RKE2_NODES`, and registry settings you plan
@@ -407,7 +409,7 @@ It compares the project against the selected platform profile:
 - `INGRESS=traefik` warns when a Compose service publishes host ports `80` or
   `443`, or when the project includes a second Traefik edge controller.
 - `WEB=nginx` expects the platform gateway image
-  `nginxinc/nginx-unprivileged:1.31.0` and flags rootful or version-drifted
+  `nginxinc/nginx-unprivileged:1.31.1` and flags rootful or version-drifted
   nginx images.
 - `DB=postgresql` expects the PostgreSQL/CloudNativePG migration path. It flags
   PostgreSQL majors older or newer than the platform default `18`, and fails
