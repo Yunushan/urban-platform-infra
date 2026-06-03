@@ -44,7 +44,7 @@ MEMORY_QUANTITY_RE = re.compile(r"^([0-9]+)(Ki|Mi|Gi|Ti)?$")
 CPU_QUANTITY_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(m)?$")
 PRIVATE_IPV4_RE = re.compile(r"\b(?:10|192\.168|172\.(?:1[6-9]|2[0-9]|3[01]))(?:\.[0-9]{1,3}){2}\b")
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 2
+MANIFEST_GENERATOR_VERSION = 3
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -855,19 +855,86 @@ def configmap_file_entry(path: Path) -> tuple[str, str] | None:
         return ("binary", base64.b64encode(content).decode("ascii"))
 
 
-def nginx_configmap_mount_manifests(
+def service_looks_like_dotnet(record: import_project.ServiceRecord, service: dict[str, Any]) -> bool:
+    image = (record.image.display if record.image else "").lower()
+    if any(token in image for token in ["dotnet", "aspnet", "mcr.microsoft.com"]):
+        return True
+    env_keys = {
+        key.upper()
+        for key, value in import_project.environment_entries(service.get("environment"))
+        if value is not None
+    }
+    return bool(
+        env_keys
+        & {
+            "ASPNETCORE_HTTP_PORTS",
+            "ASPNETCORE_URLS",
+            "ASPNET_VERSION",
+            "DOTNET_RUNNING_IN_CONTAINER",
+            "DOTNET_VERSION",
+        }
+    )
+
+
+def merge_container_env(env: list[dict[str, str]], defaults: dict[str, str]) -> list[dict[str, str]]:
+    existing = {entry["name"] for entry in env if "name" in entry}
+    merged = list(env)
+    for key, value in defaults.items():
+        if key not in existing:
+            merged.append({"name": key, "value": value})
+    return merged
+
+
+def default_import_environment(record: import_project.ServiceRecord, service: dict[str, Any]) -> dict[str, str]:
+    defaults: dict[str, str] = {}
+    if service_looks_like_dotnet(record, service):
+        defaults.update(
+            {
+                # Imported Compose projects often run many .NET apps per node.
+                # Disabling config reload prevents FileSystemWatcher inotify exhaustion.
+                "DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE": "false",
+                "ASPNETCORE_HOSTBUILDER__RELOADCONFIGONCHANGE": "false",
+            }
+        )
+    return defaults
+
+
+def apisix_config_text(record: import_project.ServiceRecord, target: str) -> bool:
+    identity = " ".join(
+        [
+            record.name.lower(),
+            record.kind.lower(),
+            record.image.display.lower() if record.image else "",
+            target.lower(),
+        ]
+    )
+    return "apisix" in identity and "/conf/" in target
+
+
+def normalize_imported_config_text(record: import_project.ServiceRecord, target: str, value: str) -> str:
+    if apisix_config_text(record, target):
+        value = re.sub(r"(?<![A-Za-z0-9.-])127[.]0[.]0[.]1:2379\b", "etcd:2379", value)
+        value = re.sub(r"(?<![A-Za-z0-9.-])localhost:2379\b", "etcd:2379", value)
+    return value
+
+
+def should_mount_bind_as_configmap(record: import_project.ServiceRecord, target: str) -> bool:
+    if record.kind == "nginx":
+        return target == "/etc/nginx/nginx.conf" or target.startswith("/etc/nginx/") or target.startswith("/usr/share/nginx/html")
+    return apisix_config_text(record, target)
+
+
+def configmap_mount_manifests(
     args: argparse.Namespace,
     record: import_project.ServiceRecord,
     service: dict[str, Any],
     labels: dict[str, str],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    if record.kind != "nginx":
-        return [], [], []
     manifests: list[dict[str, Any]] = []
     volumes: list[dict[str, Any]] = []
     volume_mounts: list[dict[str, Any]] = []
     for index, (source, target) in enumerate(compose_bind_mounts(service), start=1):
-        if not (target == "/etc/nginx/nginx.conf" or target.startswith("/etc/nginx/") or target.startswith("/usr/share/nginx/html")):
+        if not should_mount_bind_as_configmap(record, target):
             continue
         if SECRET_ENV_RE.search(source) or SECRET_ENV_RE.search(target):
             continue
@@ -887,6 +954,8 @@ def nginx_configmap_mount_manifests(
                 continue
             key = configmap_key(Path(source_path.name), used_keys)
             kind, value = entry
+            if kind == "text":
+                value = normalize_imported_config_text(record, target, value)
             total_size += len(value.encode("utf-8"))
             if kind == "text":
                 data[key] = value
@@ -904,6 +973,8 @@ def nginx_configmap_mount_manifests(
                     continue
                 key = configmap_key(relative_path, used_keys)
                 kind, value = entry
+                if kind == "text":
+                    value = normalize_imported_config_text(record, f"{target}/{relative_path.as_posix()}", value)
                 total_size += len(value.encode("utf-8"))
                 if total_size > CONFIGMAP_TOTAL_MAX_BYTES:
                     break
@@ -997,6 +1068,7 @@ def kubernetes_workload_manifests(
             for key, value in import_project.environment_entries(service.get("environment"))
             if value is not None and not SECRET_ENV_RE.search(key) and KUBERNETES_ENV_NAME_RE.fullmatch(key)
         ]
+        env = merge_container_env(env, default_import_environment(record, service))
         container: dict[str, Any] = {
             "name": name,
             "image": image,
@@ -1013,7 +1085,7 @@ def kubernetes_workload_manifests(
         resources = imported_workload_resources(args)
         if resources:
             container["resources"] = resources
-        config_map_manifests, volumes, volume_mounts = nginx_configmap_mount_manifests(args, record, service, labels)
+        config_map_manifests, volumes, volume_mounts = configmap_mount_manifests(args, record, service, labels)
         if volume_mounts:
             container["volumeMounts"] = volume_mounts
         pod_spec: dict[str, Any] = {
