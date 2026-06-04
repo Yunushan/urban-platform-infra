@@ -34,11 +34,6 @@ spec:
         expose:
           default: true
         exposedPort: 80
-        redirections:
-          entryPoint:
-            to: websecure
-            scheme: https
-            permanent: true
       websecure:
 {% if traefik_exposure == 'nodePort' %}
         nodePort: {{ rke2_traefik_websecure_node_port | default(30443) }}
@@ -48,8 +43,6 @@ spec:
         expose:
           default: true
         exposedPort: 443
-        tls:
-          enabled: true
 {% if rke2_traefik_image_repository | default('') | length > 0 or rke2_traefik_image_tag | default('') | length > 0 %}
     image:
 {% if rke2_traefik_image_repository | default('') | length > 0 %}
