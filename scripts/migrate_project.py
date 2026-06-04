@@ -1318,6 +1318,31 @@ def all_preload_nodes_have_image(args: argparse.Namespace, image_refs: list[str]
     return all(remote_containerd_has_image(args, ssh_options, target, image_refs) for target in targets)
 
 
+def tag_preloaded_image_on_nodes(args: argparse.Namespace, source_refs: list[str], target_refs: list[str]) -> bool:
+    targets, ssh_options = preload_node_targets(args)
+    if not targets:
+        return False
+    source_ref_args = " ".join(shlex.quote(ref) for ref in source_refs)
+    target_ref_args = " ".join(shlex.quote(ref) for ref in target_refs)
+    script = (
+        "set -e; "
+        "ctr=/var/lib/rancher/rke2/bin/ctr; "
+        "socket=/run/k3s/containerd/containerd.sock; "
+        "[ -S \"$socket\" ] && [ -x \"$ctr\" ] || exit 1; "
+        "images=\"$($ctr --address \"$socket\" -n k8s.io images ls -q)\"; "
+        "source_ref=\"\"; "
+        f"for ref in {source_ref_args}; do "
+        "if printf '%s\\n' \"$images\" | grep -Fx -- \"$ref\" >/dev/null; then source_ref=\"$ref\"; break; fi; "
+        "done; "
+        "[ -n \"$source_ref\" ] || exit 1; "
+        f"for target_ref in {target_ref_args}; do "
+        "\"$ctr\" --address \"$socket\" -n k8s.io images tag \"$source_ref\" \"$target_ref\" >/dev/null 2>&1 || true; "
+        "\"$ctr\" --address \"$socket\" -n k8s.io images ls -q | grep -Fx -- \"$target_ref\" >/dev/null; "
+        "done"
+    )
+    return all(run_remote_sudo_shell_status(args, ssh_options, target, script) == 0 for target in targets)
+
+
 def tune_rke2_nodes_for_import(args: argparse.Namespace) -> None:
     if not args.execute or not args.rke2_nodes:
         return
@@ -3091,6 +3116,11 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
         needs_tag = record.build_only or (image is not None and (not image.tag or image.tag in import_project.MUTABLE_TAGS))
         if needs_tag:
             candidates.append((record, service, build))
+    source_image_records: dict[str, list[import_project.ServiceRecord]] = {}
+    for record, _service, _build in candidates:
+        if record.image is not None:
+            source_image_records.setdefault(record.image.display, []).append(record)
+    source_preloaded_refs: dict[str, list[str]] = {}
     print(f"Application image promotion candidates: {len(candidates)}")
     if not args.execute:
         return
@@ -3127,6 +3157,8 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
         try:
             if preload_streaming and all_preload_nodes_have_image(args, image_refs):
                 print(f"Image {image_refs[0]} is already present on all RKE2 nodes; skipping build, archive save, and upload.")
+                if record.image is not None:
+                    source_preloaded_refs.setdefault(record.image.display, image_refs)
                 if args.cleanup_operator_images:
                     cleanup_operator_container_tags(args, [target_image])
                 continue
@@ -3146,6 +3178,23 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
             elif record.image:
                 source_ready, source_cleanup_images = ensure_source_image(args, record)
                 if not source_ready:
+                    reused_source_refs = source_preloaded_refs.get(record.image.display, [])
+                    if not reused_source_refs and preload_streaming:
+                        for sibling_record in source_image_records.get(record.image.display, []):
+                            if sibling_record is record:
+                                continue
+                            sibling_refs = containerd_import_image_refs(local_import_image(args, sibling_record))
+                            if all_preload_nodes_have_image(args, sibling_refs):
+                                reused_source_refs = sibling_refs
+                                source_preloaded_refs.setdefault(record.image.display, sibling_refs)
+                                break
+                    if reused_source_refs and preload_streaming and tag_preloaded_image_on_nodes(args, reused_source_refs, image_refs):
+                        print(
+                            f"Source image {record.image.display} is unavailable; "
+                            f"tagged existing preloaded sibling image as {image_refs[0]} on all RKE2 nodes."
+                        )
+                        source_preloaded_refs.setdefault(record.image.display, image_refs)
+                        continue
                     if archive_path is not None and archive_path.exists():
                         print(
                             f"Source image {record.image.display} is unavailable; "
@@ -3162,6 +3211,7 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                             preload_initialized = True
                             if copied and args.cleanup_operator_images and archive_path.exists():
                                 archive_path.unlink()
+                            source_preloaded_refs.setdefault(record.image.display, image_refs)
                         else:
                             generated_archives.append(archive_path)
                         continue
@@ -3178,6 +3228,8 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                     print(f"Image {image_refs[0]} is already present on all RKE2 nodes; skipping local archive save and upload.")
                     if archive_path.exists():
                         archive_path.unlink()
+                    if record.image is not None:
+                        source_preloaded_refs.setdefault(record.image.display, image_refs)
                     if args.cleanup_operator_images:
                         cleanup_operator_container_tags(args, [target_image])
                     continue
@@ -3193,6 +3245,8 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                     preload_initialized = True
                     if copied and args.cleanup_operator_images and archive_path.exists():
                         archive_path.unlink()
+                    if copied and record.image is not None:
+                        source_preloaded_refs.setdefault(record.image.display, image_refs)
                 else:
                     generated_archives.append(archive_path)
             if args.cleanup_operator_images:
