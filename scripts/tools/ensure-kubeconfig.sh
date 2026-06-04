@@ -1118,6 +1118,7 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
   if [ "${repair_required_due_to_version_drift}" = "true" ]; then
     run_cluster_repair
     export MIGRATION_AUTO_REPAIR_CLUSTER=false
+    export OPERATOR_KUBECONFIG_FORCE_REPAIR=false
     echo "Retrying operator kubeconfig after automatic RKE2 version reconciliation."
     exec bash "$0"
   fi
@@ -1210,6 +1211,7 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
       if auto_repair_cluster_enabled; then
         run_cluster_repair
         export MIGRATION_AUTO_REPAIR_CLUSTER=false
+        export OPERATOR_KUBECONFIG_FORCE_REPAIR=false
         echo "Retrying operator kubeconfig after automatic cluster reconciliation."
         exec bash "$0"
       fi
