@@ -743,8 +743,8 @@ def should_generate_tcp_probes(record: import_project.ServiceRecord, service: di
 
 def image_for_kubernetes_manifest(args: argparse.Namespace, record: import_project.ServiceRecord) -> str | None:
     def manifest_image(image: str) -> str:
-        if args.image_mode == "preload" and not args.registry and not image.startswith("localhost/"):
-            return f"localhost/{image}"
+        if args.image_mode == "preload" and not args.registry:
+            return image.removeprefix("localhost/")
         return image
 
     if record.build_only:
@@ -1171,8 +1171,11 @@ def containerd_import_image_refs(target_image: str) -> list[str]:
     has_registry = "." in first_segment or ":" in first_segment or first_segment == "localhost"
     refs = [target_image]
     if not has_registry:
+        refs.append(f"docker.io/{target_image}")
         refs.append(f"localhost/{target_image}")
-    return refs
+    elif first_segment == "localhost" and "/" in target_image:
+        refs.append(f"docker.io/{target_image.split('/', 1)[1]}")
+    return list(dict.fromkeys(refs))
 
 
 def container_image_exists(args: argparse.Namespace, image: str) -> bool:
@@ -1411,17 +1414,41 @@ def preload_archives_to_nodes(args: argparse.Namespace, archives: list[Path], st
         )
         for archive in archives:
             if image_refs and remote_containerd_has_image(args, ssh_options, target, image_refs):
+                tag_preloaded_image_on_nodes(args, image_refs, image_refs)
                 print(f"Image {image_refs[0]} is already present on {target}; skipping archive upload.")
                 continue
             remote_archive = f"{remote_image_dir_raw}/{archive.name}"
             run_remote_sudo_upload(args, ssh_options, target, archive, remote_archive)
             if args.rke2_import_images:
-                import_preloaded_archives_to_containerd(args, ssh_options, target, remote_image_dir, [archive.name])
+                import_preloaded_archives_to_containerd(args, ssh_options, target, remote_image_dir, [archive.name], image_refs)
     return True
 
 
-def import_preloaded_archives_to_containerd(args: argparse.Namespace, ssh_options: list[str], target: str, remote_image_dir: str, archive_names: list[str]) -> None:
+def import_preloaded_archives_to_containerd(
+    args: argparse.Namespace,
+    ssh_options: list[str],
+    target: str,
+    remote_image_dir: str,
+    archive_names: list[str],
+    image_refs: list[str] | None = None,
+) -> None:
     archive_name_args = " ".join(shlex.quote(name) for name in archive_names)
+    image_ref_args = " ".join(shlex.quote(ref) for ref in image_refs or [])
+    tag_alias_script = ""
+    if image_refs:
+        tag_alias_script = (
+            f"image_ref_args={shlex.quote(image_ref_args)}; "
+            "source_ref=\"\"; "
+            "images=\"$($ctr --address \"$socket\" -n k8s.io images ls -q)\"; "
+            "for ref in $image_ref_args; do "
+            "if printf '%s\\n' \"$images\" | grep -Fx -- \"$ref\" >/dev/null; then source_ref=\"$ref\"; break; fi; "
+            "done; "
+            "if [ -n \"$source_ref\" ]; then "
+            "for target_ref in $image_ref_args; do "
+            "\"$ctr\" --address \"$socket\" -n k8s.io images tag \"$source_ref\" \"$target_ref\" >/dev/null 2>&1 || true; "
+            "done; "
+            "fi; "
+        )
     script = (
         "set -e; "
         "ctr=/var/lib/rancher/rke2/bin/ctr; "
@@ -1434,6 +1461,7 @@ def import_preloaded_archives_to_containerd(args: argparse.Namespace, ssh_option
         "\"$ctr\" --address \"$socket\" -n k8s.io images import \"$archive\"; "
         "rm -f \"$archive\"; "
         "done; "
+        f"{tag_alias_script}"
         "\"$ctr\" --address \"$socket\" -n k8s.io images ls >/dev/null; "
         "echo \"Imported preload archives into running RKE2 containerd and removed staged tar files.\"; "
         "else "
@@ -3181,6 +3209,7 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
         retry_build: tuple[Path, str] | None = None
         try:
             if preload_streaming and all_preload_nodes_have_image(args, image_refs):
+                tag_preloaded_image_on_nodes(args, image_refs, image_refs)
                 print(f"Image {image_refs[0]} is already present on all RKE2 nodes; skipping build, archive save, and upload.")
                 if record.image is not None:
                     source_preloaded_refs.setdefault(record.image.display, image_refs)
@@ -3265,6 +3294,7 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
             elif args.image_mode == "preload":
                 assert archive_path is not None
                 if preload_streaming and all_preload_nodes_have_image(args, image_refs):
+                    tag_preloaded_image_on_nodes(args, image_refs, image_refs)
                     print(f"Image {image_refs[0]} is already present on all RKE2 nodes; skipping local archive save and upload.")
                     if archive_path.exists():
                         archive_path.unlink()
