@@ -2581,14 +2581,25 @@ fi
         services = parsed["services"]
         rke2_server_state = services.get("rke2-server", ("unknown", "missing"))[0]
         rke2_agent_state = services.get("rke2-agent", ("unknown", "missing"))[0]
-        if rke2_server_state != "active" and rke2_agent_state != "active":
-            message = f"`{display_target}` has neither `rke2-server` nor `rke2-agent` active."
+        rke2_server_ready = rke2_server_state == "active" or (
+            rke2_server_state == "activating" and parsed["readyz"] == "ok"
+        )
+        rke2_agent_ready = rke2_agent_state == "active"
+        if not rke2_server_ready and not rke2_agent_ready:
+            message = (
+                f"`{display_target}` has neither a ready `rke2-server` nor an active `rke2-agent` "
+                f"(server={rke2_server_state}, agent={rke2_agent_state}, readyz={parsed['readyz']})."
+            )
             errors.append(message)
             preflight_record(lines, "ERROR", message)
+        elif rke2_server_state == "activating" and parsed["readyz"] == "ok":
+            message = f"`{display_target}` has `rke2-server` state `activating`, but local `/readyz` is OK."
+            warnings.append(message)
+            preflight_record(lines, "WARN", message)
         else:
             preflight_record(lines, "OK", f"`{display_target}` has an active RKE2 service.")
 
-        if rke2_server_state == "active" and parsed["readyz"] != "ok":
+        if rke2_server_state in {"active", "activating"} and parsed["readyz"] != "ok":
             message = f"`{display_target}` runs `rke2-server`, but local `/readyz` is `{parsed['readyz']}`."
             errors.append(message)
             preflight_record(lines, "ERROR", message)
