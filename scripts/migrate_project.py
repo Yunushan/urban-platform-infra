@@ -180,6 +180,11 @@ def k8s_name(value: str, prefix: str = "") -> str:
     return f"{base}-{digest}"[:63].strip("-")
 
 
+def k8s_slug(value: str) -> str:
+    safe = re.sub(r"[^a-z0-9-]+", "-", value.lower()).strip("-")
+    return re.sub(r"-+", "-", safe) or "item"
+
+
 def relative_compose_file(project_path: Path, file_name: str) -> Path:
     return project_path / file_name
 
@@ -671,6 +676,23 @@ def local_import_image(args: argparse.Namespace, record: import_project.ServiceR
     if args.registry:
         return f"{args.registry.rstrip('/')}/{image_artifact_name(record)}:{args.image_tag}"
     return f"urban-platform-import/{image_artifact_name(record)}:{args.image_tag}"
+
+
+def image_reference_aliases(image: str) -> set[str]:
+    base = image.rsplit("/", 1)[-1].split("@", 1)[0].rsplit(":", 1)[0]
+    base = k8s_slug(base)
+    aliases = {base}
+    parts = base.split("-")
+    if len(parts) > 1 and parts[0] in {"ops", "local", "compose", "docker", "image", "app", "import", "imported"}:
+        aliases.add("-".join(parts[1:]))
+    return {alias for alias in aliases if alias}
+
+
+def record_image_aliases(record: import_project.ServiceRecord) -> set[str]:
+    aliases = {k8s_slug(record.name)}
+    if record.image is not None:
+        aliases.update(image_reference_aliases(record.image.display))
+    return aliases
 
 
 def kubernetes_workload_name(record: import_project.ServiceRecord) -> str:
@@ -3117,9 +3139,12 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
         if needs_tag:
             candidates.append((record, service, build))
     source_image_records: dict[str, list[import_project.ServiceRecord]] = {}
+    alias_image_records: dict[str, list[import_project.ServiceRecord]] = {}
     for record, _service, _build in candidates:
         if record.image is not None:
             source_image_records.setdefault(record.image.display, []).append(record)
+        for alias in record_image_aliases(record):
+            alias_image_records.setdefault(alias, []).append(record)
     source_preloaded_refs: dict[str, list[str]] = {}
     print(f"Application image promotion candidates: {len(candidates)}")
     if not args.execute:
@@ -3187,6 +3212,21 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                             if all_preload_nodes_have_image(args, sibling_refs):
                                 reused_source_refs = sibling_refs
                                 source_preloaded_refs.setdefault(record.image.display, sibling_refs)
+                                break
+                    if not reused_source_refs and preload_streaming:
+                        for alias in sorted(image_reference_aliases(record.image.display)):
+                            for sibling_record in alias_image_records.get(alias, []):
+                                if sibling_record is record:
+                                    continue
+                                sibling_refs = containerd_import_image_refs(local_import_image(args, sibling_record))
+                                if all_preload_nodes_have_image(args, sibling_refs):
+                                    reused_source_refs = sibling_refs
+                                    print(
+                                        f"Source image {record.image.display} matched preloaded imported image "
+                                        f"{sibling_refs[0]} through alias `{alias}`."
+                                    )
+                                    break
+                            if reused_source_refs:
                                 break
                     if reused_source_refs and preload_streaming and tag_preloaded_image_on_nodes(args, reused_source_refs, image_refs):
                         print(
