@@ -3625,6 +3625,10 @@ def traefik_source_allowlist_middleware_ref(args: argparse.Namespace) -> str:
     return f"{args.namespace}-source-allow-list@kubernetescrd"
 
 
+def traefik_middleware_ref(args: argparse.Namespace, name: str) -> str:
+    return f"{args.namespace}-{name}@kubernetescrd"
+
+
 def kubernetes_secret_exists(args: argparse.Namespace, name: str) -> bool:
     command = kubectl_command(args, ["-n", args.namespace, "get", "secret", name, "--request-timeout=15s"])
     return subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
@@ -3807,6 +3811,41 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
                     tls_entry["hosts"] = [rule_host]
                 spec["tls"] = [tls_entry]
                 annotations["traefik.ingress.kubernetes.io/router.tls"] = "true"
+                redirect_middleware_name = k8s_name(f"{name}-redirect-https")
+                ingress_manifests.append(
+                    {
+                        "apiVersion": "traefik.io/v1alpha1",
+                        "kind": "Middleware",
+                        "metadata": {
+                            "name": redirect_middleware_name,
+                            "namespace": args.namespace,
+                        },
+                        "spec": {
+                            "redirectScheme": {
+                                "scheme": "https",
+                                "permanent": True,
+                            }
+                        },
+                    }
+                )
+                ingress_manifests.append(
+                    {
+                        "apiVersion": "networking.k8s.io/v1",
+                        "kind": "Ingress",
+                        "metadata": {
+                            "name": f"{name}-traefik-http-redirect",
+                            "namespace": args.namespace,
+                            "annotations": {
+                                "traefik.ingress.kubernetes.io/router.entrypoints": "web",
+                                "traefik.ingress.kubernetes.io/router.middlewares": traefik_middleware_ref(args, redirect_middleware_name),
+                            },
+                        },
+                        "spec": {
+                            "ingressClassName": "traefik",
+                            "rules": [rule],
+                        },
+                    }
+                )
             ingress_manifests.append(
                 {
                     "apiVersion": "networking.k8s.io/v1",
