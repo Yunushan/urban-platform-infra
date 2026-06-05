@@ -151,7 +151,13 @@ noise by setting `RuntimeDefault` seccomp, `runAsNonRoot`, dropped Linux
 capabilities, and disabled privilege escalation. In lab mode,
 `MIGRATION_IMAGE_MODE` defaults to `preload`
 and unavailable database sources are skipped with a private report entry so a
-small lab can continue. For very large Compose projects, import a subset first
+small lab can continue. `MIGRATION_RELAX_RESOURCE_QUOTA=true` is the lab
+default on `import-auto`; it deploys the platform with
+`namespace.resourceQuota.enabled=false` so migration batches, CNPG init jobs,
+and local-path PVC first-consumer scheduling are not blocked by the chart's
+production guardrail quota. Set `MIGRATION_RELAX_RESOURCE_QUOTA=false` when the
+namespace quota has already been sized for the selected batch. For very large
+Compose projects, import a subset first
 or deliberately raise `MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS`; the default
 limit is meant to protect 4 GiB lab nodes from starting too many small-request
 pods at once. Batch selection applies to service-specific secrets, image
@@ -356,8 +362,12 @@ For `import-auto`, set `MIGRATION_TLS_MODE` to select how the ingress TLS secret
 is produced. `auto` defaults to a reusable private lab CA in lab mode and an
 existing-secret requirement in production mode. Use `MIGRATION_TLS_MODE=lab-ca`
 for an internal domain such as `auyp.local`; the import writes
-`reports/import-migration/import-tls.md` with the CA certificate path to trust on
-browser workstations. Use `MIGRATION_TLS_MODE=cert-files` with
+`reports/import-migration/import-tls.md` and `reports/import-migration/tls-trust/`
+with the public CA certificate plus Windows/Linux trust helpers for browser
+workstations. The client workstation must trust the generated CA to avoid
+browser `NET::ERR_CERT_AUTHORITY_INVALID`; no server-side setting can make a
+private/self-signed CA trusted automatically by Chrome. Use
+`MIGRATION_TLS_MODE=cert-files` with
 `MIGRATION_TLS_CERT_FILE` and `MIGRATION_TLS_KEY_FILE` for `.crt`, `.cert`, or
 `.pem` material; use `MIGRATION_TLS_MODE=pfx` with `MIGRATION_TLS_PFX_FILE` and
 `MIGRATION_TLS_PFX_PASSWORD_FILE` for PKCS#12/PFX bundles; use

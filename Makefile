@@ -137,6 +137,7 @@ DEPLOY_CLUSTER_DOMAIN ?= $(if $(MIGRATION_CLUSTER_DOMAIN),$(MIGRATION_CLUSTER_DO
 DEPLOY_CLUSTER_VIP ?= $(MIGRATION_CLUSTER_VIP)
 DEPLOY_TLS_SECRET_NAME ?=
 DEPLOY_TLS_CREATE_SECRET ?=
+DEPLOY_NAMESPACE_RESOURCE_QUOTA ?= true
 PROJECT_PATH ?=
 IMPORT_REPORT ?=
 IMPORT_STRICT ?= false
@@ -196,6 +197,7 @@ MIGRATION_PRUNE_OPERATOR_CACHE ?= true
 MIGRATION_SKIP_DOCKER_SOCKET_SERVICES ?= true
 MIGRATION_SKIP_UNAVAILABLE_DATABASES ?= $(if $(filter production,$(MIGRATION_PROFILE)),false,true)
 MIGRATION_DEPLOY_PLATFORM ?= true
+MIGRATION_RELAX_RESOURCE_QUOTA ?= $(if $(filter lab,$(MIGRATION_PROFILE)),true,false)
 MIGRATION_SECRET_PROVIDER ?= kubernetes
 MIGRATION_SECRET_REMOTE_PREFIX ?= example/urban-platform/import
 MIGRATION_SECRET_STORE_NAME ?= vault
@@ -447,6 +449,7 @@ HELM_DEPLOY_SET_ARGS = \
 	$(if $(DEPLOY_CLUSTER_VIP),--set global.cluster.vip=$(DEPLOY_CLUSTER_VIP),) \
 	$(if $(DEPLOY_TLS_SECRET_NAME),--set ingress.tls.secretName=$(DEPLOY_TLS_SECRET_NAME),) \
 	$(if $(DEPLOY_TLS_CREATE_SECRET),--set ingress.tls.createSecret=$(DEPLOY_TLS_CREATE_SECRET),) \
+	--set namespace.resourceQuota.enabled=$(DEPLOY_NAMESPACE_RESOURCE_QUOTA) \
 	$(if $(filter true,$(DEPLOY_SKIP_PLACEHOLDER_WORKLOADS)),--set global.skipPlaceholderWorkloads=true,) \
 	$(if $(DEPLOY_ROOT_IMAGE_REPOSITORY),--set workloads.$(DEPLOY_ROOT_WORKLOAD).image.repository=$(DEPLOY_ROOT_IMAGE_REPOSITORY),) \
 	$(if $(DEPLOY_ROOT_IMAGE_TAG),--set-string workloads.$(DEPLOY_ROOT_WORKLOAD).image.tag=$(DEPLOY_ROOT_IMAGE_TAG),) \
@@ -676,7 +679,7 @@ import-auto: MIGRATION_AUTO_REPAIR_CLUSTER = true
 import-auto: operator-kubeconfig ## Run the full import migration workflow with preparation, execution, and validation.
 	@if [ "$(MIGRATION_DEPLOY_PLATFORM)" = "true" ]; then \
 		echo "Deploying/upgrading the platform chart before import so PostgreSQL 18 and platform services are reconciled."; \
-		$(MAKE) deploy-auto VALUES="$(VALUES)" NAMESPACE="$(MIGRATION_NAMESPACE)"; \
+		$(MAKE) deploy-auto VALUES="$(VALUES)" NAMESPACE="$(MIGRATION_NAMESPACE)" DEPLOY_NAMESPACE_RESOURCE_QUOTA="$(if $(filter true,$(MIGRATION_RELAX_RESOURCE_QUOTA)),false,$(DEPLOY_NAMESPACE_RESOURCE_QUOTA))"; \
 	else \
 		echo "Skipping platform Helm deploy because MIGRATION_DEPLOY_PLATFORM=$(MIGRATION_DEPLOY_PLATFORM)."; \
 	fi

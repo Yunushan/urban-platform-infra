@@ -55,7 +55,9 @@ Supported import modes:
 
 - `MIGRATION_TLS_MODE=lab-ca`: generate/reuse a private CA under
   `MIGRATION_PRIVATE_DIR/tls`, issue a host certificate, apply
-  `urban-platform-tls`, and write `reports/import-migration/import-tls.md`.
+  `urban-platform-tls`, write `reports/import-migration/import-tls.md`, and
+  create a `reports/import-migration/tls-trust/` handoff bundle with the
+  public CA certificate plus Windows/Linux trust install helpers.
 - `MIGRATION_TLS_MODE=cert-files`: apply a Kubernetes TLS secret from
   `MIGRATION_TLS_CERT_FILE` and `MIGRATION_TLS_KEY_FILE`.
 - `MIGRATION_TLS_MODE=pfx`: extract a `.pfx`/`.p12` bundle from
@@ -71,7 +73,9 @@ Supported import modes:
 Use `MIGRATION_TLS_EXTRA_HOSTS` for additional SANs, including wildcard names
 such as `*.apps.example.internal`. Browsers still need a concrete hostname in
 the URL, and lab CA mode requires installing the generated CA certificate on the
-workstation once.
+workstation once. Server-side automation cannot suppress
+`NET::ERR_CERT_AUTHORITY_INVALID` by itself; trust must be added to the client
+operating system or browser trust store.
 
 ## Apply Guard
 
