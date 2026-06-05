@@ -1975,6 +1975,8 @@ for migration_automation_token in [
     'sudo -k -S',
     'removed staged tar files',
     'ensure_source_image',
+    'explicit_container_pull_reference',
+    'container_command(args, "tag", pull_image, image)',
     'explicit_pull_reference',
     'container_tool',
     'docker.io/library/',

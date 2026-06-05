@@ -1282,11 +1282,36 @@ def container_image_exists(args: argparse.Namespace, image: str) -> bool:
     return subprocess.run(container_command(args, "image", "inspect", image), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
 
 
+def explicit_container_pull_reference(image: str) -> str:
+    image = image.strip()
+    if not image or image.startswith("$") or "${" in image:
+        return image
+    if "@" in image:
+        base, digest = image.split("@", 1)
+        suffix = f"@{digest}"
+    else:
+        base = image
+        suffix = ""
+    first_segment = base.split("/", 1)[0]
+    has_registry = "." in first_segment or ":" in first_segment or first_segment == "localhost"
+    if has_registry:
+        return image
+    repository = base
+    if "/" not in repository:
+        repository = f"docker.io/library/{repository}"
+    else:
+        repository = f"docker.io/{repository}"
+    return f"{repository}{suffix}"
+
+
 def ensure_container_image(args: argparse.Namespace, image: str, purpose: str) -> None:
     if container_image_exists(args, image):
         return
-    print(f"{purpose} image {image} is not local; pulling it.")
-    run_command(container_command(args, "pull", image))
+    pull_image = explicit_container_pull_reference(image)
+    print(f"{purpose} image {image} is not local; pulling {pull_image}.")
+    run_command(container_command(args, "pull", pull_image))
+    if pull_image != image:
+        run_command(container_command(args, "tag", pull_image, image))
 
 
 def explicit_pull_reference(image: import_project.ImageRef) -> str:
