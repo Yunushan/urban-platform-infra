@@ -885,6 +885,15 @@ def configmap_file_entry(path: Path) -> tuple[str, str] | None:
         return ("binary", base64.b64encode(content).decode("ascii"))
 
 
+def directory_configmap_file_paths(source_path: Path) -> list[Path]:
+    def sort_key(path: Path) -> tuple[int, str]:
+        relative_path = path.relative_to(source_path).as_posix()
+        priority = 0 if relative_path == "index.html" else 1
+        return priority, relative_path
+
+    return sorted((path for path in source_path.rglob("*") if path.is_file()), key=sort_key)
+
+
 def service_looks_like_dotnet(record: import_project.ServiceRecord, service: dict[str, Any]) -> bool:
     image = (record.image.display if record.image else "").lower()
     if any(token in image for token in ["dotnet", "aspnet", "mcr.microsoft.com"]):
@@ -992,7 +1001,21 @@ def configmap_mount_manifests(
             items.append({"key": key, "path": key})
             volume_mounts.append({"name": volume_name, "mountPath": target, "subPath": key, "readOnly": True})
         elif source_path.is_dir():
-            for file_path in sorted(path for path in source_path.rglob("*") if path.is_file()):
+            config_map_chunks: list[tuple[str, dict[str, str], dict[str, str], list[dict[str, str]]]] = []
+
+            def flush_config_map_chunk() -> None:
+                nonlocal data, binary_data, items, total_size
+                if not items:
+                    return
+                chunk_number = len(config_map_chunks) + 1
+                chunk_name = cm_name if chunk_number == 1 else k8s_name(f"{kubernetes_workload_name(record)}-{index}-{chunk_number}", "import-cm")
+                config_map_chunks.append((chunk_name, data, binary_data, items))
+                data = {}
+                binary_data = {}
+                items = []
+                total_size = 0
+
+            for file_path in directory_configmap_file_paths(source_path):
                 relative_path = file_path.relative_to(source_path)
                 if SECRET_ENV_RE.search(relative_path.as_posix()):
                     continue
@@ -1003,17 +1026,46 @@ def configmap_mount_manifests(
                 kind, value = entry
                 if kind == "text":
                     value = normalize_imported_config_text(record, f"{target}/{relative_path.as_posix()}", value)
-                total_size += len(value.encode("utf-8"))
-                if total_size > CONFIGMAP_TOTAL_MAX_BYTES:
-                    break
+                entry_size = len(value.encode("utf-8"))
+                if total_size + entry_size > CONFIGMAP_TOTAL_MAX_BYTES:
+                    flush_config_map_chunk()
+                total_size += entry_size
                 if kind == "text":
                     data[key] = value
                 else:
                     binary_data[key] = value
                 items.append({"key": key, "path": relative_path.as_posix()})
-            if not items:
+            flush_config_map_chunk()
+            if not config_map_chunks:
                 continue
+            for chunk_name, chunk_data, chunk_binary_data, chunk_items in config_map_chunks:
+                config_map: dict[str, Any] = {
+                    "apiVersion": "v1",
+                    "kind": "ConfigMap",
+                    "metadata": {"name": chunk_name, "namespace": args.namespace, "labels": labels},
+                }
+                if chunk_data:
+                    config_map["data"] = chunk_data
+                if chunk_binary_data:
+                    config_map["binaryData"] = chunk_binary_data
+                manifests.append(config_map)
+            if len(config_map_chunks) == 1:
+                chunk_name, _chunk_data, _chunk_binary_data, chunk_items = config_map_chunks[0]
+                volumes.append({"name": volume_name, "configMap": {"name": chunk_name, "items": chunk_items}})
+            else:
+                volumes.append(
+                    {
+                        "name": volume_name,
+                        "projected": {
+                            "sources": [
+                                {"configMap": {"name": chunk_name, "items": chunk_items}}
+                                for chunk_name, _chunk_data, _chunk_binary_data, chunk_items in config_map_chunks
+                            ]
+                        },
+                    }
+                )
             volume_mounts.append({"name": volume_name, "mountPath": target, "readOnly": True})
+            continue
         else:
             continue
         config_map: dict[str, Any] = {
