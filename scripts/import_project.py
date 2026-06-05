@@ -970,6 +970,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--webserver", choices=["nginx", "apache-httpd", "apache-tomcat", "traefik"], help="Selected platform webserver profile.")
     parser.add_argument("--database", help="Selected platform database profile, for example postgresql or cloudnative-pg.")
     parser.add_argument("--report", help="Optional Markdown report output path.")
+    parser.add_argument("--quiet", action="store_true", help="Write the report without printing it to stdout.")
     parser.add_argument("--redact-sensitive", action="store_true", help="Redact project paths, Compose filenames, service names, and local application image names in the report.")
     parser.add_argument("--strict", action="store_true", help="Return non-zero when warnings are present.")
     parser.add_argument(
@@ -1059,7 +1060,8 @@ def main(argv: list[str]) -> int:
         database_targets=selected_database_targets,
         redact_sensitive=args.redact_sensitive,
     )
-    print(report)
+    if not args.quiet:
+        print(report)
 
     if args.report:
         report_path = Path(args.report).expanduser()

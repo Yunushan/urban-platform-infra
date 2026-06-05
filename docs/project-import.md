@@ -366,6 +366,13 @@ make import-migrate PROJECT_PATH=/path/to/compose-project \
   MIGRATION_ALLOW_SECRET_MATERIAL=true
 ```
 
+The `validate` stage writes two reports. `post-migration-check.md` keeps the
+source Compose compatibility backlog for follow-up remediation without printing
+every warning to the terminal. `post-migration-runtime.md` checks the deployed
+Kubernetes state: imported Deployment readiness, Services, Ingresses, observed
+runtime images, database-family runtime images, and nginx runtime version checks
+for imported nginx workloads.
+
 PostgreSQL-family database dump/restore is performed by the automation when
 execution is enabled. The restore step uses the generated private DB target map.
 For CloudNativePG targets from the selected Helm values, the map points at the

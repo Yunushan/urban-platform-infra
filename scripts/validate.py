@@ -1855,6 +1855,7 @@ for project_import_token in [
     'find_compose_files',
     'docker-compose',
     '--project-path',
+    '--quiet',
     'nginxinc/nginx-unprivileged:1.30.2',
     'CloudNativePG',
     'config/image-policy.yaml',
@@ -1971,6 +1972,9 @@ for migration_automation_token in [
     'nginx_rollout_base_image',
     'urban-platform.io/nginx-base-image',
     'refresh_preload_image',
+    'write_post_migration_runtime_report',
+    'post-migration-runtime.md',
+    'Source compatibility backlog written to',
     'expected_webserver_image',
     'Aligning nginx service',
     'generated_archives',
@@ -2083,6 +2087,7 @@ for project_import_docs_token in [
     'stable nginx-base suffix',
     'secretRef',
     'generated Ingress candidates are applied only if',
+    'post-migration-runtime.md',
 ]:
     if project_import_docs_token not in project_import_docs_text:
         errors.append(f'Project import docs missing token: {project_import_docs_token}')

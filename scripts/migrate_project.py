@@ -3008,7 +3008,7 @@ def generate_bundle(
         "- `scripts/02-build-and-push-images.sh` builds application images. Use image mode `registry` to push, `preload` to export/copy tar archives to RKE2 nodes, or `skip` for external Compose transition mode.",
         "- `scripts/03-database-dump-restore.sh` dumps PostgreSQL-family sources and restores only targets defined in the private database target map; optional engines are scaffolded in that map until their engine-specific runner is enabled.",
         "- `scripts/04-generate-routing-and-storage.sh` writes imported app Deployment/Service manifests plus Traefik routing candidates.",
-        "- `scripts/05-validate.sh` re-runs the compatibility checker.",
+        "- `scripts/05-validate.sh` writes the source compatibility backlog quietly and checks deployed Kubernetes runtime state.",
         "",
         "## Guardrails",
         "",
@@ -3984,6 +3984,134 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
             print("No ingress candidates were applied because their backend services are not present yet.")
 
 
+def pod_container_images(pod: dict[str, Any]) -> list[str]:
+    images: list[str] = []
+    for container in pod.get("spec", {}).get("containers", []) or []:
+        image = container.get("image")
+        if image:
+            images.append(str(image))
+    return images
+
+
+def deployment_ready_status(item: dict[str, Any]) -> tuple[int, int]:
+    spec = item.get("spec", {}) or {}
+    status = item.get("status", {}) or {}
+    desired = int(spec.get("replicas", 1) or 0)
+    ready = int(status.get("readyReplicas", 0) or 0)
+    return ready, desired
+
+
+def nginx_deployment_version(args: argparse.Namespace, name: str) -> str:
+    result = kubectl_capture(args, ["-n", args.namespace, "exec", f"deploy/{name}", "--", "nginx", "-v"])
+    details = command_details(result)
+    if result.returncode != 0:
+        return f"unavailable ({details or 'kubectl exec failed'})"
+    return details or "unknown"
+
+
+def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
+    output = Path(args.output).expanduser()
+    lines = [
+        "# Post-Migration Runtime Validation",
+        "",
+        "This report checks deployed Kubernetes runtime state. The source Compose compatibility backlog is written separately to `post-migration-check.md`.",
+        "",
+        f"- Namespace: `{args.namespace}`",
+        f"- Generated at: `{utc_timestamp()}`",
+        "",
+    ]
+    try:
+        deployments = kubectl_json(
+            args,
+            [
+                "-n",
+                args.namespace,
+                "get",
+                "deploy",
+                "-l",
+                "app.kubernetes.io/managed-by=urban-platform-import",
+            ],
+        ).get("items", [])
+        services = kubectl_json(
+            args,
+            [
+                "-n",
+                args.namespace,
+                "get",
+                "service",
+                "-l",
+                "app.kubernetes.io/managed-by=urban-platform-import",
+            ],
+        ).get("items", [])
+        ingresses = kubectl_json(args, ["-n", args.namespace, "get", "ingress"]).get("items", [])
+        pods = kubectl_json(args, ["-n", args.namespace, "get", "pods"]).get("items", [])
+    except RuntimeError as exc:
+        lines.extend(["## Result", "", "- Status: `FAIL`", f"- Error: `{exc}`", ""])
+        write_file(output / "post-migration-runtime.md", "\n".join(lines) + "\n")
+        raise SystemExit(f"Post-migration runtime validation failed: {exc}") from exc
+
+    not_ready: list[str] = []
+    nginx_versions: list[str] = []
+    for item in deployments:
+        name = item.get("metadata", {}).get("name", "unknown")
+        ready, desired = deployment_ready_status(item)
+        if ready < desired:
+            not_ready.append(f"{name} ({ready}/{desired})")
+        annotations = item.get("spec", {}).get("template", {}).get("metadata", {}).get("annotations", {}) or {}
+        if annotations.get("urban-platform.io/nginx-base-image"):
+            nginx_versions.append(f"{name}: {nginx_deployment_version(args, str(name))}")
+
+    runtime_images = sorted({image for pod in pods for image in pod_container_images(pod)})
+    database_images = [
+        image
+        for image in runtime_images
+        if any(token in image.lower() for token in ["postgres", "postgis", "timescale"])
+    ]
+
+    status = "PASS" if not not_ready else "FAIL"
+    lines.extend(
+        [
+            "## Result",
+            "",
+            f"- Status: `{status}`",
+            f"- Imported deployments: `{len(deployments)}`",
+            f"- Imported services: `{len(services)}`",
+            f"- Ingresses in namespace: `{len(ingresses)}`",
+            f"- Runtime images observed: `{len(runtime_images)}`",
+            "",
+            "## Deployment Readiness",
+            "",
+        ]
+    )
+    if not_ready:
+        lines.extend(f"- Not ready: `{item}`" for item in not_ready)
+    else:
+        lines.append("- All imported deployments report desired ready replicas.")
+
+    lines.extend(["", "## nginx Runtime", ""])
+    if nginx_versions:
+        lines.extend(f"- `{item}`" for item in nginx_versions)
+    else:
+        lines.append("- No imported nginx deployment with `urban-platform.io/nginx-base-image` annotation was found.")
+
+    lines.extend(["", "## Database Runtime Images", ""])
+    if database_images:
+        lines.extend(f"- `{image}`" for image in database_images)
+    else:
+        lines.append("- No PostgreSQL/PostGIS/TimescaleDB runtime images were observed in running pods.")
+
+    lines.extend(["", "## Runtime Images", ""])
+    lines.extend(f"- `{image}`" for image in runtime_images[:80])
+    if len(runtime_images) > 80:
+        lines.append(f"- `+{len(runtime_images) - 80}` more")
+
+    report_path = output / "post-migration-runtime.md"
+    write_file(report_path, "\n".join(lines) + "\n")
+    print(f"Post-migration runtime validation written to {report_path}")
+    if status != "PASS":
+        raise SystemExit(f"Post-migration runtime validation found not-ready deployment(s): {', '.join(not_ready)}")
+
+
 def stage_validate(args: argparse.Namespace) -> None:
     command = [
         sys.executable,
@@ -4000,6 +4128,7 @@ def stage_validate(args: argparse.Namespace) -> None:
         args.database,
         "--report",
         str(Path(args.output).expanduser() / "post-migration-check.md"),
+        "--quiet",
     ]
     if args.redact_sensitive:
         command.append("--redact-sensitive")
@@ -4009,9 +4138,12 @@ def stage_validate(args: argparse.Namespace) -> None:
         command.append("--allow-docker-socket-skip")
     if args.execute:
         run_command(command)
+        print(f"Source compatibility backlog written to {Path(args.output).expanduser() / 'post-migration-check.md'}")
+        write_post_migration_runtime_report(args)
     else:
         print("Validation command:")
         print(" ".join(command))
+        print("Runtime validation command: kubectl deployment/service/ingress/pod checks against the target namespace")
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
