@@ -750,3 +750,86 @@
   when:
     - inventory_hostname in groups['rke2_servers']
     - not ansible_check_mode
+
+- name: Clean stale bundled Traefik Helm controller resources
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    kubectl=/var/lib/rancher/rke2/bin/kubectl
+    kubeconfig=/etc/rancher/rke2/rke2.yaml
+    namespace=kube-system
+    changed=false
+
+    k() {
+      "${kubectl}" --kubeconfig "${kubeconfig}" --request-timeout=20s "$@"
+    }
+
+    resource_exists() {
+      k -n "${namespace}" get "$1" "$2" >/dev/null 2>&1
+    }
+
+    delete_if_exists() {
+      kind="$1"
+      name="$2"
+      if resource_exists "${kind}" "${name}"; then
+        k -n "${namespace}" delete "${kind}" "${name}" --ignore-not-found --wait=false >/dev/null
+        changed=true
+      fi
+    }
+
+    delete_if_exists helmchartconfig.helm.cattle.io rke2-traefik
+
+    for chart in rke2-traefik rke2-traefik-crd; do
+      if resource_exists helmchart.helm.cattle.io "${chart}"; then
+        deletion_timestamp="$(
+          k -n "${namespace}" get helmchart.helm.cattle.io "${chart}" \
+            -o jsonpath='{.metadata.deletionTimestamp}' 2>/dev/null || true
+        )"
+        if [ -z "${deletion_timestamp}" ]; then
+          k -n "${namespace}" delete helmchart.helm.cattle.io "${chart}" \
+            --ignore-not-found --wait=false >/dev/null || true
+          changed=true
+          sleep 2
+        fi
+
+        deletion_timestamp="$(
+          k -n "${namespace}" get helmchart.helm.cattle.io "${chart}" \
+            -o jsonpath='{.metadata.deletionTimestamp}' 2>/dev/null || true
+        )"
+        finalizers="$(
+          k -n "${namespace}" get helmchart.helm.cattle.io "${chart}" \
+            -o jsonpath='{.metadata.finalizers}' 2>/dev/null || true
+        )"
+        if [ -n "${deletion_timestamp}" ] && printf '%s' "${finalizers}" | grep -q 'wrangler.cattle.io/on-helm-chart-remove'; then
+          k -n "${namespace}" patch helmchart.helm.cattle.io "${chart}" \
+            --type=merge \
+            -p '{"metadata":{"finalizers":[]}}' >/dev/null || true
+          changed=true
+        fi
+      fi
+    done
+
+    for job in \
+      helm-delete-rke2-traefik \
+      helm-delete-rke2-traefik-crd \
+      helm-install-rke2-traefik \
+      helm-install-rke2-traefik-crd
+    do
+      delete_if_exists job.batch "${job}"
+    done
+
+    for chart in rke2-traefik rke2-traefik-crd; do
+      k -n "${namespace}" wait --for=delete "helmchart.helm.cattle.io/${chart}" \
+        --timeout=30s >/dev/null 2>&1 || true
+    done
+
+    echo "changed=${changed}"
+  args:
+    executable: /bin/bash
+  register: rke2_stale_bundled_traefik_cleanup
+  changed_when: "'changed=true' in rke2_stale_bundled_traefik_cleanup.stdout"
+  when:
+    - inventory_hostname == groups['rke2_servers'][0]
+    - rke2_manage_upstream_traefik | bool
+    - rke2_cleanup_stale_bundled_traefik | default(true) | bool
+    - not ansible_check_mode
