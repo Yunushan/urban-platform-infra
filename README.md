@@ -276,7 +276,7 @@ By default the Kubernetes profile deploys:
 | Control-plane access | HAProxy + Keepalived | VIP failover on `7443` for the API and `9346` for RKE2 registration |
 | Edge ingress | RKE2-bundled Traefik | Default ingress class `traefik`; RKE2 owns the bundled Traefik version, with an optional upstream chart pin mode, and nginx/ingress-nginx remains switchable |
 | Time sync | Chrony | Installed on every node |
-| Web gateway | `nginxinc/nginx-unprivileged:1.31.1` | Low-resource default replica, HTTPS redirect, swappable with Apache HTTPD, Tomcat, or Traefik |
+| Web gateway | `nginxinc/nginx-unprivileged:1.30.2` | Low-resource default replica, HTTPS redirect, swappable with Apache HTTPD, Tomcat, or Traefik |
 | Application services | Sanitized `example-app-*` images | Skipped by default until real images are configured or imported |
 | Kafka | `confluentinc/cp-kafka:7.9.6` + `confluentinc/cp-zookeeper:7.9.6` | One compact broker and ZooKeeper pod for the lab profile |
 | Redis | `redis:8.6.2` | One compact Redis pod; Sentinel disabled by default |

@@ -45,7 +45,7 @@ MEMORY_QUANTITY_RE = re.compile(r"^([0-9]+)(Ki|Mi|Gi|Ti)?$")
 CPU_QUANTITY_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(m)?$")
 PRIVATE_IPV4_RE = re.compile(r"\b(?:10|192\.168|172\.(?:1[6-9]|2[0-9]|3[01]))(?:\.[0-9]{1,3}){2}\b")
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 4
+MANIFEST_GENERATOR_VERSION = 5
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -783,6 +783,12 @@ def nginx_static_import_base_image(args: argparse.Namespace, record: import_proj
     return nginx_platform_base_image(args, record) or (record.image.display if record.image else None)
 
 
+def nginx_rollout_base_image(args: argparse.Namespace, record: import_project.ServiceRecord) -> str | None:
+    if not nginx_requires_platform_import(args, record):
+        return None
+    return nginx_static_import_base_image(args, record)
+
+
 def numeric_port(value: str | int | None) -> int | None:
     if value is None:
         return None
@@ -1228,6 +1234,9 @@ def kubernetes_workload_manifests(
             "urban-platform.io/migration-profile": args.profile,
             "urban-platform.io/probe-mode": probe_mode,
         }
+        pod_template_annotations = {"urban-platform.io/probe-mode": probe_mode}
+        if nginx_base_image := nginx_rollout_base_image(args, record):
+            pod_template_annotations["urban-platform.io/nginx-base-image"] = nginx_base_image
         deployment = {
             "apiVersion": "apps/v1",
             "kind": "Deployment",
@@ -1241,7 +1250,7 @@ def kubernetes_workload_manifests(
                 "replicas": 1,
                 "selector": {"matchLabels": labels},
                 "template": {
-                    "metadata": {"labels": labels, "annotations": {"urban-platform.io/probe-mode": probe_mode}},
+                    "metadata": {"labels": labels, "annotations": pod_template_annotations},
                     "spec": pod_spec,
                 },
             },
@@ -2320,7 +2329,7 @@ def migration_stage_scope(args: argparse.Namespace, stage: str, service_pairs: l
     image_inputs = [
         f"{record.file}::{record.name}::nginx-base::{nginx_static_import_base_image(args, record) or ''}"
         for record, service in scoped_pairs
-        if stage == "images"
+        if stage in {"images", "manifests"}
         and (nginx_static_html_bind_source(args, record, service) is not None or nginx_requires_platform_import(args, record))
     ]
     scope_material = {
@@ -2343,7 +2352,7 @@ def migration_stage_scope(args: argparse.Namespace, stage: str, service_pairs: l
         "secretStoreName": args.secret_store_name if stage == "secrets" else "",
         "secretStoreKind": args.secret_store_kind if stage == "secrets" else "",
         "secretKeys": sorted(secret_keys) if stage == "secrets" else [],
-        "imageInputs": sorted(image_inputs) if stage == "images" else [],
+        "imageInputs": sorted(image_inputs) if stage in {"images", "manifests"} else [],
         "manifestImages": sorted(manifest_images) if stage in {"images", "manifests"} else [],
         "records": record_keys,
     }
@@ -3354,9 +3363,15 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
         archive_path = archive_dir / image_archive_name(record) if args.image_mode == "preload" else None
         retry_build: tuple[Path, str] | None = None
         static_source = nginx_static_html_bind_source(args, record, service)
+        refresh_preload_image = nginx_requires_platform_import(args, record)
         temporary_dockerfile: Path | None = None
         try:
-            if static_source is None and preload_streaming and all_preload_nodes_have_image(args, image_refs):
+            if (
+                not refresh_preload_image
+                and static_source is None
+                and preload_streaming
+                and all_preload_nodes_have_image(args, image_refs)
+            ):
                 tag_preloaded_image_on_nodes(args, image_refs, image_refs)
                 print(f"Image {image_refs[0]} is already present on all RKE2 nodes; skipping build, archive save, and upload.")
                 if record.image is not None:
@@ -3466,7 +3481,12 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                 run_command(container_command(args, "push", target_image))
             elif args.image_mode == "preload":
                 assert archive_path is not None
-                if static_source is None and preload_streaming and all_preload_nodes_have_image(args, image_refs):
+                if (
+                    not refresh_preload_image
+                    and static_source is None
+                    and preload_streaming
+                    and all_preload_nodes_have_image(args, image_refs)
+                ):
                     tag_preloaded_image_on_nodes(args, image_refs, image_refs)
                     print(f"Image {image_refs[0]} is already present on all RKE2 nodes; skipping local archive save and upload.")
                     if archive_path.exists():

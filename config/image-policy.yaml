@@ -24,7 +24,7 @@ policy:
     publicSafeReport: true
   approvedRuntimeImages:
     - repository: nginxinc/nginx-unprivileged
-      tag: '1.31.1'
+      tag: '1.30.2'
       owner: webserver
     - repository: httpd
       tag: '2.4'

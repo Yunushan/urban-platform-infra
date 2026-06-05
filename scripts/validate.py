@@ -1855,7 +1855,7 @@ for project_import_token in [
     'find_compose_files',
     'docker-compose',
     '--project-path',
-    'nginxinc/nginx-unprivileged:1.31.1',
+    'nginxinc/nginx-unprivileged:1.30.2',
     'CloudNativePG',
     'config/image-policy.yaml',
     'literal secret value',
@@ -1966,6 +1966,9 @@ for migration_automation_token in [
     'nginx_platform_base_image',
     'nginx_requires_platform_import',
     'nginx_static_import_base_image',
+    'nginx_rollout_base_image',
+    'urban-platform.io/nginx-base-image',
+    'refresh_preload_image',
     'expected_webserver_image',
     'Aligning nginx service',
     'generated_archives',
@@ -3884,7 +3887,7 @@ runtime_image_surface_text = '\n'.join(
     ]
 )
 for current_runtime_image in [
-    'nginxinc/nginx-unprivileged:1.31.1',
+    'nginxinc/nginx-unprivileged:1.30.2',
     'traefik:v3.7.1',
     'confluentinc/cp-kafka:7.9.6',
     'confluentinc/cp-zookeeper:7.9.6',

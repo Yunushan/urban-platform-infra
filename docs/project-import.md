@@ -292,7 +292,7 @@ Image migration has three modes:
   corrupted build layer and archive save fails, build-only candidates are rebuilt
   once with `--no-cache` before failing the import.
 - Imported nginx edge/static services are rebuilt or retagged from the selected
-  platform nginx image, for example `nginxinc/nginx-unprivileged:1.31.1`, instead
+  platform nginx image, for example `nginxinc/nginx-unprivileged:1.30.2`, instead
   of keeping older Compose nginx pins such as `nginx:1.18`.
 - `MIGRATION_IMAGE_MODE=skip` leaves application image movement out of the
   migration run. Use this when keeping the existing Compose deployment running
@@ -412,7 +412,7 @@ It compares the project against the selected platform profile:
 - `INGRESS=traefik` warns when a Compose service publishes host ports `80` or
   `443`, or when the project includes a second Traefik edge controller.
 - `WEB=nginx` expects the platform gateway image
-  `nginxinc/nginx-unprivileged:1.31.1` and flags rootful or version-drifted
+  `nginxinc/nginx-unprivileged:1.30.2` and flags rootful or version-drifted
   nginx images.
 - `DB=postgresql` expects the PostgreSQL/CloudNativePG migration path. It flags
   PostgreSQL majors older or newer than the platform default `18`, and fails
