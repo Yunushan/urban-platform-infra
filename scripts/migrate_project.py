@@ -741,12 +741,18 @@ def should_generate_tcp_probes(record: import_project.ServiceRecord, service: di
     return True
 
 
-def image_for_kubernetes_manifest(args: argparse.Namespace, record: import_project.ServiceRecord) -> str | None:
+def image_for_kubernetes_manifest(
+    args: argparse.Namespace,
+    record: import_project.ServiceRecord,
+    service: dict[str, Any] | None = None,
+) -> str | None:
     def manifest_image(image: str) -> str:
         if args.image_mode == "preload" and not args.registry:
             return image.removeprefix("localhost/")
         return image
 
+    if service is not None and nginx_static_html_bind_source(args, record, service) is not None:
+        return manifest_image(local_import_image(args, record))
     if record.build_only:
         return manifest_image(local_import_image(args, record))
     if record.image is None:
@@ -855,6 +861,26 @@ def resolve_bind_source(args: argparse.Namespace, record: import_project.Service
             candidate = project_path.joinpath(*parts[index + 1 :]).resolve()
             if candidate.exists():
                 return candidate
+    return None
+
+
+def nginx_static_html_target(target: str) -> bool:
+    return target.rstrip("/") == "/usr/share/nginx/html"
+
+
+def nginx_static_html_bind_source(
+    args: argparse.Namespace,
+    record: import_project.ServiceRecord,
+    service: dict[str, Any],
+) -> Path | None:
+    if record.kind != "nginx":
+        return None
+    for source, target in compose_bind_mounts(service):
+        if not nginx_static_html_target(target):
+            continue
+        source_path = resolve_bind_source(args, record, source)
+        if source_path is not None and source_path.is_dir():
+            return source_path
     return None
 
 
@@ -971,6 +997,8 @@ def configmap_mount_manifests(
     volumes: list[dict[str, Any]] = []
     volume_mounts: list[dict[str, Any]] = []
     for index, (source, target) in enumerate(compose_bind_mounts(service), start=1):
+        if nginx_static_html_target(target) and nginx_static_html_bind_source(args, record, service) is not None:
+            continue
         if not should_mount_bind_as_configmap(record, target):
             continue
         if SECRET_ENV_RE.search(source) or SECRET_ENV_RE.search(target):
@@ -1125,7 +1153,7 @@ def kubernetes_workload_manifests(
     for record, service in service_pairs:
         if not should_generate_kubernetes_workload(args, record, service):
             continue
-        image = image_for_kubernetes_manifest(args, record)
+        image = image_for_kubernetes_manifest(args, record, service)
         ports = kubernetes_container_ports(record, service)
         if not image or not ports:
             continue
@@ -1289,6 +1317,15 @@ def ensure_source_image(args: argparse.Namespace, record: import_project.Service
         return True, cleanup_images
     print(f"Source image {source} is not local and does not look pullable; skipping {record.name}.")
     return False, []
+
+
+def create_nginx_static_dockerfile(base_image: str) -> Path:
+    fd, path = tempfile.mkstemp(prefix="urban-nginx-static-", suffix=".Dockerfile")
+    dockerfile_path = Path(path)
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(f"FROM {base_image}\n")
+        handle.write("COPY . /usr/share/nginx/html/\n")
+    return dockerfile_path
 
 
 def cleanup_operator_container_tags(args: argparse.Namespace, images: list[str]) -> None:
@@ -2015,7 +2052,7 @@ def imported_capacity_candidates(
     for record, service in service_pairs:
         if not should_generate_kubernetes_workload(args, record, service):
             continue
-        if not image_for_kubernetes_manifest(args, record):
+        if not image_for_kubernetes_manifest(args, record, service):
             continue
         if not kubernetes_container_ports(record, service):
             continue
@@ -2231,8 +2268,8 @@ def migration_stage_scope(args: argparse.Namespace, stage: str, service_pairs: l
         if SECRET_ENV_RE.search(key)
     ]
     manifest_images = [
-        f"{record.file}::{record.name}::{image_for_kubernetes_manifest(args, record) or ''}"
-        for record, _service in scoped_pairs
+        f"{record.file}::{record.name}::{image_for_kubernetes_manifest(args, record, service) or ''}"
+        for record, service in scoped_pairs
         if stage in {"images", "manifests"}
     ]
     scope_material = {
@@ -3214,12 +3251,13 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
         if args.skip_docker_socket_services and service_has_docker_socket(service):
             print(f"Skipping Docker-socket service image candidate: {record.file}::{record.name}")
             continue
-        if record.kind != "application" and not record.build_only:
+        static_source = nginx_static_html_bind_source(args, record, service)
+        if record.kind != "application" and not record.build_only and static_source is None:
             continue
         image = record.image
         build = service.get("build")
         needs_tag = record.build_only or (image is not None and (not image.tag or image.tag in import_project.MUTABLE_TAGS))
-        if needs_tag:
+        if needs_tag or static_source is not None:
             candidates.append((record, service, build))
     source_image_records: dict[str, list[import_project.ServiceRecord]] = {}
     alias_image_records: dict[str, list[import_project.ServiceRecord]] = {}
@@ -3262,8 +3300,10 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
         compose_path = relative_compose_file(project_path, record.file)
         archive_path = archive_dir / image_archive_name(record) if args.image_mode == "preload" else None
         retry_build: tuple[Path, str] | None = None
+        static_source = nginx_static_html_bind_source(args, record, service)
+        temporary_dockerfile: Path | None = None
         try:
-            if preload_streaming and all_preload_nodes_have_image(args, image_refs):
+            if static_source is None and preload_streaming and all_preload_nodes_have_image(args, image_refs):
                 tag_preloaded_image_on_nodes(args, image_refs, image_refs)
                 print(f"Image {image_refs[0]} is already present on all RKE2 nodes; skipping build, archive save, and upload.")
                 if record.image is not None:
@@ -3271,7 +3311,20 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                 if args.cleanup_operator_images:
                     cleanup_operator_container_tags(args, [target_image])
                 continue
-            if build:
+            if static_source is not None:
+                if record.image is None:
+                    skipped.append(f"{record.file}::{record.name} (nginx static import has no base image)")
+                    continue
+                source_ready, source_cleanup_images = ensure_source_image(args, record)
+                if not source_ready:
+                    skipped.append(f"{record.file}::{record.name} ({record.image.display})")
+                    continue
+                pulled_source_images.extend(source_cleanup_images)
+                temporary_dockerfile = create_nginx_static_dockerfile(record.image.display)
+                retry_build = (static_source, str(temporary_dockerfile))
+                print(f"Baking nginx static directory {static_source} into {target_image}.")
+                run_command(container_command(args, "build", "-t", target_image, "-f", str(temporary_dockerfile), "."), cwd=static_source)
+            elif build:
                 context, dockerfile, fallback_note = resolve_build_source(compose_path, build)
                 if fallback_note:
                     print(fallback_note)
@@ -3348,7 +3401,7 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                 run_command(container_command(args, "push", target_image))
             elif args.image_mode == "preload":
                 assert archive_path is not None
-                if preload_streaming and all_preload_nodes_have_image(args, image_refs):
+                if static_source is None and preload_streaming and all_preload_nodes_have_image(args, image_refs):
                     tag_preloaded_image_on_nodes(args, image_refs, image_refs)
                     print(f"Image {image_refs[0]} is already present on all RKE2 nodes; skipping local archive save and upload.")
                     if archive_path.exists():
@@ -3378,6 +3431,12 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                 cleanup_operator_container_tags(args, [target_image])
         except subprocess.CalledProcessError as exc:
             failed.append(f"{record.file}::{record.name} ({exc.cmd})")
+        finally:
+            if temporary_dockerfile is not None:
+                try:
+                    temporary_dockerfile.unlink()
+                except OSError:
+                    pass
     if args.image_mode == "preload" and not preload_streaming:
         archives_copied = preload_archives_to_nodes(args, generated_archives, stale_archive_names)
         if args.cleanup_operator_images:
