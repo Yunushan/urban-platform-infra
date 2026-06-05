@@ -752,7 +752,7 @@ def image_for_kubernetes_manifest(
             return image.removeprefix("localhost/")
         return image
 
-    if service is not None and nginx_static_html_bind_source(args, record, service) is not None:
+    if nginx_requires_platform_import(args, record):
         return manifest_image(local_import_image(args, record))
     if record.build_only:
         return manifest_image(local_import_image(args, record))
@@ -762,6 +762,25 @@ def image_for_kubernetes_manifest(
     if needs_import_tag:
         return manifest_image(local_import_image(args, record))
     return record.image.display
+
+
+def selected_webserver_image(args: argparse.Namespace) -> str | None:
+    value = getattr(args, "expected_webserver_image", None)
+    return str(value) if value else None
+
+
+def nginx_platform_base_image(args: argparse.Namespace, record: import_project.ServiceRecord) -> str | None:
+    if record.kind != "nginx" or args.webserver != "nginx":
+        return None
+    return selected_webserver_image(args)
+
+
+def nginx_requires_platform_import(args: argparse.Namespace, record: import_project.ServiceRecord) -> bool:
+    return nginx_platform_base_image(args, record) is not None
+
+
+def nginx_static_import_base_image(args: argparse.Namespace, record: import_project.ServiceRecord) -> str | None:
+    return nginx_platform_base_image(args, record) or (record.image.display if record.image else None)
 
 
 def numeric_port(value: str | int | None) -> int | None:
@@ -2273,6 +2292,12 @@ def migration_stage_scope(args: argparse.Namespace, stage: str, service_pairs: l
         for record, service in scoped_pairs
         if stage in {"images", "manifests"}
     ]
+    image_inputs = [
+        f"{record.file}::{record.name}::nginx-base::{nginx_static_import_base_image(args, record) or ''}"
+        for record, service in scoped_pairs
+        if stage == "images"
+        and (nginx_static_html_bind_source(args, record, service) is not None or nginx_requires_platform_import(args, record))
+    ]
     scope_material = {
         "stage": stage,
         "profile": args.profile,
@@ -2293,6 +2318,7 @@ def migration_stage_scope(args: argparse.Namespace, stage: str, service_pairs: l
         "secretStoreName": args.secret_store_name if stage == "secrets" else "",
         "secretStoreKind": args.secret_store_kind if stage == "secrets" else "",
         "secretKeys": sorted(secret_keys) if stage == "secrets" else [],
+        "imageInputs": sorted(image_inputs) if stage == "images" else [],
         "manifestImages": sorted(manifest_images) if stage in {"images", "manifests"} else [],
         "records": record_keys,
     }
@@ -3253,12 +3279,13 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
             print(f"Skipping Docker-socket service image candidate: {record.file}::{record.name}")
             continue
         static_source = nginx_static_html_bind_source(args, record, service)
-        if record.kind != "application" and not record.build_only and static_source is None:
+        platform_nginx_import = nginx_requires_platform_import(args, record)
+        if record.kind != "application" and not record.build_only and static_source is None and not platform_nginx_import:
             continue
         image = record.image
         build = service.get("build")
         needs_tag = record.build_only or (image is not None and (not image.tag or image.tag in import_project.MUTABLE_TAGS))
-        if needs_tag or static_source is not None:
+        if needs_tag or static_source is not None or platform_nginx_import:
             candidates.append((record, service, build))
     source_image_records: dict[str, list[import_project.ServiceRecord]] = {}
     alias_image_records: dict[str, list[import_project.ServiceRecord]] = {}
@@ -3313,18 +3340,30 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                     cleanup_operator_container_tags(args, [target_image])
                 continue
             if static_source is not None:
-                if record.image is None:
+                base_image = nginx_static_import_base_image(args, record)
+                if base_image is None:
                     skipped.append(f"{record.file}::{record.name} (nginx static import has no base image)")
                     continue
-                source_ready, source_cleanup_images = ensure_source_image(args, record)
-                if not source_ready:
-                    skipped.append(f"{record.file}::{record.name} ({record.image.display})")
-                    continue
-                pulled_source_images.extend(source_cleanup_images)
-                temporary_dockerfile = create_nginx_static_dockerfile(record.image.display)
+                base_was_local = container_image_exists(args, base_image)
+                ensure_container_image(args, base_image, "Platform nginx base")
+                if not base_was_local:
+                    pulled_source_images.append(base_image)
+                temporary_dockerfile = create_nginx_static_dockerfile(base_image)
                 retry_build = (static_source, str(temporary_dockerfile))
+                if record.image is not None and base_image != record.image.display:
+                    print(f"Aligning nginx service {record.name} from {record.image.display} to platform image {base_image}.")
                 print(f"Baking nginx static directory {static_source} into {target_image}.")
                 run_command(container_command(args, "build", "-t", target_image, "-f", str(temporary_dockerfile), "."), cwd=static_source)
+            elif nginx_platform_base_image(args, record) is not None:
+                base_image = nginx_platform_base_image(args, record)
+                assert base_image is not None
+                base_was_local = container_image_exists(args, base_image)
+                ensure_container_image(args, base_image, "Platform nginx base")
+                if not base_was_local:
+                    pulled_source_images.append(base_image)
+                if record.image is not None and base_image != record.image.display:
+                    print(f"Aligning nginx service {record.name} from {record.image.display} to platform image {base_image}.")
+                run_command(container_command(args, "tag", base_image, target_image))
             elif build:
                 context, dockerfile, fallback_note = resolve_build_source(compose_path, build)
                 if fallback_note:
@@ -4010,6 +4049,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     project_path, compose_files, service_pairs, findings, values = load_context(args)
+    args.expected_webserver_image = import_project.expected_webserver_image(values, args.webserver)
     resolve_auto_import_batch(args, service_pairs)
     resolve_lab_safe_import_batch(args, service_pairs)
     if args.auto_prepare and args.stage != "prepare":

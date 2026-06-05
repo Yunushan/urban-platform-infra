@@ -291,6 +291,9 @@ Image migration has three modes:
   migrated image skip that archive upload. If the operator container cache has a
   corrupted build layer and archive save fails, build-only candidates are rebuilt
   once with `--no-cache` before failing the import.
+- Imported nginx edge/static services are rebuilt or retagged from the selected
+  platform nginx image, for example `nginxinc/nginx-unprivileged:1.31.1`, instead
+  of keeping older Compose nginx pins such as `nginx:1.18`.
 - `MIGRATION_IMAGE_MODE=skip` leaves application image movement out of the
   migration run. Use this when keeping the existing Compose deployment running
   temporarily behind external routing.
