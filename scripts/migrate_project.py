@@ -806,6 +806,37 @@ def nginx_rollout_base_image(args: argparse.Namespace, record: import_project.Se
     return nginx_static_import_base_image(args, record)
 
 
+def expected_nginx_version_from_image(image: str) -> str | None:
+    reference = image.split("@", 1)[0]
+    last_segment = reference.rsplit("/", 1)[-1]
+    if ":" not in last_segment:
+        return None
+    tag = last_segment.rsplit(":", 1)[1]
+    if re.fullmatch(r"[0-9]+(?:\.[0-9]+){1,2}(?:[-._a-zA-Z0-9]*)?", tag):
+        version = tag.split("-", 1)[0].split("_", 1)[0]
+        return f"nginx/{version}"
+    return None
+
+
+def verify_nginx_import_image(args: argparse.Namespace, record: import_project.ServiceRecord, image: str) -> None:
+    if not nginx_requires_platform_import(args, record):
+        return
+    base_image = nginx_static_import_base_image(args, record)
+    expected_version = expected_nginx_version_from_image(base_image or "")
+    command = container_command(args, "run", "--rm", image, "nginx", "-v")
+    print(f"+ {' '.join(command)}")
+    result = subprocess.run(command, text=True, capture_output=True)
+    details = command_details(result)
+    if result.returncode != 0:
+        raise SystemExit(f"Could not verify nginx import image `{image}`: {details}")
+    if expected_version and expected_version not in details:
+        raise SystemExit(
+            f"Refusing to preload nginx image `{image}` because it reports `{details}`, "
+            f"but the selected platform nginx image requires `{expected_version}`."
+        )
+    print(f"Verified nginx platform image {image}: {details}")
+
+
 def numeric_port(value: str | int | None) -> int | None:
     if value is None:
         return None
@@ -1549,7 +1580,13 @@ def tune_rke2_nodes_for_import(args: argparse.Namespace) -> None:
         run_remote_sudo_shell(args, ssh_options, target, script)
 
 
-def preload_archives_to_nodes(args: argparse.Namespace, archives: list[Path], stale_archive_names: set[str], image_refs: list[str] | None = None) -> bool:
+def preload_archives_to_nodes(
+    args: argparse.Namespace,
+    archives: list[Path],
+    stale_archive_names: set[str],
+    image_refs: list[str] | None = None,
+    force: bool = False,
+) -> bool:
     targets, ssh_options = preload_node_targets(args)
     archives = sorted(archives)
     if not archives:
@@ -1573,14 +1610,14 @@ def preload_archives_to_nodes(args: argparse.Namespace, archives: list[Path], st
             f"for name in {stale_name_args}; do rm -f {remote_image_dir}/\"$name\"; done",
         )
         for archive in archives:
-            if image_refs and remote_containerd_has_image(args, ssh_options, target, image_refs):
+            if image_refs and not force and remote_containerd_has_image(args, ssh_options, target, image_refs):
                 tag_preloaded_image_on_nodes(args, image_refs, image_refs)
                 print(f"Image {image_refs[0]} is already present on {target}; skipping archive upload.")
                 continue
             remote_archive = f"{remote_image_dir_raw}/{archive.name}"
             run_remote_sudo_upload(args, ssh_options, target, archive, remote_archive)
             if args.rke2_import_images:
-                import_preloaded_archives_to_containerd(args, ssh_options, target, remote_image_dir, [archive.name], image_refs)
+                import_preloaded_archives_to_containerd(args, ssh_options, target, remote_image_dir, [archive.name], image_refs, force=force)
     return True
 
 
@@ -1591,9 +1628,18 @@ def import_preloaded_archives_to_containerd(
     remote_image_dir: str,
     archive_names: list[str],
     image_refs: list[str] | None = None,
+    force: bool = False,
 ) -> None:
     archive_name_args = " ".join(shlex.quote(name) for name in archive_names)
     image_ref_args = " ".join(shlex.quote(ref) for ref in image_refs or [])
+    force_remove_script = ""
+    if force and image_refs:
+        force_remove_script = (
+            f"image_ref_args={shlex.quote(image_ref_args)}; "
+            "for ref in $image_ref_args; do "
+            "\"$ctr\" --address \"$socket\" -n k8s.io images rm \"$ref\" >/dev/null 2>&1 || true; "
+            "done; "
+        )
     tag_alias_script = ""
     if image_refs:
         tag_alias_script = (
@@ -1615,6 +1661,7 @@ def import_preloaded_archives_to_containerd(
         "socket=/run/k3s/containerd/containerd.sock; "
         f"image_dir={remote_image_dir}; "
         "if [ -S \"$socket\" ] && [ -x \"$ctr\" ]; then "
+        f"{force_remove_script}"
         f"for name in {archive_name_args}; do "
         "archive=\"$image_dir/$name\"; "
         "[ -e \"$archive\" ] || continue; "
@@ -3001,6 +3048,7 @@ def generate_bundle(
         "",
         "## Automation Entry Points",
         "",
+        "- `make import-auto` is the canonical one-command workflow; it runs operator kubeconfig repair, `deploy-auto`, and then this guarded migration flow.",
         "- `run-migration.sh` runs all guarded stages for the selected import batch.",
         "- Automatic preparation creates the private report, DB target map, dump directory, and optional registry login before guarded stages run.",
         "- `scripts/00-cluster-preflight.sh` checks Kubernetes readiness, nodes, storage, imported workload capacity, ingress reachability, and RKE2/HA node services before mutation.",
@@ -3015,6 +3063,7 @@ def generate_bundle(
         "- Dry-run is the default. Use `MIGRATION_EXECUTE=true` only on the trusted operator machine.",
         "- Secret and database stages require `MIGRATION_ALLOW_SECRET_MATERIAL=true` so secret values are read only at execution time.",
         "- Database restore uses the private `MIGRATION_DB_TARGETS` file. The generated map targets CloudNativePG app secrets when platform database instances exist.",
+        "- Platform PostgreSQL 18 targets are reconciled by `deploy-auto` before import when `MIGRATION_DEPLOY_PLATFORM=true` on the `make import-auto` path.",
         "- Registry login is used only with image mode `registry`. Image mode `preload` avoids registry login by writing image archives and optionally copying them to RKE2 nodes.",
         "- The default `lab` migration profile writes `lab-profile-values.yaml`, forces imported workloads to one replica, and adds small resource requests/limits to imported workloads.",
         "- Lab imports can run in batches. `MIGRATION_IMPORT_BATCH=auto` selects the first batch with pending secret, image, or manifest work.",
@@ -3493,6 +3542,7 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                     continue
                 pulled_source_images.extend(source_cleanup_images)
                 run_command(container_command(args, "tag", record.image.display, target_image))
+            verify_nginx_import_image(args, record, target_image)
             generated_images.append(target_image)
             if args.image_mode == "registry":
                 run_command(container_command(args, "push", target_image))
@@ -3520,6 +3570,7 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                         [archive_path],
                         stale_archive_names if not preload_initialized else set(),
                         image_refs,
+                        force=refresh_preload_image,
                     )
                     archives_copied = archives_copied or copied
                     preload_initialized = True

@@ -70,11 +70,15 @@ make import-auto PROJECT_PATH=/path/to/compose-project \
 
 `import-auto` is a convenience wrapper around `import-migrate` with
 `MIGRATION_STAGE=all` and `MIGRATION_EXECUTE=true`. It first runs the
-operator-kubeconfig repair target, then verifies Kubernetes API reachability
-with `MIGRATION_KUBECONFIG`, runs the import cluster preflight, and only then
-applies secrets, reads database target secrets, or applies manifests. Use it
-after the dry-run report looks correct and the operator machine has access to
-the Compose project, Docker, Kubernetes, and the RKE2 nodes.
+operator-kubeconfig repair target, deploys/upgrades the platform chart with
+`deploy-auto` so PostgreSQL 18 CloudNativePG targets and platform services are
+present, then verifies Kubernetes API reachability with `MIGRATION_KUBECONFIG`,
+runs the import cluster preflight, and only then applies secrets, reads
+database target secrets, or applies manifests. Set
+`MIGRATION_DEPLOY_PLATFORM=false` only when the platform chart has already been
+reconciled intentionally. Use it after the dry-run report looks correct and the
+operator machine has access to the Compose project, Docker, Kubernetes, and the
+RKE2 nodes.
 `make environment-profile-plan` should be the first public-safe planning command
 for a lab, staging, or production migration. It writes
 `reports/environment-profile-plan.md` and
@@ -151,6 +155,12 @@ global because databases are shared dependencies controlled by
 `MIGRATION_DB_TARGETS`. In production mode, `MIGRATION_IMAGE_MODE` defaults to
 `registry` and unavailable database sources fail the run unless explicitly
 overridden.
+
+Imported nginx edge/static services are rebuilt or retagged from the selected
+platform nginx image. In preload mode, nginx platform imports use a stable
+nginx-base suffix and force-refresh the node-side RKE2/containerd image ref, so
+a previous `nginx:1.18` import cannot silently satisfy a later
+`nginxinc/nginx-unprivileged:1.30.2` rollout.
 
 To run later lab batches after the first automatic batch, rerun the same
 `import-auto` command. Resume state skips completed batch stages and

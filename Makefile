@@ -183,6 +183,7 @@ MIGRATION_CLEANUP_OPERATOR_IMAGES ?= true
 MIGRATION_PRUNE_OPERATOR_CACHE ?= true
 MIGRATION_SKIP_DOCKER_SOCKET_SERVICES ?= true
 MIGRATION_SKIP_UNAVAILABLE_DATABASES ?= $(if $(filter production,$(MIGRATION_PROFILE)),false,true)
+MIGRATION_DEPLOY_PLATFORM ?= true
 MIGRATION_SECRET_PROVIDER ?= kubernetes
 MIGRATION_SECRET_REMOTE_PREFIX ?= example/urban-platform/import
 MIGRATION_SECRET_STORE_NAME ?= vault
@@ -661,6 +662,12 @@ import-migrate: python-deps ## Generate or execute guarded migration automation 
 
 import-auto: MIGRATION_AUTO_REPAIR_CLUSTER = true
 import-auto: operator-kubeconfig ## Run the full import migration workflow with preparation, execution, and validation.
+	@if [ "$(MIGRATION_DEPLOY_PLATFORM)" = "true" ]; then \
+		echo "Deploying/upgrading the platform chart before import so PostgreSQL 18 and platform services are reconciled."; \
+		$(MAKE) deploy-auto VALUES="$(VALUES)" NAMESPACE="$(MIGRATION_NAMESPACE)"; \
+	else \
+		echo "Skipping platform Helm deploy because MIGRATION_DEPLOY_PLATFORM=$(MIGRATION_DEPLOY_PLATFORM)."; \
+	fi
 	$(MAKE) import-migrate PROJECT_PATH="$(PROJECT_PATH)" VALUES="$(VALUES)" INGRESS="$(INGRESS)" WEB="$(WEB)" DB="$(DB)" IMPORT_REDACT="$(IMPORT_REDACT)" IMPORT_STRICT="$(IMPORT_STRICT)" MIGRATION_STAGE=all MIGRATION_EXECUTE=true
 
 $(ANSIBLE_COLLECTIONS_STAMP): $(ANSIBLE_COLLECTION_REQUIREMENTS) $(PYTHON_DEPS_STAMP)
