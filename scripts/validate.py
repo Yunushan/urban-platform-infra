@@ -4036,9 +4036,11 @@ for kafka_template_token in [
     '.Values.messaging.kafka.zookeeper.resources',
     '.Values.messaging.kafka.resources',
     '.Values.messaging.kafka.ui.resources',
+    'cip.podSecurityContext',
+    'cip.securityContext',
 ]:
     if kafka_template_token not in kafka_template_text:
-        errors.append(f'Kafka template missing lab replica-aware token: {kafka_template_token}')
+        errors.append(f'Kafka template missing lab replica/security token: {kafka_template_token}')
 redis_template_text = (ROOT / 'helm/urban-platform-infra/templates/redis.yaml').read_text(encoding='utf-8')
 for redis_template_token in [
     '$redisReplicas',
@@ -4046,9 +4048,11 @@ for redis_template_token in [
     'sentinel monitor mymaster',
     '.Values.messaging.redis.resources',
     '.Values.messaging.redis.sentinel.resources',
+    'cip.podSecurityContext',
+    'cip.securityContext',
 ]:
     if redis_template_token not in redis_template_text:
-        errors.append(f'Redis template missing lab replica-aware token: {redis_template_token}')
+        errors.append(f'Redis template missing lab replica/security token: {redis_template_token}')
 namespace_resource_template = (ROOT / 'helm/urban-platform-infra/templates/namespace-resource-controls.yaml').read_text(encoding='utf-8')
 for namespace_resource_token in ['kind: LimitRange', 'kind: ResourceQuota', '.Values.namespace.limitRange', '.Values.namespace.resourceQuota']:
     if namespace_resource_token not in namespace_resource_template:

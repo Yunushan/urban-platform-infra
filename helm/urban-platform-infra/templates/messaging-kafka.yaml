@@ -51,10 +51,16 @@ spec:
         app.kubernetes.io/part-of: urban-platform-infra
     spec:
       {{- include "cip.podSpecDefaults" . | nindent 6 }}
+      {{- if .Values.global.podSecurityContext.enabled }}
+      securityContext:
+        {{- include "cip.podSecurityContext" . | nindent 8 }}
+      {{- end }}
       containers:
         - name: zookeeper
           image: {{ include "cip.image" (list . .Values.messaging.kafka.zookeeper.image) | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy | quote }}
+          securityContext:
+            {{- include "cip.securityContext" . | nindent 12 }}
           command: ["/bin/bash", "-ec"]
           args:
             - |
@@ -132,10 +138,16 @@ spec:
         app.kubernetes.io/part-of: urban-platform-infra
     spec:
       {{- include "cip.podSpecDefaults" . | nindent 6 }}
+      {{- if .Values.global.podSecurityContext.enabled }}
+      securityContext:
+        {{- include "cip.podSecurityContext" . | nindent 8 }}
+      {{- end }}
       containers:
         - name: kafka
           image: {{ include "cip.image" (list . .Values.messaging.kafka.image) | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy | quote }}
+          securityContext:
+            {{- include "cip.securityContext" . | nindent 12 }}
           env:
             - name: POD_NAME
               valueFrom:
@@ -220,10 +232,16 @@ spec:
         app.kubernetes.io/part-of: urban-platform-infra
     spec:
       {{- include "cip.podSpecDefaults" . | nindent 6 }}
+      {{- if .Values.global.podSecurityContext.enabled }}
+      securityContext:
+        {{- include "cip.podSecurityContext" . | nindent 8 }}
+      {{- end }}
       containers:
         - name: kafka-ui
           image: {{ include "cip.image" (list . .Values.messaging.kafka.ui.image) | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy | quote }}
+          securityContext:
+            {{- include "cip.securityContext" . | nindent 12 }}
           env:
             - name: KAFKA_CLUSTERS_0_NAME
               value: urban-platform

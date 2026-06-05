@@ -62,10 +62,16 @@ spec:
         app.kubernetes.io/part-of: urban-platform-infra
     spec:
       {{- include "cip.podSpecDefaults" . | nindent 6 }}
+      {{- if .Values.global.podSecurityContext.enabled }}
+      securityContext:
+        {{- include "cip.podSecurityContext" . | nindent 8 }}
+      {{- end }}
       containers:
         - name: redis
           image: {{ include "cip.image" (list . .Values.messaging.redis.image) | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy | quote }}
+          securityContext:
+            {{- include "cip.securityContext" . | nindent 12 }}
           command: ["/bin/sh", "-ec"]
           args:
             - |
@@ -90,6 +96,8 @@ spec:
         - name: sentinel
           image: {{ include "cip.image" (list . .Values.messaging.redis.image) | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy | quote }}
+          securityContext:
+            {{- include "cip.securityContext" . | nindent 12 }}
           command: ["redis-sentinel", "/config/sentinel.conf"]
           ports:
             - name: sentinel
