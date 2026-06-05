@@ -673,10 +673,27 @@ def legacy_image_archive_name(record: import_project.ServiceRecord) -> str:
     return f"{k8s_name(record.name)}.tar"
 
 
+def image_variant_suffix(args: argparse.Namespace, record: import_project.ServiceRecord) -> str | None:
+    if nginx_requires_platform_import(args, record):
+        base_image = nginx_static_import_base_image(args, record)
+        if base_image:
+            digest = hashlib.sha256(base_image.encode("utf-8")).hexdigest()[:8]
+            return f"nginx-{digest}"
+    return None
+
+
+def local_import_tag(args: argparse.Namespace, record: import_project.ServiceRecord) -> str:
+    suffix = image_variant_suffix(args, record)
+    if suffix:
+        return f"{args.image_tag}-{suffix}"
+    return args.image_tag
+
+
 def local_import_image(args: argparse.Namespace, record: import_project.ServiceRecord) -> str:
+    tag = local_import_tag(args, record)
     if args.registry:
-        return f"{args.registry.rstrip('/')}/{image_artifact_name(record)}:{args.image_tag}"
-    return f"urban-platform-import/{image_artifact_name(record)}:{args.image_tag}"
+        return f"{args.registry.rstrip('/')}/{image_artifact_name(record)}:{tag}"
+    return f"urban-platform-import/{image_artifact_name(record)}:{tag}"
 
 
 def image_reference_aliases(image: str) -> set[str]:

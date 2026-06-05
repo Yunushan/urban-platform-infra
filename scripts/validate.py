@@ -1963,6 +1963,8 @@ for migration_automation_token in [
     'cleanup_operator_archives',
     'prune_operator_container_cache',
     'legacy_image_archive_name',
+    'image_variant_suffix',
+    'local_import_tag',
     'nginx_platform_base_image',
     'nginx_requires_platform_import',
     'nginx_static_import_base_image',
@@ -2078,6 +2080,7 @@ for project_import_docs_token in [
     'MIGRATION_EXECUTE=true',
     'MIGRATION_REGISTRY_USERNAME',
     'Imported nginx edge/static services are rebuilt or retagged from the selected',
+    'stable nginx-base suffix',
     'secretRef',
     'generated Ingress candidates are applied only if',
 ]:

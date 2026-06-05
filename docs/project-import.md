@@ -293,7 +293,9 @@ Image migration has three modes:
   once with `--no-cache` before failing the import.
 - Imported nginx edge/static services are rebuilt or retagged from the selected
   platform nginx image, for example `nginxinc/nginx-unprivileged:1.30.2`, instead
-  of keeping older Compose nginx pins such as `nginx:1.18`.
+  of keeping older Compose nginx pins such as `nginx:1.18`. Their imported image
+  tags include a stable nginx-base suffix so RKE2 does not reuse an older
+  same-tag containerd cache after the platform nginx version changes.
 - `MIGRATION_IMAGE_MODE=skip` leaves application image movement out of the
   migration run. Use this when keeping the existing Compose deployment running
   temporarily behind external routing.
