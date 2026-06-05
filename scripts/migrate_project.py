@@ -1679,12 +1679,15 @@ def render_private_report(
 def handled_error_reason(args: argparse.Namespace, finding: import_project.Finding) -> str | None:
     if finding.severity != "ERROR":
         return None
-    if args.allow_secret_material and "literal secret value" in finding.message:
-        return "automated-secret-import"
-    if args.secret_provider in {"external-secrets", "vault"} and "literal secret value" in finding.message:
-        return f"{args.secret_provider}-secret-reference"
-    if args.secret_provider in {"sops", "sealed-secrets"} and "literal secret value" in finding.message:
-        return f"{args.secret_provider}-encrypted-handoff"
+    if "literal secret value" in finding.message:
+        if args.stage not in {"all", "secrets", "databases"}:
+            return "literal-secret-not-used-by-selected-stage"
+        if args.allow_secret_material:
+            return "automated-secret-import"
+        if args.secret_provider in {"external-secrets", "vault"}:
+            return f"{args.secret_provider}-secret-reference"
+        if args.secret_provider in {"sops", "sealed-secrets"}:
+            return f"{args.secret_provider}-encrypted-handoff"
     if args.skip_docker_socket_services and "/var/run/docker.sock" in finding.message:
         return "skipped-docker-socket-service"
     return None
