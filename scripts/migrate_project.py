@@ -45,7 +45,7 @@ MEMORY_QUANTITY_RE = re.compile(r"^([0-9]+)(Ki|Mi|Gi|Ti)?$")
 CPU_QUANTITY_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(m)?$")
 PRIVATE_IPV4_RE = re.compile(r"\b(?:10|192\.168|172\.(?:1[6-9]|2[0-9]|3[01]))(?:\.[0-9]{1,3}){2}\b")
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 5
+MANIFEST_GENERATOR_VERSION = 7
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -1215,6 +1215,25 @@ def kubernetes_service_manifest(
     }
 
 
+def imported_workload_pod_security_context(args: argparse.Namespace) -> dict[str, Any]:
+    if args.import_security_context == "compat":
+        return {}
+    return {
+        "runAsNonRoot": True,
+        "seccompProfile": {"type": "RuntimeDefault"},
+    }
+
+
+def imported_workload_container_security_context(args: argparse.Namespace) -> dict[str, Any]:
+    if args.import_security_context == "compat":
+        return {}
+    return {
+        "allowPrivilegeEscalation": False,
+        "runAsNonRoot": True,
+        "capabilities": {"drop": ["ALL"]},
+    }
+
+
 def kubernetes_workload_manifests(
     args: argparse.Namespace,
     service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
@@ -1257,6 +1276,9 @@ def kubernetes_workload_manifests(
             "imagePullPolicy": "IfNotPresent",
             "ports": [{"name": kubernetes_service_port_name(port), "containerPort": port, "protocol": "TCP"} for port in ports],
         }
+        container_security_context = imported_workload_container_security_context(args)
+        if container_security_context:
+            container["securityContext"] = container_security_context
         if generate_tcp_probes:
             container["readinessProbe"] = {"tcpSocket": {"port": ports[0]}, "initialDelaySeconds": 15, "periodSeconds": 10}
             container["livenessProbe"] = {"tcpSocket": {"port": ports[0]}, "initialDelaySeconds": 45, "periodSeconds": 20}
@@ -1274,6 +1296,9 @@ def kubernetes_workload_manifests(
             "enableServiceLinks": False,
             "containers": [container],
         }
+        pod_security_context = imported_workload_pod_security_context(args)
+        if pod_security_context:
+            pod_spec["securityContext"] = pod_security_context
         if volumes:
             pod_spec["volumes"] = volumes
         annotations = {
@@ -2405,8 +2430,15 @@ def migration_stage_scope(args: argparse.Namespace, stage: str, service_pairs: l
         "imageMode": args.image_mode if stage in {"images", "manifests"} else "",
         "imageTag": args.image_tag if stage in {"images", "manifests"} else "",
         "registry": args.registry if stage in {"images", "manifests"} else "",
+        "importSecurityContext": args.import_security_context if stage == "manifests" else "",
         "ingressHost": args.ingress_host if stage == "manifests" else "",
-        "tlsEnabled": bool(args.tls_cert_file or args.tls_key_file) if stage == "manifests" else False,
+        "tlsMode": selected_tls_mode(args) if stage == "manifests" else "",
+        "tlsCertFingerprint": file_fingerprint(Path(args.tls_cert_file).expanduser()) if stage == "manifests" and args.tls_cert_file else "",
+        "tlsKeyFingerprint": file_fingerprint(Path(args.tls_key_file).expanduser()) if stage == "manifests" and args.tls_key_file else "",
+        "tlsPfxFingerprint": file_fingerprint(Path(args.tls_pfx_file).expanduser()) if stage == "manifests" and args.tls_pfx_file else "",
+        "tlsExtraHosts": sorted(split_csv(args.tls_extra_hosts)) if stage == "manifests" else [],
+        "tlsIssuerName": args.tls_le_issuer_name if stage == "manifests" else "",
+        "tlsIssuerKind": args.tls_le_issuer_kind if stage == "manifests" else "",
         "manifestGeneratorVersion": MANIFEST_GENERATOR_VERSION if stage == "manifests" else "",
         "databaseTargets": str(database_target_path) if stage == "databases" else "",
         "databaseTargetsFingerprint": file_fingerprint(database_target_path) if stage == "databases" else "",
@@ -2762,6 +2794,7 @@ def preflight_check_ingress_endpoint(
     warnings: list[str],
 ) -> None:
     host = resolve_ingress_host(args, values)
+    mode = selected_tls_mode(args)
     tls_files = [path for path in [args.tls_cert_file, args.tls_key_file] if path]
     if args.tls_cert_file or args.tls_key_file:
         missing = [path for path in tls_files if not Path(path).expanduser().exists()]
@@ -2771,6 +2804,34 @@ def preflight_check_ingress_endpoint(
             preflight_record(lines, "ERROR", message)
         elif len(tls_files) == 2:
             preflight_record(lines, "OK", "Ingress TLS certificate and key files exist.")
+    if mode == "pfx":
+        pfx_file = Path(args.tls_pfx_file).expanduser()
+        if not args.tls_pfx_file or not pfx_file.exists():
+            message = "MIGRATION_TLS_MODE=pfx requires an existing MIGRATION_TLS_PFX_FILE."
+            errors.append(message)
+            preflight_record(lines, "ERROR", message)
+        else:
+            preflight_record(lines, "OK", "Ingress TLS PFX file exists.")
+    if mode == "letsencrypt":
+        hosts = tls_hosts(args, host)
+        if not hosts:
+            message = "MIGRATION_TLS_MODE=letsencrypt requires MIGRATION_INGRESS_HOST or MIGRATION_TLS_EXTRA_HOSTS."
+            errors.append(message)
+            preflight_record(lines, "ERROR", message)
+        elif any(host_is_ip_address(item) for item in hosts):
+            message = "Let's Encrypt cannot issue certificates for IP addresses; use a DNS name or MIGRATION_TLS_MODE=lab-ca."
+            errors.append(message)
+            preflight_record(lines, "ERROR", message)
+        elif any(item.startswith("*.") for item in hosts) and args.tls_le_create_issuer:
+            message = "Let's Encrypt wildcard certificates require a preconfigured DNS-01 cert-manager issuer."
+            errors.append(message)
+            preflight_record(lines, "ERROR", message)
+        elif args.tls_le_create_issuer and not args.tls_le_email:
+            message = "MIGRATION_TLS_LE_EMAIL is required when MIGRATION_TLS_MODE=letsencrypt creates an ACME issuer."
+            errors.append(message)
+            preflight_record(lines, "ERROR", message)
+        else:
+            preflight_record(lines, "OK", f"Ingress TLS mode `{mode}` is configured.")
 
     if not host:
         message = "No ingress host was configured; skipping DNS/TLS endpoint reachability check."
@@ -3042,6 +3103,8 @@ def generate_bundle(
         f"- Dump directory: `{args.dump_dir}`",
         f"- Database target map: `{database_targets_path(args)}`",
         f"- Image mode: `{args.image_mode}`",
+        f"- TLS mode: `{selected_tls_mode(args)}`",
+        f"- Imported workload security context: `{args.import_security_context}`",
         f"- Auto prepare: `{str(args.auto_prepare).lower()}`",
         f"- Execute mode: `{str(args.execute).lower()}`",
         f"- Redacted output: `{str(args.redact_sensitive).lower()}`",
@@ -3057,6 +3120,7 @@ def generate_bundle(
         "- `scripts/03-database-dump-restore.sh` dumps PostgreSQL-family sources and restores only targets defined in the private database target map; optional engines are scaffolded in that map until their engine-specific runner is enabled.",
         "- `scripts/04-generate-routing-and-storage.sh` writes imported app Deployment/Service manifests plus Traefik routing candidates.",
         "- `scripts/05-validate.sh` writes the source compatibility backlog quietly and checks deployed Kubernetes runtime state.",
+        "- `import-tls.md` records the selected TLS mode and lab CA trust handoff without printing private keys or certificate contents.",
         "",
         "## Guardrails",
         "",
@@ -3064,6 +3128,7 @@ def generate_bundle(
         "- Secret and database stages require `MIGRATION_ALLOW_SECRET_MATERIAL=true` so secret values are read only at execution time.",
         "- Database restore uses the private `MIGRATION_DB_TARGETS` file. The generated map targets CloudNativePG app secrets when platform database instances exist.",
         "- Platform PostgreSQL 18 targets are reconciled by `deploy-auto` before import when `MIGRATION_DEPLOY_PLATFORM=true` on the `make import-auto` path.",
+        "- TLS modes include `lab-ca`, `cert-files`, `pfx`, `letsencrypt`, `existing-secret`, and `self-signed`; wildcard Let's Encrypt certificates require a preconfigured DNS-01 issuer.",
         "- Registry login is used only with image mode `registry`. Image mode `preload` avoids registry login by writing image archives and optionally copying them to RKE2 nodes.",
         "- The default `lab` migration profile writes `lab-profile-values.yaml`, forces imported workloads to one replica, and adds small resource requests/limits to imported workloads.",
         "- Lab imports can run in batches. `MIGRATION_IMPORT_BATCH=auto` selects the first batch with pending secret, image, or manifest work.",
@@ -3098,9 +3163,21 @@ def generate_bundle(
         f'MIGRATION_PRIVATE_DIR="${{MIGRATION_PRIVATE_DIR:-{args.private_dir}}}"\n'
         f'MIGRATION_KUBECONFIG="${{MIGRATION_KUBECONFIG:-{args.kubeconfig}}}"\n'
         f'MIGRATION_INGRESS_HOST="${{MIGRATION_INGRESS_HOST:-{args.ingress_host}}}"\n'
+        f'MIGRATION_TLS_MODE="${{MIGRATION_TLS_MODE:-{args.tls_mode}}}"\n'
         f'MIGRATION_TLS_CERT_FILE="${{MIGRATION_TLS_CERT_FILE:-{args.tls_cert_file}}}"\n'
         f'MIGRATION_TLS_KEY_FILE="${{MIGRATION_TLS_KEY_FILE:-{args.tls_key_file}}}"\n'
+        f'MIGRATION_TLS_EXTRA_HOSTS="${{MIGRATION_TLS_EXTRA_HOSTS:-{args.tls_extra_hosts}}}"\n'
+        f'MIGRATION_TLS_PFX_FILE="${{MIGRATION_TLS_PFX_FILE:-{args.tls_pfx_file}}}"\n'
+        f'MIGRATION_TLS_PFX_PASSWORD_FILE="${{MIGRATION_TLS_PFX_PASSWORD_FILE:-{args.tls_pfx_password_file}}}"\n'
+        f'MIGRATION_TLS_DURATION_DAYS="${{MIGRATION_TLS_DURATION_DAYS:-{args.tls_duration_days}}}"\n'
+        f'MIGRATION_TLS_LE_EMAIL="${{MIGRATION_TLS_LE_EMAIL:-{args.tls_le_email}}}"\n'
+        f'MIGRATION_TLS_LE_SERVER="${{MIGRATION_TLS_LE_SERVER:-{args.tls_le_server}}}"\n'
+        f'MIGRATION_TLS_LE_ISSUER_NAME="${{MIGRATION_TLS_LE_ISSUER_NAME:-{args.tls_le_issuer_name}}}"\n'
+        f'MIGRATION_TLS_LE_ISSUER_KIND="${{MIGRATION_TLS_LE_ISSUER_KIND:-{args.tls_le_issuer_kind}}}"\n'
+        f'MIGRATION_TLS_LE_PRIVATE_KEY_SECRET="${{MIGRATION_TLS_LE_PRIVATE_KEY_SECRET:-{args.tls_le_private_key_secret}}}"\n'
+        f'MIGRATION_TLS_LE_CREATE_ISSUER="${{MIGRATION_TLS_LE_CREATE_ISSUER:-{str(args.tls_le_create_issuer).lower()}}}"\n'
         f'MIGRATION_PROFILE="${{MIGRATION_PROFILE:-{args.profile}}}"\n'
+        f'MIGRATION_IMPORT_SECURITY_CONTEXT="${{MIGRATION_IMPORT_SECURITY_CONTEXT:-{args.import_security_context}}}"\n'
         f'MIGRATION_LAB_WORKLOAD_CPU_REQUEST="${{MIGRATION_LAB_WORKLOAD_CPU_REQUEST:-{args.lab_workload_cpu_request}}}"\n'
         f'MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST="${{MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST:-{args.lab_workload_memory_request}}}"\n'
         f'MIGRATION_LAB_WORKLOAD_CPU_LIMIT="${{MIGRATION_LAB_WORKLOAD_CPU_LIMIT:-{args.lab_workload_cpu_limit}}}"\n'
@@ -3158,13 +3235,22 @@ def generate_bundle(
         'if [ "$MIGRATION_RESUME" = "false" ]; then RESUME_FLAG="--no-resume"; fi\n'
         'FORCE_RERUN_FLAG=""\n'
         'if [ "$MIGRATION_FORCE_RERUN" = "true" ]; then FORCE_RERUN_FLAG="--force-rerun"; fi\n'
+        'TLS_LE_ISSUER_FLAG="--tls-le-create-issuer"\n'
+        'if [ "$MIGRATION_TLS_LE_CREATE_ISSUER" = "false" ]; then TLS_LE_ISSUER_FLAG="--tls-le-existing-issuer"; fi\n'
     )
     callback = (
         '"$PYTHON" "$REPO_ROOT/scripts/migrate_project.py" '
         '--project-path "$PROJECT_PATH" --values "$VALUES" --namespace "$NAMESPACE" '
         '--output "$MIGRATION_OUTPUT" --private-dir "$MIGRATION_PRIVATE_DIR" --kubeconfig "$MIGRATION_KUBECONFIG" --auto-prepare '
-        '--ingress-host "$MIGRATION_INGRESS_HOST" --tls-cert-file "$MIGRATION_TLS_CERT_FILE" --tls-key-file "$MIGRATION_TLS_KEY_FILE" '
+        '--ingress-host "$MIGRATION_INGRESS_HOST" '
+        '--tls-mode "$MIGRATION_TLS_MODE" --tls-cert-file "$MIGRATION_TLS_CERT_FILE" --tls-key-file "$MIGRATION_TLS_KEY_FILE" '
+        '--tls-extra-hosts "$MIGRATION_TLS_EXTRA_HOSTS" --tls-pfx-file "$MIGRATION_TLS_PFX_FILE" '
+        '--tls-pfx-password-file "$MIGRATION_TLS_PFX_PASSWORD_FILE" --tls-duration-days "$MIGRATION_TLS_DURATION_DAYS" '
+        '--tls-le-email "$MIGRATION_TLS_LE_EMAIL" --tls-le-server "$MIGRATION_TLS_LE_SERVER" '
+        '--tls-le-issuer-name "$MIGRATION_TLS_LE_ISSUER_NAME" --tls-le-issuer-kind "$MIGRATION_TLS_LE_ISSUER_KIND" '
+        '--tls-le-private-key-secret "$MIGRATION_TLS_LE_PRIVATE_KEY_SECRET" $TLS_LE_ISSUER_FLAG '
         '--profile "$MIGRATION_PROFILE" '
+        '--import-security-context "$MIGRATION_IMPORT_SECURITY_CONTEXT" '
         '--lab-workload-cpu-request "$MIGRATION_LAB_WORKLOAD_CPU_REQUEST" '
         '--lab-workload-memory-request "$MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST" '
         '--lab-workload-cpu-limit "$MIGRATION_LAB_WORKLOAD_CPU_LIMIT" '
@@ -3840,7 +3926,131 @@ def ingress_san(host: str) -> str:
     return f"IP:{host}"
 
 
+def split_csv(value: str) -> list[str]:
+    return [item.strip() for item in re.split(r"[,\s]+", value or "") if item.strip()]
+
+
+def tls_hosts(args: argparse.Namespace, host: str) -> list[str]:
+    hosts = []
+    if host:
+        hosts.append(host)
+    hosts.extend(split_csv(args.tls_extra_hosts))
+    return list(dict.fromkeys(hosts))
+
+
+def selected_tls_mode(args: argparse.Namespace) -> str:
+    mode = args.tls_mode
+    if mode != "auto":
+        return mode
+    if args.tls_pfx_file:
+        return "pfx"
+    if args.tls_cert_file or args.tls_key_file:
+        return "cert-files"
+    if args.profile == "production":
+        return "existing-secret"
+    return "lab-ca"
+
+
+def tls_private_dir(args: argparse.Namespace) -> Path:
+    path = Path(args.private_dir).expanduser() / "tls"
+    secure_directory(path)
+    return path
+
+
+def tls_material_prefix(args: argparse.Namespace, hosts: list[str]) -> Path:
+    primary = hosts[0] if hosts else "ingress"
+    digest = hashlib.sha256(",".join(hosts).encode("utf-8")).hexdigest()[:8]
+    return tls_private_dir(args) / f"{k8s_name(primary)}-{digest}"
+
+
+def openssl_required(message: str) -> None:
+    if not shutil.which("openssl"):
+        raise SystemExit(f"{message} because `openssl` is not installed on the operator machine.")
+
+
+def write_openssl_server_config(path: Path, hosts: list[str]) -> None:
+    primary = hosts[0]
+    dns_entries = []
+    ip_entries = []
+    for host in hosts:
+        try:
+            ipaddress.ip_address(host)
+            ip_entries.append(host)
+        except ValueError:
+            dns_entries.append(host)
+    alt_lines = []
+    for index, name in enumerate(dns_entries, start=1):
+        alt_lines.append(f"DNS.{index} = {name}")
+    for index, address in enumerate(ip_entries, start=1):
+        alt_lines.append(f"IP.{index} = {address}")
+    content = "\n".join(
+        [
+            "[req]",
+            "prompt = no",
+            "distinguished_name = req_distinguished_name",
+            "req_extensions = v3_req",
+            "",
+            "[req_distinguished_name]",
+            f"CN = {primary}",
+            "",
+            "[v3_req]",
+            "basicConstraints = CA:FALSE",
+            "keyUsage = digitalSignature, keyEncipherment",
+            "extendedKeyUsage = serverAuth",
+            "subjectAltName = @alt_names",
+            "",
+            "[alt_names]",
+            *alt_lines,
+            "",
+        ]
+    )
+    write_file(path, content)
+
+
+def write_tls_report(args: argparse.Namespace, *, mode: str, secret_name: str, hosts: list[str], ca_file: Path | None = None) -> None:
+    output = Path(args.output).expanduser()
+    display_hosts = ["<ingress-host>" for _host in hosts] if args.redact_sensitive and hosts else hosts
+    lines = [
+        "# Import TLS Mode",
+        "",
+        "This report is public-safe. It does not include private keys, PFX passwords, certificate contents, or private CA key paths.",
+        "",
+        f"- TLS mode: `{mode}`",
+        f"- TLS secret: `{'<tls-secret>' if args.redact_sensitive else secret_name}`",
+        f"- Hosts/SANs: `{', '.join(display_hosts) if display_hosts else '-'}`",
+    ]
+    if ca_file is not None:
+        ca_display = "<private-ca-certificate-path>" if args.redact_sensitive else str(ca_file)
+        lines.extend(
+            [
+                f"- Lab CA certificate: `{ca_display}`",
+                "",
+                "## Browser Trust",
+                "",
+                "- Install the lab CA certificate on each workstation that should trust the lab domain.",
+                "- Do not commit the lab CA private key or generated TLS material.",
+            ]
+        )
+    if mode == "letsencrypt":
+        lines.extend(
+            [
+                "",
+                "## Cert-Manager",
+                "",
+                "- Cert-manager Certificate resources request the Kubernetes TLS secret automatically.",
+                "- Wildcard certificates require a DNS-01 issuer that already has the DNS provider credentials.",
+            ]
+        )
+    write_file(output / "import-tls.md", "\n".join(lines) + "\n")
+
+
 def apply_tls_secret_from_files(args: argparse.Namespace, name: str, cert_file: Path, key_file: Path) -> None:
+    secure_file(key_file)
+    if cert_file.exists():
+        try:
+            cert_file.chmod(0o644)
+        except PermissionError:
+            print(f"Could not chmod {cert_file}; verify permissions manually.")
     create_command = kubectl_command(
         args,
         [
@@ -3863,59 +4073,305 @@ def apply_tls_secret_from_files(args: argparse.Namespace, name: str, cert_file: 
     run_command(kubectl_apply_stdin_command(args, namespace=args.namespace), stdin=result.stdout)
 
 
+def generate_lab_ca_certificate(args: argparse.Namespace) -> tuple[Path, Path]:
+    openssl_required("Cannot create lab CA TLS material")
+    tls_dir = tls_private_dir(args)
+    ca_key = tls_dir / "urban-platform-lab-ca.key"
+    ca_crt = tls_dir / "urban-platform-lab-ca.crt"
+    duration_days = int(getattr(args, "tls_duration_days", 3650) or 3650)
+    if ca_key.exists() and ca_crt.exists():
+        return ca_crt, ca_key
+    run_command(["openssl", "genrsa", "-out", str(ca_key), "4096"])
+    secure_file(ca_key)
+    run_command(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-new",
+            "-nodes",
+            "-key",
+            str(ca_key),
+            "-sha256",
+            "-days",
+            str(duration_days),
+            "-subj",
+            "/CN=Urban Platform Lab CA",
+            "-out",
+            str(ca_crt),
+        ]
+    )
+    return ca_crt, ca_key
+
+
+def generate_lab_ca_signed_certificate(args: argparse.Namespace, hosts: list[str]) -> tuple[Path, Path, Path]:
+    if not hosts:
+        raise SystemExit("Cannot create lab CA ingress certificate without MIGRATION_INGRESS_HOST or MIGRATION_TLS_EXTRA_HOSTS.")
+    ca_crt, ca_key = generate_lab_ca_certificate(args)
+    prefix = tls_material_prefix(args, hosts)
+    cert_file = prefix.with_suffix(".crt")
+    key_file = prefix.with_suffix(".key")
+    csr_file = prefix.with_suffix(".csr")
+    config_file = prefix.with_suffix(".openssl.cnf")
+    duration_days = int(getattr(args, "tls_duration_days", 3650) or 3650)
+    if cert_file.exists() and key_file.exists():
+        return cert_file, key_file, ca_crt
+    write_openssl_server_config(config_file, hosts)
+    run_command(["openssl", "genrsa", "-out", str(key_file), "2048"])
+    secure_file(key_file)
+    run_command(["openssl", "req", "-new", "-key", str(key_file), "-out", str(csr_file), "-config", str(config_file)])
+    run_command(
+        [
+            "openssl",
+            "x509",
+            "-req",
+            "-in",
+            str(csr_file),
+            "-CA",
+            str(ca_crt),
+            "-CAkey",
+            str(ca_key),
+            "-CAcreateserial",
+            "-out",
+            str(cert_file),
+            "-days",
+            str(duration_days),
+            "-sha256",
+            "-extensions",
+            "v3_req",
+            "-extfile",
+            str(config_file),
+        ]
+    )
+    return cert_file, key_file, ca_crt
+
+
+def generate_self_signed_certificate(args: argparse.Namespace, hosts: list[str]) -> tuple[Path, Path]:
+    if not hosts:
+        raise SystemExit("Cannot create a self-signed ingress certificate without MIGRATION_INGRESS_HOST or MIGRATION_TLS_EXTRA_HOSTS.")
+    openssl_required("Cannot create self-signed ingress certificate")
+    prefix = tls_material_prefix(args, hosts)
+    cert_file = prefix.with_suffix(".selfsigned.crt")
+    key_file = prefix.with_suffix(".selfsigned.key")
+    config_file = prefix.with_suffix(".selfsigned.openssl.cnf")
+    duration_days = int(getattr(args, "tls_duration_days", 3650) or 3650)
+    write_openssl_server_config(config_file, hosts)
+    run_command(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-nodes",
+            "-newkey",
+            "rsa:2048",
+            "-days",
+            str(duration_days),
+            "-keyout",
+            str(key_file),
+            "-out",
+            str(cert_file),
+            "-config",
+            str(config_file),
+            "-extensions",
+            "v3_req",
+        ]
+    )
+    secure_file(key_file)
+    return cert_file, key_file
+
+
+def pfx_password(args: argparse.Namespace) -> str:
+    if args.tls_pfx_password_file:
+        path = Path(args.tls_pfx_password_file).expanduser()
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError as exc:
+            raise SystemExit(f"Could not read MIGRATION_TLS_PFX_PASSWORD_FILE `{path}`: {exc}") from exc
+        return lines[0] if lines else ""
+    return os.environ.get("MIGRATION_TLS_PFX_PASSWORD", "")
+
+
+def extract_pfx_certificate(args: argparse.Namespace) -> tuple[Path, Path]:
+    openssl_required("Cannot extract PFX ingress certificate")
+    pfx_file = Path(args.tls_pfx_file).expanduser()
+    if not pfx_file.is_file():
+        raise SystemExit(f"MIGRATION_TLS_PFX_FILE was not found: {pfx_file}")
+    prefix = tls_private_dir(args) / f"{k8s_name(pfx_file.stem)}-pfx"
+    cert_file = prefix.with_suffix(".crt")
+    key_file = prefix.with_suffix(".key")
+    env = os.environ.copy()
+    env["MIGRATION_TLS_PFX_PASSWORD"] = pfx_password(args)
+    subprocess.run(
+        [
+            "openssl",
+            "pkcs12",
+            "-in",
+            str(pfx_file),
+            "-clcerts",
+            "-nokeys",
+            "-out",
+            str(cert_file),
+            "-passin",
+            "env:MIGRATION_TLS_PFX_PASSWORD",
+        ],
+        env=env,
+        check=True,
+    )
+    subprocess.run(
+        [
+            "openssl",
+            "pkcs12",
+            "-in",
+            str(pfx_file),
+            "-nocerts",
+            "-nodes",
+            "-out",
+            str(key_file),
+            "-passin",
+            "env:MIGRATION_TLS_PFX_PASSWORD",
+        ],
+        env=env,
+        check=True,
+    )
+    secure_file(key_file)
+    return cert_file, key_file
+
+
+def cert_manager_certificate_manifest(
+    args: argparse.Namespace,
+    secret_name: str,
+    hosts: list[str],
+) -> dict[str, Any]:
+    dns_names = []
+    ip_addresses = []
+    for host in hosts:
+        try:
+            ipaddress.ip_address(host)
+            ip_addresses.append(host)
+        except ValueError:
+            dns_names.append(host)
+    if not dns_names and not ip_addresses:
+        raise SystemExit("Cannot request cert-manager TLS without MIGRATION_INGRESS_HOST or MIGRATION_TLS_EXTRA_HOSTS.")
+    cert_spec: dict[str, Any] = {
+        "secretName": secret_name,
+        "issuerRef": {
+            "name": args.tls_le_issuer_name,
+            "kind": args.tls_le_issuer_kind,
+            "group": "cert-manager.io",
+        },
+    }
+    if dns_names:
+        cert_spec["dnsNames"] = dns_names
+    if ip_addresses:
+        cert_spec["ipAddresses"] = ip_addresses
+    return {
+        "apiVersion": "cert-manager.io/v1",
+        "kind": "Certificate",
+        "metadata": {
+            "name": k8s_name(f"{secret_name}-certificate"),
+            "namespace": args.namespace,
+            "labels": {"app.kubernetes.io/managed-by": "urban-platform-import"},
+        },
+        "spec": cert_spec,
+    }
+
+
+def cert_manager_issuer_manifest(args: argparse.Namespace) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "name": args.tls_le_issuer_name,
+        "labels": {"app.kubernetes.io/managed-by": "urban-platform-import"},
+    }
+    if args.tls_le_issuer_kind != "ClusterIssuer":
+        metadata["namespace"] = args.namespace
+    return {
+        "apiVersion": "cert-manager.io/v1",
+        "kind": args.tls_le_issuer_kind,
+        "metadata": metadata,
+        "spec": {
+            "acme": {
+                "email": args.tls_le_email,
+                "server": args.tls_le_server,
+                "privateKeySecretRef": {"name": args.tls_le_private_key_secret},
+                "solvers": [{"http01": {"ingress": {"class": args.ingress_controller}}}],
+            }
+        },
+    }
+
+
+def ensure_letsencrypt_certificate(args: argparse.Namespace, secret_name: str, hosts: list[str]) -> None:
+    if not args.tls_le_email and args.tls_le_create_issuer:
+        raise SystemExit("MIGRATION_TLS_LE_EMAIL is required when MIGRATION_TLS_MODE=letsencrypt creates an ACME issuer.")
+    if not hosts:
+        raise SystemExit("MIGRATION_TLS_MODE=letsencrypt requires MIGRATION_INGRESS_HOST or MIGRATION_TLS_EXTRA_HOSTS.")
+    if any(host_is_ip_address(host) for host in hosts):
+        raise SystemExit("Let's Encrypt cannot issue certificates for IP addresses. Use a DNS name or MIGRATION_TLS_MODE=lab-ca.")
+    if any(host.startswith("*.") for host in hosts) and args.tls_le_create_issuer:
+        raise SystemExit(
+            "Let's Encrypt wildcard certificates require a DNS-01 cert-manager issuer. "
+            "Create that issuer with DNS provider credentials, then rerun with "
+            "MIGRATION_TLS_LE_CREATE_ISSUER=false and MIGRATION_TLS_LE_ISSUER_NAME=<issuer>."
+        )
+    if args.tls_le_create_issuer:
+        run_command(
+            kubectl_apply_stdin_command(args, namespace=args.namespace if args.tls_le_issuer_kind != "ClusterIssuer" else None),
+            stdin=yaml.safe_dump(cert_manager_issuer_manifest(args), sort_keys=False),
+        )
+    run_command(
+        kubectl_apply_stdin_command(args, namespace=args.namespace),
+        stdin=yaml.safe_dump(cert_manager_certificate_manifest(args, secret_name, hosts), sort_keys=False),
+    )
+
+
 def ensure_ingress_tls_secret(args: argparse.Namespace, values: dict[str, Any], host: str) -> None:
     tls_values = values.get("ingress", {}).get("tls", {})
     if not tls_values.get("enabled", True):
         return
     secret_name = ingress_tls_secret_name(values)
-    if kubernetes_secret_exists(args, secret_name):
-        print(f"Ingress TLS secret already exists: {secret_name}")
+    hosts = tls_hosts(args, host)
+    mode = selected_tls_mode(args)
+    if not getattr(args, "tls_duration_days", None):
+        args.tls_duration_days = int(tls_values.get("selfSigned", {}).get("durationDays", 3650))
+
+    if mode == "existing-secret":
+        if kubernetes_secret_exists(args, secret_name):
+            print(f"Ingress TLS secret already exists: {secret_name}")
+            write_tls_report(args, mode=mode, secret_name=secret_name, hosts=hosts)
+            return
+        raise SystemExit(
+            f"MIGRATION_TLS_MODE=existing-secret requires Kubernetes TLS secret `{secret_name}` "
+            f"to already exist in namespace `{args.namespace}`."
+        )
+
+    if mode == "letsencrypt":
+        print(f"Requesting ingress TLS secret {secret_name} with cert-manager/Let's Encrypt.")
+        ensure_letsencrypt_certificate(args, secret_name, hosts)
+        write_tls_report(args, mode=mode, secret_name=secret_name, hosts=hosts)
         return
 
-    cert_file_arg = args.tls_cert_file
-    key_file_arg = args.tls_key_file
-    if cert_file_arg or key_file_arg:
-        if not cert_file_arg or not key_file_arg:
-            raise SystemExit("Both MIGRATION_TLS_CERT_FILE and MIGRATION_TLS_KEY_FILE are required when providing an ingress certificate.")
-        cert_file = Path(cert_file_arg).expanduser()
-        key_file = Path(key_file_arg).expanduser()
+    ca_file: Path | None = None
+    if mode == "cert-files":
+        if not args.tls_cert_file or not args.tls_key_file:
+            raise SystemExit("MIGRATION_TLS_MODE=cert-files requires both MIGRATION_TLS_CERT_FILE and MIGRATION_TLS_KEY_FILE.")
+        cert_file = Path(args.tls_cert_file).expanduser()
+        key_file = Path(args.tls_key_file).expanduser()
         if not cert_file.is_file() or not key_file.is_file():
             raise SystemExit(f"Provided ingress TLS files were not found: cert={cert_file} key={key_file}")
-        print(f"Creating ingress TLS secret {secret_name} from provided certificate files.")
-        apply_tls_secret_from_files(args, secret_name, cert_file, key_file)
-        return
-
-    if not host:
-        raise SystemExit("Cannot create a self-signed ingress certificate without MIGRATION_INGRESS_HOST, MIGRATION_CLUSTER_DOMAIN, ingress.host, or global.cluster.domain.")
-    if not shutil.which("openssl"):
-        raise SystemExit("Cannot create default self-signed ingress certificate because `openssl` is not installed on the operator machine.")
-
-    duration_days = int(tls_values.get("selfSigned", {}).get("durationDays", 3650))
-    with tempfile.TemporaryDirectory(prefix="urban-platform-tls-") as tmp_dir:
-        cert_file = Path(tmp_dir) / "tls.crt"
-        key_file = Path(tmp_dir) / "tls.key"
-        run_command(
-            [
-                "openssl",
-                "req",
-                "-x509",
-                "-nodes",
-                "-newkey",
-                "rsa:2048",
-                "-days",
-                str(duration_days),
-                "-subj",
-                f"/CN={host}",
-                "-addext",
-                f"subjectAltName={ingress_san(host)}",
-                "-keyout",
-                str(key_file),
-                "-out",
-                str(cert_file),
-            ]
-        )
-        print(f"Creating self-signed ingress TLS secret {secret_name} for {host}.")
-        apply_tls_secret_from_files(args, secret_name, cert_file, key_file)
+        print(f"Applying ingress TLS secret {secret_name} from provided certificate files.")
+    elif mode == "pfx":
+        if not args.tls_pfx_file:
+            raise SystemExit("MIGRATION_TLS_MODE=pfx requires MIGRATION_TLS_PFX_FILE.")
+        cert_file, key_file = extract_pfx_certificate(args)
+        print(f"Applying ingress TLS secret {secret_name} from extracted PFX material.")
+    elif mode == "lab-ca":
+        cert_file, key_file, ca_file = generate_lab_ca_signed_certificate(args, hosts)
+        print(f"Applying ingress TLS secret {secret_name} from lab CA-signed certificate.")
+    elif mode == "self-signed":
+        cert_file, key_file = generate_self_signed_certificate(args, hosts)
+        print(f"Applying ingress TLS secret {secret_name} from self-signed certificate.")
+    else:
+        raise SystemExit(f"Unsupported MIGRATION_TLS_MODE={mode}.")
+    apply_tls_secret_from_files(args, secret_name, cert_file, key_file)
+    write_tls_report(args, mode=mode, secret_name=secret_name, hosts=hosts, ca_file=ca_file)
 
 
 def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]], values: dict[str, Any]) -> None:
@@ -4209,10 +4665,23 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--ingress-host", default=os.environ.get("MIGRATION_INGRESS_HOST", os.environ.get("MIGRATION_CLUSTER_DOMAIN", "")))
     parser.add_argument("--tls-cert-file", default=os.environ.get("MIGRATION_TLS_CERT_FILE", ""))
     parser.add_argument("--tls-key-file", default=os.environ.get("MIGRATION_TLS_KEY_FILE", ""))
+    parser.add_argument("--tls-mode", choices=["auto", "existing-secret", "lab-ca", "self-signed", "cert-files", "pfx", "letsencrypt"], default=os.environ.get("MIGRATION_TLS_MODE", "auto"))
+    parser.add_argument("--tls-extra-hosts", default=os.environ.get("MIGRATION_TLS_EXTRA_HOSTS", ""))
+    parser.add_argument("--tls-pfx-file", default=os.environ.get("MIGRATION_TLS_PFX_FILE", ""))
+    parser.add_argument("--tls-pfx-password-file", default=os.environ.get("MIGRATION_TLS_PFX_PASSWORD_FILE", ""))
+    parser.add_argument("--tls-duration-days", type=int, default=int(os.environ["MIGRATION_TLS_DURATION_DAYS"]) if os.environ.get("MIGRATION_TLS_DURATION_DAYS") else 0)
+    parser.add_argument("--tls-le-email", default=os.environ.get("MIGRATION_TLS_LE_EMAIL", ""))
+    parser.add_argument("--tls-le-server", default=os.environ.get("MIGRATION_TLS_LE_SERVER", "https://acme-v02.api.letsencrypt.org/directory"))
+    parser.add_argument("--tls-le-issuer-name", default=os.environ.get("MIGRATION_TLS_LE_ISSUER_NAME", "urban-platform-letsencrypt"))
+    parser.add_argument("--tls-le-issuer-kind", choices=["Issuer", "ClusterIssuer"], default=os.environ.get("MIGRATION_TLS_LE_ISSUER_KIND", "ClusterIssuer"))
+    parser.add_argument("--tls-le-private-key-secret", default=os.environ.get("MIGRATION_TLS_LE_PRIVATE_KEY_SECRET", "urban-platform-letsencrypt-account"))
+    parser.add_argument("--tls-le-create-issuer", dest="tls_le_create_issuer", action="store_true", default=os.environ.get("MIGRATION_TLS_LE_CREATE_ISSUER", "true").lower() != "false")
+    parser.add_argument("--tls-le-existing-issuer", dest="tls_le_create_issuer", action="store_false")
     parser.add_argument("--ingress-controller", choices=["traefik", "nginx"], default="traefik")
     parser.add_argument("--webserver", choices=["nginx", "apache-httpd", "apache-tomcat", "traefik"], default="nginx")
     parser.add_argument("--database", default="postgresql")
     parser.add_argument("--profile", choices=["lab", "production"], default=os.environ.get("MIGRATION_PROFILE", "lab"))
+    parser.add_argument("--import-security-context", choices=["restricted", "compat"], default=os.environ.get("MIGRATION_IMPORT_SECURITY_CONTEXT", "restricted"))
     parser.add_argument("--lab-workload-cpu-request", default=os.environ.get("MIGRATION_LAB_WORKLOAD_CPU_REQUEST", "25m"))
     parser.add_argument("--lab-workload-memory-request", default=os.environ.get("MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST", "64Mi"))
     parser.add_argument("--lab-workload-cpu-limit", default=os.environ.get("MIGRATION_LAB_WORKLOAD_CPU_LIMIT", "250m"))

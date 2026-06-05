@@ -142,8 +142,14 @@ stateful stages in `/var/lib/urban-platform/private/migration-state.yaml`.
 The lab profile keeps imported workloads to one replica, adds small CPU/memory
 requests and limits to generated imported Deployment manifests, keeps
 autoscaling, observability, backups, and optional platform capabilities
-disabled, and constrains platform database, Kafka, ZooKeeper, and Redis defaults
-for small clusters. In lab mode, `MIGRATION_IMAGE_MODE` defaults to `preload`
+disabled, applies restricted-compatible pod/container security contexts to
+generated imports, and constrains platform database, Kafka, ZooKeeper, and
+Redis defaults for small clusters. If a legacy image cannot run as non-root yet,
+use `MIGRATION_IMPORT_SECURITY_CONTEXT=compat` only as a temporary migration
+escape hatch; the default `restricted` mode removes Pod Security warn/audit
+noise by setting `RuntimeDefault` seccomp, `runAsNonRoot`, dropped Linux
+capabilities, and disabled privilege escalation. In lab mode,
+`MIGRATION_IMAGE_MODE` defaults to `preload`
 and unavailable database sources are skipped with a private report entry so a
 small lab can continue. For very large Compose projects, import a subset first
 or deliberately raise `MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS`; the default
@@ -346,9 +352,19 @@ Run `make edge-migration-plan` before applying route candidates. It writes
 `reports/edge-migration-plan.md`, a public-safe view of the selected ingress
 class, TLS mode, HTTP redirect, source allowlist, backend-Service apply guard,
 and nginx/Traefik edge conversion rules.
-For `import-auto`, set `MIGRATION_TLS_CERT_FILE` and `MIGRATION_TLS_KEY_FILE`
-to create the ingress TLS secret from your certificate files; otherwise the
-import stage creates a self-signed fallback secret for `MIGRATION_INGRESS_HOST`.
+For `import-auto`, set `MIGRATION_TLS_MODE` to select how the ingress TLS secret
+is produced. `auto` defaults to a reusable private lab CA in lab mode and an
+existing-secret requirement in production mode. Use `MIGRATION_TLS_MODE=lab-ca`
+for an internal domain such as `auyp.local`; the import writes
+`reports/import-migration/import-tls.md` with the CA certificate path to trust on
+browser workstations. Use `MIGRATION_TLS_MODE=cert-files` with
+`MIGRATION_TLS_CERT_FILE` and `MIGRATION_TLS_KEY_FILE` for `.crt`, `.cert`, or
+`.pem` material; use `MIGRATION_TLS_MODE=pfx` with `MIGRATION_TLS_PFX_FILE` and
+`MIGRATION_TLS_PFX_PASSWORD_FILE` for PKCS#12/PFX bundles; use
+`MIGRATION_TLS_MODE=letsencrypt` with cert-manager ACME settings when a real DNS
+name and issuer are available. Wildcard SANs can be passed with
+`MIGRATION_TLS_EXTRA_HOSTS`, but Let's Encrypt wildcards require a DNS-01 issuer
+that already has DNS provider credentials.
 When execution is enabled, generated Ingress candidates are applied only if
 their backend Kubernetes Service already exists in the target namespace. If the
 Compose edge service has not been converted to a chart workload yet, the

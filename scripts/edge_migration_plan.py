@@ -155,15 +155,21 @@ def source_allowlist_count(values: dict[str, Any], allowed_cidrs: str) -> tuple[
     return enabled or bool(allowed_cidrs.strip()), len(list(dict.fromkeys(cidrs)))
 
 
-def tls_mode(values: dict[str, Any], tls_cert_file: str, tls_key_file: str) -> str:
+def tls_mode(values: dict[str, Any], requested_mode: str, tls_cert_file: str, tls_key_file: str, tls_pfx_file: str, tls_le_email: str) -> str:
     tls = nested(values, "ingress", "tls", default={})
     if not isinstance(tls, dict) or tls.get("enabled", True) is False:
         return "disabled"
+    if requested_mode and requested_mode != "auto":
+        return requested_mode
     external_tls = nested(values, "secretManagement", "externalSecrets", "ingressTls", "enabled", default=False)
     if external_tls:
         return "external-secret"
+    if tls_pfx_file:
+        return "pfx"
+    if tls_le_email:
+        return "letsencrypt"
     if tls_cert_file or tls_key_file:
-        return "provided-cert-files"
+        return "cert-files"
     if tls.get("createSecret", True) is False:
         return "existing-secret"
     cert_manager = tls.get("certManager", {}) if isinstance(tls.get("certManager", {}), dict) else {}
@@ -184,6 +190,7 @@ def findings(
     tls_mode_name: str,
     tls_cert_file: str,
     tls_key_file: str,
+    tls_pfx_file: str,
     source_allowlist_enabled: bool,
     profile: dict[str, Any],
 ) -> list[str]:
@@ -196,6 +203,8 @@ def findings(
         result.append("ERROR: Selected edge profile requires TLS, but ingress TLS is disabled.")
     if bool(tls_cert_file) != bool(tls_key_file):
         result.append("ERROR: Both MIGRATION_TLS_CERT_FILE and MIGRATION_TLS_KEY_FILE are required when providing certificate files.")
+    if tls_mode_name == "pfx" and not tls_pfx_file:
+        result.append("ERROR: MIGRATION_TLS_MODE=pfx requires MIGRATION_TLS_PFX_FILE.")
     if ingress_class == "traefik" and not source_allowlist_enabled and bool(profile.get("sourceAllowListRecommended", False)):
         result.append("WARN: Source allowlist is not enabled; review public route exposure before production cutover.")
     if ingress_class == "none":
@@ -213,7 +222,7 @@ def generate_report(args: argparse.Namespace, config: dict[str, Any], values: di
     ingress_host = args.ingress_host or str(nested(values, "ingress", "host", default="") or nested(values, "global", "cluster", "domain", default=""))
     tls_enabled = bool(nested(values, "ingress", "tls", "enabled", default=True))
     tls_secret_name = str(nested(values, "ingress", "tls", "secretName", default="urban-platform-tls"))
-    tls_mode_name = tls_mode(values, args.tls_cert_file, args.tls_key_file)
+    tls_mode_name = tls_mode(values, args.tls_mode, args.tls_cert_file, args.tls_key_file, args.tls_pfx_file, args.tls_le_email)
     source_allowlist_enabled, source_allowlist_count_value = source_allowlist_count(values, args.allowed_cidrs)
     ssl_redirect = bool(nested(values, "ingress", "sslRedirect", default=True))
     force_ssl_redirect = bool(nested(values, "ingress", "forceSslRedirect", default=True))
@@ -225,6 +234,7 @@ def generate_report(args: argparse.Namespace, config: dict[str, Any], values: di
         tls_mode_name=tls_mode_name,
         tls_cert_file=args.tls_cert_file,
         tls_key_file=args.tls_key_file,
+        tls_pfx_file=args.tls_pfx_file,
         source_allowlist_enabled=source_allowlist_enabled,
         profile=profile,
     )
@@ -278,8 +288,9 @@ def generate_report(args: argparse.Namespace, config: dict[str, Any], values: di
             "- Compose nginx edge gateways should move external routing to Traefik Ingress and remain as internal backends only when still needed.",
             "- Compose Traefik services should not be imported as a second edge controller when RKE2 bundled Traefik is selected.",
             "- Generated Ingress candidates are written before apply; execution applies only candidates whose backend Services already exist.",
-            "- TLS can come from an existing secret, provided cert/key files, cert-manager issuer, External Secrets, or self-signed lab fallback.",
+            "- TLS can come from an existing secret, lab private CA, cert/key files, PFX extraction, cert-manager/Let's Encrypt issuer, External Secrets, or self-signed lab fallback.",
             "- Provided cert/key files map to `MIGRATION_TLS_CERT_FILE` and `MIGRATION_TLS_KEY_FILE`.",
+            "- PFX imports map to `MIGRATION_TLS_PFX_FILE`; Let's Encrypt maps to `MIGRATION_TLS_MODE=letsencrypt` and cert-manager issuer settings.",
             "- Review source allowlist settings before opening production routes.",
             "",
             "## Guardrails",
@@ -323,8 +334,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--webserver", default="")
     parser.add_argument("--ingress-host", default="")
     parser.add_argument("--ingress-enabled", default="")
+    parser.add_argument("--tls-mode", default="auto")
     parser.add_argument("--tls-cert-file", default="")
     parser.add_argument("--tls-key-file", default="")
+    parser.add_argument("--tls-extra-hosts", default="")
+    parser.add_argument("--tls-pfx-file", default="")
+    parser.add_argument("--tls-le-email", default="")
     parser.add_argument("--allowed-cidrs", default="")
     parser.add_argument("--redact-sensitive", action="store_true")
     args = parser.parse_args(argv)
