@@ -40,6 +40,7 @@ KUBERNETES_NAMESPACE_RETRY_DELAY_SECONDS = 5
 KUBERNETES_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 CONFIGMAP_FILE_MAX_BYTES = 900 * 1024
 CONFIGMAP_TOTAL_MAX_BYTES = 950 * 1024
+OFFICIAL_LIBRARY_PULL_IMAGES = {"nginx"}
 MEMORY_QUANTITY_RE = re.compile(r"^([0-9]+)(Ki|Mi|Gi|Ti)?$")
 CPU_QUANTITY_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(m)?$")
 PRIVATE_IPV4_RE = re.compile(r"\b(?:10|192\.168|172\.(?:1[6-9]|2[0-9]|3[01]))(?:\.[0-9]{1,3}){2}\b")
@@ -1292,7 +1293,7 @@ def pullable_image(image: import_project.ImageRef) -> bool:
     if image.variable:
         return False
     first_segment = image.repository.split("/", 1)[0]
-    return "/" in image.repository or "." in first_segment or ":" in first_segment
+    return image.repository in OFFICIAL_LIBRARY_PULL_IMAGES or "/" in image.repository or "." in first_segment or ":" in first_segment
 
 
 def ensure_source_image(args: argparse.Namespace, record: import_project.ServiceRecord) -> tuple[bool, list[str]]:
