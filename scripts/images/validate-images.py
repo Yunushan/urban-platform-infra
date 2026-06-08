@@ -10,6 +10,9 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 DIGEST_RE = re.compile(r'^sha256:[A-Fa-f0-9]{64}$')
+COMPOSE_DEFAULT_RE = re.compile(
+    r'\$\{(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?P<operator>:-|-)?(?P<default>[^}]*)\}'
+)
 
 
 def as_text(value: Any) -> str:
@@ -25,12 +28,17 @@ def is_mutable_tag(tag: str, blocked: set[str]) -> bool:
     return normalized in blocked or normalized.startswith('latest-') or normalized.endswith('-latest')
 
 
-def strip_default_registry_prefix(image: str) -> str:
-    return image.replace('${REGISTRY_PREFIX:-}', '')
+def resolve_compose_default_variables(image: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        if match.group('operator'):
+            return match.group('default')
+        return match.group(0)
+
+    return COMPOSE_DEFAULT_RE.sub(replace, image)
 
 
 def parse_image_ref(image: str) -> tuple[str, str | None, str | None]:
-    value = strip_default_registry_prefix(image.strip())
+    value = resolve_compose_default_variables(image.strip())
     if '@' in value:
       repository, digest = value.rsplit('@', 1)
       return repository, None, digest
