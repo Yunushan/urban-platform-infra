@@ -45,7 +45,7 @@ MEMORY_QUANTITY_RE = re.compile(r"^([0-9]+)(Ki|Mi|Gi|Ti)?$")
 CPU_QUANTITY_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(m)?$")
 PRIVATE_IPV4_RE = re.compile(r"\b(?:10|192\.168|172\.(?:1[6-9]|2[0-9]|3[01]))(?:\.[0-9]{1,3}){2}\b")
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 8
+MANIFEST_GENERATOR_VERSION = 9
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -4527,7 +4527,14 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
         print(f"Ingress host `{host}` is an IP address; generating hostless Traefik Ingress rules.")
     tls_enabled = bool(values.get("ingress", {}).get("tls", {}).get("enabled", True))
     tls_secret_name = ingress_tls_secret_name(values)
-    for record, service in scoped_service_pairs:
+    edge_service_pairs = [
+        (record, service)
+        for record, service in service_pairs
+        if record.kind == "nginx" and import_project.has_edge_publish(record.ports)
+    ]
+    if edge_service_pairs and plan["selectedBatch"] is not None:
+        print("Evaluating edge ingress candidates across the full import set so canonical routes are not tied to the selected workload batch.")
+    for record, service in edge_service_pairs:
         if record.kind == "nginx" and import_project.has_edge_publish(record.ports):
             name = kubernetes_workload_name(record)
             rule: dict[str, Any] = {

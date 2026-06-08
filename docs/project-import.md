@@ -379,7 +379,9 @@ When execution is enabled, generated Ingress candidates are applied only if
 their backend Kubernetes Service already exists in the target namespace. If the
 Compose edge service has not been converted to a chart workload yet, the
 candidate is still written to `reports/import-migration/manifests/` but is not
-applied as a broken route.
+applied as a broken route. Edge Ingress candidates are evaluated across the full
+import set even when a workload batch is selected, so canonical routes continue
+to converge after the edge Service exists.
 When `MIGRATION_INGRESS_HOST` is a DNS name, the import also writes a Traefik
 HTTP catch-all redirect so raw VIP/IP requests such as `http://<cluster-vip>/login`
 are redirected to the canonical FQDN, for example

@@ -1987,6 +1987,8 @@ for migration_automation_token in [
     'Skipping ingress candidate',
     'No ingress candidates were applied because their backend services are not present yet.',
     'canonical_host_http_redirect_manifests',
+    'edge_service_pairs',
+    'Evaluating edge ingress candidates across the full import set',
     'redirectRegex',
     'traefik-canonical-host-redirect',
     'traefik_middleware_refs',
