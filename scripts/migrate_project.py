@@ -45,7 +45,7 @@ MEMORY_QUANTITY_RE = re.compile(r"^([0-9]+)(Ki|Mi|Gi|Ti)?$")
 CPU_QUANTITY_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(m)?$")
 PRIVATE_IPV4_RE = re.compile(r"\b(?:10|192\.168|172\.(?:1[6-9]|2[0-9]|3[01]))(?:\.[0-9]{1,3}){2}\b")
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 10
+MANIFEST_GENERATOR_VERSION = 11
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -1310,6 +1310,10 @@ def kubernetes_workload_manifests(
         pod_template_annotations = {"urban-platform.io/probe-mode": probe_mode}
         if nginx_base_image := nginx_rollout_base_image(args, record):
             pod_template_annotations["urban-platform.io/nginx-base-image"] = nginx_base_image
+            rollout_fingerprint = hashlib.sha256(
+                f"{nginx_base_image}|{local_import_image(args, record)}|{MANIFEST_GENERATOR_VERSION}".encode("utf-8")
+            ).hexdigest()[:12]
+            pod_template_annotations["urban-platform.io/nginx-rollout-fingerprint"] = rollout_fingerprint
         deployment = {
             "apiVersion": "apps/v1",
             "kind": "Deployment",
@@ -4838,6 +4842,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
 
     not_ready: list[str] = []
     nginx_versions: list[str] = []
+    nginx_mismatches: list[str] = []
     pod_waiting = pod_waiting_summaries(pods)
     for item in deployments:
         name = item.get("metadata", {}).get("name", "unknown")
@@ -4845,8 +4850,15 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
         if ready < desired:
             not_ready.append(f"{name} ({ready}/{desired})")
         annotations = item.get("spec", {}).get("template", {}).get("metadata", {}).get("annotations", {}) or {}
-        if annotations.get("urban-platform.io/nginx-base-image"):
-            nginx_versions.append(f"{name}: {nginx_deployment_version(args, str(name))}")
+        if nginx_base_image := annotations.get("urban-platform.io/nginx-base-image"):
+            actual_version = nginx_deployment_version(args, str(name))
+            expected_version = expected_nginx_version_from_image(str(nginx_base_image))
+            expected_summary = f" expected nginx/{expected_version}" if expected_version else ""
+            nginx_versions.append(f"{name}: {actual_version}{expected_summary}")
+            if expected_version and f"nginx/{expected_version}" not in actual_version:
+                nginx_mismatches.append(
+                    f"{name}: expected nginx/{expected_version} from {nginx_base_image}, got {actual_version}"
+                )
 
     runtime_images = sorted({image for pod in pods for image in pod_container_images(pod)})
     database_images = [
@@ -4855,7 +4867,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
         if any(token in image.lower() for token in ["postgres", "postgis", "timescale"])
     ]
 
-    status = "PASS" if not not_ready else "FAIL"
+    status = "PASS" if not not_ready and not nginx_mismatches else "FAIL"
     lines.extend(
         [
             "## Result",
@@ -4868,6 +4880,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
             f"- Pods with waiting containers: `{len(pod_waiting)}`",
             f"- CNPG clusters needing attention: `{len(cnpg_summaries)}`",
             f"- PVCs not bound: `{len(pvc_summaries)}`",
+            f"- nginx version mismatches: `{len(nginx_mismatches)}`",
             "",
             "## Deployment Readiness",
             "",
@@ -4905,6 +4918,9 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
         lines.extend(f"- `{item}`" for item in nginx_versions)
     else:
         lines.append("- No imported nginx deployment with `urban-platform.io/nginx-base-image` annotation was found.")
+    if nginx_mismatches:
+        lines.extend(["", "## nginx Version Mismatches", ""])
+        lines.extend(f"- `{item}`" for item in nginx_mismatches)
 
     lines.extend(["", "## Database Runtime Images", ""])
     if database_images:
@@ -4924,6 +4940,8 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
         problems = []
         if not_ready:
             problems.append(f"not-ready deployment(s): {', '.join(not_ready[:20])}")
+        if nginx_mismatches:
+            problems.append(f"{len(nginx_mismatches)} nginx version mismatch(es)")
         if pod_waiting:
             problems.append(f"{len(pod_waiting)} pod waiting reason(s)")
         if cnpg_summaries:
