@@ -15,8 +15,8 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5013:5013
-    - 5021:5021
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5013:5013"
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5021:5021"
   app-02:
     image: ${REGISTRY_PREFIX:-}example-app-02:0.1.0
     restart: unless-stopped
@@ -27,7 +27,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5006:5006
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5006:5006"
   app-03:
     image: ${REGISTRY_PREFIX:-}example-app-03:0.1.0
     restart: unless-stopped
@@ -38,8 +38,8 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5019:5019
-    - 3000:3000
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5019:5019"
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:3000:3000"
   app-04:
     image: ${REGISTRY_PREFIX:-}example-app-04:0.1.0
     restart: unless-stopped
@@ -50,8 +50,8 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5020:5020
-    - 3001:3001
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5020:5020"
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:3001:3001"
   app-05:
     image: ${REGISTRY_PREFIX:-}example-app-05:0.1.0
     restart: unless-stopped
@@ -62,7 +62,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5004:5004
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5004:5004"
   app-06:
     image: ${REGISTRY_PREFIX:-}example-app-06:0.1.0
     restart: unless-stopped
@@ -73,7 +73,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5023:5023
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5023:5023"
   app-07:
     image: ${REGISTRY_PREFIX:-}example-app-07:0.1.0
     restart: unless-stopped
@@ -84,7 +84,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5036:5036
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5036:5036"
   app-08:
     image: ${REGISTRY_PREFIX:-}example-app-08:0.1.0
     restart: unless-stopped
@@ -95,7 +95,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5037:5037
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5037:5037"
   app-09:
     image: ${REGISTRY_PREFIX:-}example-app-09:0.1.0
     restart: unless-stopped
@@ -106,7 +106,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5009:5009
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5009:5009"
   app-10:
     image: ${REGISTRY_PREFIX:-}example-app-10:0.1.0
     restart: unless-stopped
@@ -117,7 +117,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5032:5032
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5032:5032"
   app-11:
     image: ${REGISTRY_PREFIX:-}example-app-11:0.1.0
     restart: unless-stopped
@@ -128,7 +128,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5040:5040
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5040:5040"
   app-12:
     image: ${REGISTRY_PREFIX:-}example-app-12:0.1.0
     restart: unless-stopped
@@ -139,7 +139,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5031:5031
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5031:5031"
   app-13:
     image: ${REGISTRY_PREFIX:-}example-app-13:0.1.0
     restart: unless-stopped
@@ -150,7 +150,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5010:5010
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5010:5010"
   app-14:
     image: ${REGISTRY_PREFIX:-}example-app-14:0.1.0
     restart: unless-stopped
@@ -161,7 +161,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5024:5024
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5024:5024"
   app-15:
     image: ${REGISTRY_PREFIX:-}example-app-15:0.1.0
     restart: unless-stopped
@@ -172,7 +172,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 4000-4199:4000-4199
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:4000-4199:4000-4199"
   app-16:
     image: ${REGISTRY_PREFIX:-}example-app-16:0.1.0
     restart: unless-stopped
@@ -183,7 +183,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5021:5021
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5021:5021"
   app-17:
     image: ${REGISTRY_PREFIX:-}example-app-17:0.1.0
     restart: unless-stopped
@@ -194,7 +194,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5035:5035
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5035:5035"
   app-18:
     image: ${REGISTRY_PREFIX:-}example-app-18:0.1.0
     restart: unless-stopped
@@ -205,7 +205,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5005:5005
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5005:5005"
   app-19:
     image: ${REGISTRY_PREFIX:-}example-app-19:0.1.0
     restart: unless-stopped
@@ -216,7 +216,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5001:5001
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5001:5001"
   app-20:
     image: ${REGISTRY_PREFIX:-}example-app-20:0.1.0
     restart: unless-stopped
@@ -227,7 +227,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5029:5029
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5029:5029"
   app-21:
     image: ${REGISTRY_PREFIX:-}example-app-21:0.1.0
     restart: unless-stopped
@@ -238,7 +238,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5030:5030
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5030:5030"
   app-22:
     image: ${REGISTRY_PREFIX:-}example-app-22:0.1.0
     restart: unless-stopped
@@ -249,7 +249,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5025:5025
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5025:5025"
   app-23:
     image: ${REGISTRY_PREFIX:-}example-app-23:0.1.0
     restart: unless-stopped
@@ -260,7 +260,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5027:5027
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5027:5027"
   app-24:
     image: ${REGISTRY_PREFIX:-}example-app-24:0.1.0
     restart: unless-stopped
@@ -271,7 +271,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5034:5034
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5034:5034"
   app-25:
     image: ${REGISTRY_PREFIX:-}example-app-25:0.1.0
     restart: unless-stopped
@@ -282,7 +282,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5008:5008
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5008:5008"
   app-26:
     image: ${REGISTRY_PREFIX:-}example-app-26:0.1.0
     restart: unless-stopped
@@ -293,7 +293,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5028:5028
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5028:5028"
   app-27:
     image: ${REGISTRY_PREFIX:-}example-app-27:0.1.0
     restart: unless-stopped
@@ -304,7 +304,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5000:5000
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5000:5000"
   app-28:
     image: ${REGISTRY_PREFIX:-}example-app-28:0.1.0
     restart: unless-stopped
@@ -315,7 +315,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5011:5011
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5011:5011"
   app-29:
     image: ${REGISTRY_PREFIX:-}example-app-29:0.1.0
     restart: unless-stopped
@@ -326,7 +326,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5007:5007
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5007:5007"
   app-30:
     image: ${REGISTRY_PREFIX:-}example-app-30:0.1.0
     restart: unless-stopped
@@ -337,7 +337,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5038:5038
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5038:5038"
   app-31:
     image: ${REGISTRY_PREFIX:-}example-app-31:0.1.0
     restart: unless-stopped
@@ -348,7 +348,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5026:5026
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5026:5026"
   app-32:
     image: ${REGISTRY_PREFIX:-}example-app-32:0.1.0
     restart: unless-stopped
@@ -359,7 +359,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5022:5022
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5022:5022"
   app-33:
     image: ${REGISTRY_PREFIX:-}example-app-33:0.1.0
     restart: unless-stopped
@@ -370,7 +370,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5002:5002
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5002:5002"
   app-34:
     image: ${REGISTRY_PREFIX:-}example-app-34:0.1.0
     restart: unless-stopped
@@ -381,7 +381,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5003:5003
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5003:5003"
   app-35:
     image: ${REGISTRY_PREFIX:-}example-app-35:0.1.0
     restart: unless-stopped
@@ -392,7 +392,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5033:5033
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5033:5033"
   app-36:
     image: ${REGISTRY_PREFIX:-}example-app-36:0.1.0
     restart: unless-stopped
@@ -403,7 +403,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5017:5017
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5017:5017"
   app-37:
     image: ${REGISTRY_PREFIX:-}example-app-37:0.1.0
     restart: unless-stopped
@@ -414,7 +414,7 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5015:5015
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5015:5015"
   app-38:
     image: ${REGISTRY_PREFIX:-}example-app-38:0.1.0
     restart: unless-stopped
@@ -425,12 +425,12 @@ services:
     deploy:
       replicas: 3
     ports:
-    - 5018:5018
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5018:5018"
   nginx:
-    image: nginxinc/nginx-unprivileged:1.30.2
+    image: ${STANDALONE_NGINX_IMAGE:-nginxinc/nginx-unprivileged:1.30.2}
     restart: unless-stopped
     ports:
-    - 80:8080
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:${STANDALONE_HTTP_PORT:-80}:8080"
     networks:
     - urban-platform
     deploy:
@@ -451,12 +451,12 @@ services:
     depends_on:
     - zookeeper
     ports:
-    - 29092:29092
-    - 29094:29094
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:29092:29092"
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:29094:29094"
     environment:
     - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
     - KAFKA_BROKER_ID=1
-    - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+    - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092,EXTERNAL://${STANDALONE_KAFKA_EXTERNAL_HOST:-localhost}:29092
     - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
     - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
     networks:
@@ -465,7 +465,7 @@ services:
     image: provectuslabs/kafka-ui:v0.7.2
     restart: unless-stopped
     ports:
-    - 8080:8080
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:8080:8080"
     environment:
     - KAFKA_CLUSTERS_0_NAME=urban-platform
     - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
@@ -477,15 +477,15 @@ services:
     image: redis:8.6.2
     restart: unless-stopped
     ports:
-    - 6379:6379
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:6379:6379"
     networks:
     - urban-platform
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:9.4.1
     restart: unless-stopped
     ports:
-    - 9200:9200
-    - 9300:9300
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:9200:9200"
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:9300:9300"
     environment:
     - discovery.type=single-node
     - xpack.security.enabled=false
@@ -497,7 +497,7 @@ services:
     image: docker.elastic.co/kibana/kibana:9.4.1
     restart: unless-stopped
     ports:
-    - 5601:5601
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5601:5601"
     depends_on:
     - elasticsearch
     environment:
@@ -508,21 +508,21 @@ services:
     image: docker.elastic.co/logstash/logstash:9.4.0
     restart: unless-stopped
     ports:
-    - 5044:5044
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5044:5044"
     networks:
     - urban-platform
   zabbix-agent2:
     image: zabbix/zabbix-agent2:ubuntu-7.4.10
     restart: unless-stopped
     ports:
-    - 10050:10050
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:10050:10050"
     networks:
     - urban-platform
   db-01-postgres:
-    image: postgres:18.3
+    image: ${STANDALONE_POSTGRES_IMAGE:-postgres:18.3}
     restart: unless-stopped
     ports:
-    - 5451:5432
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5451:5432"
     environment:
     - POSTGRES_DB=app_db_01
     - POSTGRES_USER=app_db_01
@@ -532,10 +532,10 @@ services:
     networks:
     - urban-platform
   db-02-postgres:
-    image: postgres:18.3
+    image: ${STANDALONE_POSTGRES_IMAGE:-postgres:18.3}
     restart: unless-stopped
     ports:
-    - 5452:5432
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5452:5432"
     environment:
     - POSTGRES_DB=app_db_02
     - POSTGRES_USER=app_db_02
@@ -545,10 +545,10 @@ services:
     networks:
     - urban-platform
   db-03-postgres:
-    image: postgres:18.3
+    image: ${STANDALONE_POSTGRES_IMAGE:-postgres:18.3}
     restart: unless-stopped
     ports:
-    - 5439:5432
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5439:5432"
     environment:
     - POSTGRES_DB=app_db_03
     - POSTGRES_USER=app_db_03
@@ -558,10 +558,10 @@ services:
     networks:
     - urban-platform
   db-04-postgres:
-    image: postgres:18.3
+    image: ${STANDALONE_POSTGRES_IMAGE:-postgres:18.3}
     restart: unless-stopped
     ports:
-    - 5433:5432
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5433:5432"
     environment:
     - POSTGRES_DB=app_db_04
     - POSTGRES_USER=app_db_04
@@ -571,10 +571,10 @@ services:
     networks:
     - urban-platform
   db-05-postgres:
-    image: postgres:18.3
+    image: ${STANDALONE_POSTGRES_IMAGE:-postgres:18.3}
     restart: unless-stopped
     ports:
-    - 5450:5432
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5450:5432"
     environment:
     - POSTGRES_DB=app_db_05
     - POSTGRES_USER=app_db_05
@@ -584,10 +584,10 @@ services:
     networks:
     - urban-platform
   db-06-postgres:
-    image: postgres:18.3
+    image: ${STANDALONE_POSTGRES_IMAGE:-postgres:18.3}
     restart: unless-stopped
     ports:
-    - 5435:5432
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5435:5432"
     environment:
     - POSTGRES_DB=app_db_06
     - POSTGRES_USER=app_db_06
@@ -597,10 +597,10 @@ services:
     networks:
     - urban-platform
   db-07-postgres:
-    image: postgres:18.3
+    image: ${STANDALONE_POSTGRES_IMAGE:-postgres:18.3}
     restart: unless-stopped
     ports:
-    - 5446:5432
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5446:5432"
     environment:
     - POSTGRES_DB=app_db_07
     - POSTGRES_USER=app_db_07
@@ -610,10 +610,10 @@ services:
     networks:
     - urban-platform
   db-08-postgres:
-    image: postgres:18.3
+    image: ${STANDALONE_POSTGRES_IMAGE:-postgres:18.3}
     restart: unless-stopped
     ports:
-    - 5432:5432
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5432:5432"
     environment:
     - POSTGRES_DB=app_db_08
     - POSTGRES_USER=app_db_08
@@ -623,10 +623,10 @@ services:
     networks:
     - urban-platform
   db-09-postgres:
-    image: postgres:18.3
+    image: ${STANDALONE_POSTGRES_IMAGE:-postgres:18.3}
     restart: unless-stopped
     ports:
-    - 5434:5432
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5434:5432"
     environment:
     - POSTGRES_DB=app_db_09
     - POSTGRES_USER=app_db_09
@@ -636,10 +636,10 @@ services:
     networks:
     - urban-platform
   db-10-postgres:
-    image: postgres:18.3
+    image: ${STANDALONE_POSTGRES_IMAGE:-postgres:18.3}
     restart: unless-stopped
     ports:
-    - 5441:5432
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5441:5432"
     environment:
     - POSTGRES_DB=app_db_10
     - POSTGRES_USER=app_db_10
@@ -649,10 +649,10 @@ services:
     networks:
     - urban-platform
   db-11-postgres:
-    image: postgres:18.3
+    image: ${STANDALONE_POSTGRES_IMAGE:-postgres:18.3}
     restart: unless-stopped
     ports:
-    - 5437:5432
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5437:5432"
     environment:
     - POSTGRES_DB=app_db_11
     - POSTGRES_USER=app_db_11
@@ -662,10 +662,10 @@ services:
     networks:
     - urban-platform
   db-12-postgres:
-    image: postgres:18.3
+    image: ${STANDALONE_POSTGRES_IMAGE:-postgres:18.3}
     restart: unless-stopped
     ports:
-    - 5449:5432
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5449:5432"
     environment:
     - POSTGRES_DB=app_db_12
     - POSTGRES_USER=app_db_12
@@ -675,10 +675,10 @@ services:
     networks:
     - urban-platform
   db-13-postgres:
-    image: postgres:18.3
+    image: ${STANDALONE_POSTGRES_IMAGE:-postgres:18.3}
     restart: unless-stopped
     ports:
-    - 5444:5432
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5444:5432"
     environment:
     - POSTGRES_DB=app_db_13
     - POSTGRES_USER=app_db_13
@@ -688,10 +688,10 @@ services:
     networks:
     - urban-platform
   db-14-postgres:
-    image: postgres:18.3
+    image: ${STANDALONE_POSTGRES_IMAGE:-postgres:18.3}
     restart: unless-stopped
     ports:
-    - 5436:5432
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5436:5432"
     environment:
     - POSTGRES_DB=app_db_14
     - POSTGRES_USER=app_db_14
@@ -701,10 +701,10 @@ services:
     networks:
     - urban-platform
   db-15-postgres:
-    image: postgres:18.3
+    image: ${STANDALONE_POSTGRES_IMAGE:-postgres:18.3}
     restart: unless-stopped
     ports:
-    - 5440:5432
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5440:5432"
     environment:
     - POSTGRES_DB=app_db_15
     - POSTGRES_USER=app_db_15
@@ -714,10 +714,10 @@ services:
     networks:
     - urban-platform
   db-16-postgres:
-    image: postgres:18.3
+    image: ${STANDALONE_POSTGRES_IMAGE:-postgres:18.3}
     restart: unless-stopped
     ports:
-    - 5443:5432
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5443:5432"
     environment:
     - POSTGRES_DB=app_db_16
     - POSTGRES_USER=app_db_16
@@ -727,10 +727,10 @@ services:
     networks:
     - urban-platform
   db-17-postgis:
-    image: postgis/postgis:18-3.6
+    image: ${STANDALONE_POSTGIS_IMAGE:-postgis/postgis:18-3.6}
     restart: unless-stopped
     ports:
-    - 5438:5432
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5438:5432"
     environment:
     - POSTGRES_DB=app_db_17
     - POSTGRES_USER=app_db_17
@@ -740,10 +740,10 @@ services:
     networks:
     - urban-platform
   timescaledb:
-    image: timescale/timescaledb:2.26.4-pg18
+    image: ${STANDALONE_TIMESCALE_IMAGE:-timescale/timescaledb:2.26.4-pg18}
     restart: unless-stopped
     ports:
-    - 5448:5432
+    - "${STANDALONE_BIND_IP:-0.0.0.0}:5448:5432"
     environment:
     - POSTGRES_DB=timeseries
     - POSTGRES_USER=timeseries

@@ -49,3 +49,12 @@ For a single-machine compatibility run:
 ```bash
 make docker-up
 ```
+
+For a single-machine run that needs operator-selected bind IP, local FQDN, TLS,
+nginx, and PostgreSQL-family image pins without committing private values:
+
+```bash
+cp .env.standalone.example .env.standalone
+$EDITOR .env.standalone
+make docker-standalone-up
+```

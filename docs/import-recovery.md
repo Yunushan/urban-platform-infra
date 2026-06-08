@@ -26,6 +26,12 @@ image, database, and manifest scopes are skipped when their scope still matches.
 Preflight and validation continue to run on every retry because cluster health
 can change between runs.
 
+`import-auto` also runs Helm release recovery before the platform chart is
+applied. In lab mode this automatically resets recoverable CloudNativePG initdb
+failures, including stale clusters stuck at `Unable to create required cluster
+objects`, so the following Helm upgrade can recreate the missing cluster objects
+and PVCs without hand-deleting database resources.
+
 Use `MIGRATION_FORCE_RERUN=true` when a completed scope intentionally needs to
 run again, such as rebuilding images after a source change or reapplying
 manifests after reviewing generated YAML. Use

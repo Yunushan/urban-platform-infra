@@ -257,6 +257,18 @@ make docker-up
 make docker-status
 ```
 
+Standalone Docker profile with local IP/FQDN/TLS variables:
+
+```bash
+cp .env.standalone.example .env.standalone
+$EDITOR .env.standalone
+make docker-standalone-up
+make docker-standalone-status
+```
+
+`.env.standalone` and `.standalone/` are ignored so real domains, IP addresses,
+passwords, and generated TLS material stay private.
+
 Private GitHub/GitLab setup:
 
 ```bash

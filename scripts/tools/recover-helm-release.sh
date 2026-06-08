@@ -180,7 +180,11 @@ for item in data.get("items", []):
     status = item.get("status") or {}
     phase = status.get("phase") or ""
     ready = status.get("readyInstances") or 0
-    if phase in {"Setting up primary", "Cluster is unrecoverable and needs manual intervention"} and int(ready) == 0:
+    if phase in {
+        "Setting up primary",
+        "Cluster is unrecoverable and needs manual intervention",
+        "Unable to create required cluster objects",
+    } and int(ready) == 0:
         print(item["metadata"]["name"])
 ' || true
   )
@@ -215,6 +219,13 @@ print(count)
     failed_pods="${failed_pods:-0}"
     missing_pvc_pods="${missing_pvc_pods:-0}"
     if [ "${failed_pods}" -gt 0 ] || [ "${missing_pvc_pods}" -gt 0 ]; then
+      recoverable+=("${cluster}")
+      continue
+    fi
+    cluster_phase="$(
+      kube -n "${namespace}" get clusters.postgresql.cnpg.io "${cluster}" -o jsonpath='{.status.phase}' 2>/dev/null || true
+    )"
+    if [ "${cluster_phase}" = "Unable to create required cluster objects" ]; then
       recoverable+=("${cluster}")
     fi
   done

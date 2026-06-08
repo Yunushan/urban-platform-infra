@@ -209,6 +209,7 @@ MIGRATION_BECOME_PASSWORD_FILE ?=
 MIGRATION_BECOME_PASSWORD_PROMPT ?= auto
 MIGRATION_CONTAINER_TOOL ?= auto
 MIGRATION_POSTGRES_CLIENT_IMAGE ?= docker.io/library/postgres:18.3
+STANDALONE_ENV_FILE ?= .env.standalone
 MIGRATION_REGISTRY ?=
 MIGRATION_IMAGE_TAG ?= imported-0.1.0
 MIGRATION_NAMESPACE ?= $(NAMESPACE)
@@ -440,7 +441,7 @@ DISASTER_RECOVERY_POST_DRILL_REVIEW ?= false
 DISASTER_RECOVERY_OUTPUT ?= reports/disaster-recovery-plan.md
 DISASTER_RECOVERY_VALUES ?= reports/disaster-recovery-values.yaml
 
-.PHONY: help setup-local doctor-local ci-contract private-data-audit operator-ready validate image-policy image-promotion-plan registry-promotion-plan runtime-hardening-plan gitops-delivery-plan progressive-delivery-plan scaling-policy-plan network-connectivity-plan access-governance-plan compliance-evidence-plan incident-response-plan change-management-plan cutover-gate-plan smoke-test-plan release-runbook-plan cluster-upgrade-plan disaster-recovery-plan lint configure backup-plan observability-plan cluster-doctor cluster-repair lab-deploy-plan capacity-preflight image-cache-plan database-migration-plan edge-migration-plan environment-profile-plan import-check import-plan import-preflight import-recovery-plan import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig configure-edge-ports install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace recover-helm-release deploy deploy-auto deploy-dry-run package-chart release-evidence verify-release-evidence status observability-status docker-up docker-down docker-status policy clean
+.PHONY: help setup-local doctor-local ci-contract private-data-audit operator-ready validate image-policy image-promotion-plan registry-promotion-plan runtime-hardening-plan gitops-delivery-plan progressive-delivery-plan scaling-policy-plan network-connectivity-plan access-governance-plan compliance-evidence-plan incident-response-plan change-management-plan cutover-gate-plan smoke-test-plan release-runbook-plan cluster-upgrade-plan disaster-recovery-plan lint configure backup-plan observability-plan cluster-doctor cluster-repair lab-deploy-plan capacity-preflight image-cache-plan database-migration-plan edge-migration-plan environment-profile-plan import-check import-plan import-preflight import-recovery-plan import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig configure-edge-ports install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace recover-helm-release deploy deploy-auto deploy-dry-run package-chart release-evidence verify-release-evidence status observability-status docker-up docker-down docker-status docker-standalone-config docker-standalone-up docker-standalone-down docker-standalone-status policy clean
 
 HELM_DEPLOY_SET_ARGS = \
 	--set namespace.create=false \
@@ -837,6 +838,24 @@ docker-down: ## Stop Docker fallback profile.
 
 docker-status: ## Show Docker fallback profile status.
 	docker compose -f compose/docker-compose.ha.yml ps
+
+docker-standalone-config: ## Generate private standalone Docker nginx/TLS runtime config from .env.standalone.
+	STANDALONE_ENV_FILE="$(STANDALONE_ENV_FILE)" bash scripts/tools/standalone-docker-config.sh
+
+docker-standalone-up: docker-standalone-config ## Start standalone Docker profile with local IP/FQDN/TLS overrides.
+	@env_flag=""; \
+	if [ -f "$(STANDALONE_ENV_FILE)" ]; then env_flag="--env-file $(STANDALONE_ENV_FILE)"; fi; \
+	docker compose $$env_flag -f compose/docker-compose.ha.yml -f compose/docker-compose.standalone.yml up -d
+
+docker-standalone-down: ## Stop standalone Docker profile.
+	@env_flag=""; \
+	if [ -f "$(STANDALONE_ENV_FILE)" ]; then env_flag="--env-file $(STANDALONE_ENV_FILE)"; fi; \
+	docker compose $$env_flag -f compose/docker-compose.ha.yml -f compose/docker-compose.standalone.yml down
+
+docker-standalone-status: ## Show standalone Docker profile status.
+	@env_flag=""; \
+	if [ -f "$(STANDALONE_ENV_FILE)" ]; then env_flag="--env-file $(STANDALONE_ENV_FILE)"; fi; \
+	docker compose $$env_flag -f compose/docker-compose.ha.yml -f compose/docker-compose.standalone.yml ps
 
 clean: ## Remove generated local files.
 	rm -rf rendered.yaml reports dist $(ANSIBLE_COLLECTIONS_STAMP)

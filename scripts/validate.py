@@ -211,6 +211,7 @@ REQUIRED = [
     'README.md', 'LICENSE', '.github/workflows/ci.yml', '.gitlab-ci.yml',
     '.github/workflows/release.yml', '.github/dependabot.yml', '.pre-commit-config.yaml',
     'requirements-ci.txt', 'requirements-ci-modern.txt',
+    '.env.standalone.example', 'compose/docker-compose.standalone.yml',
     'scripts/tools/setup_local.py', 'scripts/tools/doctor_local.py',
     'scripts/tools/validate_ci_contract.py', 'scripts/tools/private_data_audit.py',
     'ansible/requirements.yml', 'ansible/requirements-modern.yml',
@@ -281,7 +282,7 @@ REQUIRED = [
     'scripts/tools/install-helm.sh', 'scripts/tools/install-helmfile.sh',
     'scripts/tools/helmfile-sync-retry.sh',
     'scripts/tools/install-local-path-storage.sh', 'scripts/tools/recover-helm-release.sh',
-    'scripts/tools/ensure-kubeconfig.sh',
+    'scripts/tools/ensure-kubeconfig.sh', 'scripts/tools/standalone-docker-config.sh',
     'tests/policy/basic_policy.py', 'docs/hld.md', 'docs/lld.md',
     'docs/local-toolchain.md', 'docs/ci-validation.md',
     'docs/operator-workflows.md',
@@ -4009,6 +4010,42 @@ for retired_runtime_image in [
 ]:
     if retired_runtime_image in runtime_image_surface_text:
         errors.append(f'Runtime image surface still contains retired pin: {retired_runtime_image}')
+
+standalone_docker_surface_text = '\n'.join(
+    (ROOT / standalone_file).read_text(encoding='utf-8')
+    for standalone_file in [
+        '.env.standalone.example',
+        'Makefile',
+        'compose/README.md',
+        'compose/docker-compose.ha.yml',
+        'compose/docker-compose.standalone.yml',
+        'scripts/tools/standalone-docker-config.sh',
+    ]
+)
+for standalone_token in [
+    'docker-standalone-up',
+    'compose/docker-compose.standalone.yml',
+    'STANDALONE_ENV_FILE',
+    'STANDALONE_BIND_IP',
+    'STANDALONE_DOMAIN',
+    'STANDALONE_TLS_MODE',
+    'STANDALONE_AUTO_INSTALL_OPENSSL',
+    'STANDALONE_NGINX_IMAGE',
+    'STANDALONE_POSTGRES_IMAGE',
+    'STANDALONE_POSTGIS_IMAGE',
+    'STANDALONE_TIMESCALE_IMAGE',
+    'STANDALONE_KAFKA_EXTERNAL_HOST',
+    '${STANDALONE_BIND_IP:-0.0.0.0}',
+    '${STANDALONE_HTTP_PORT:-80}',
+    '${STANDALONE_HTTPS_PORT:-443}',
+    'standalone-ca.crt',
+    'proxy_pass',
+    'self-signed',
+    'provided',
+    'pfx',
+]:
+    if standalone_token not in standalone_docker_surface_text:
+        errors.append(f'Standalone Docker profile missing token: {standalone_token}')
 
 slo_contract = safe_load((ROOT / 'config/slo.yaml').read_text(encoding='utf-8'))
 objectives = slo_contract.get('objectives', {})

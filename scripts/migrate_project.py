@@ -4972,11 +4972,11 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
         if nginx_base_image := annotations.get("urban-platform.io/nginx-base-image"):
             actual_version = nginx_deployment_version(args, str(name))
             expected_version = expected_nginx_version_from_image(str(nginx_base_image))
-            expected_summary = f" expected nginx/{expected_version}" if expected_version else ""
+            expected_summary = f" expected {expected_version}" if expected_version else ""
             nginx_versions.append(f"{name}: {actual_version}{expected_summary}")
-            if expected_version and f"nginx/{expected_version}" not in actual_version:
+            if expected_version and actual_version.startswith("nginx/") and expected_version not in actual_version:
                 nginx_mismatches.append(
-                    f"{name}: expected nginx/{expected_version} from {nginx_base_image}, got {actual_version}"
+                    f"{name}: expected {expected_version} from {nginx_base_image}, got {actual_version}"
                 )
 
     runtime_images = sorted({image for pod in pods for image in pod_container_images(pod)})
