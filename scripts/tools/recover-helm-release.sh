@@ -163,6 +163,7 @@ recover_failed_cnpg_initdb() {
   local recoverable=()
   local cluster
   local failed_pods
+  local missing_pvc_pods
 
   if [ "${recover_cnpg_initdb}" != "true" ]; then
     return 0
@@ -189,17 +190,41 @@ for item in data.get("items", []):
       kube -n "${namespace}" get pods -l "cnpg.io/cluster=${cluster},cnpg.io/jobRole=initdb" --no-headers 2>/dev/null \
         | awk '$3 == "Error" || $3 == "Failed" {count++} END {print count + 0}'
     )"
-    if [ "${failed_pods}" -gt 0 ]; then
+    missing_pvc_pods="$(
+      kube -n "${namespace}" get pods -l "cnpg.io/cluster=${cluster},cnpg.io/jobRole=initdb" -o json 2>/dev/null \
+        | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    print(0)
+    raise SystemExit
+count = 0
+for pod in data.get("items", []):
+    status = pod.get("status") or {}
+    if status.get("phase") != "Pending":
+        continue
+    for condition in status.get("conditions") or []:
+        message = str(condition.get("message") or "").lower()
+        if "persistentvolumeclaim" in message and "not found" in message:
+            count += 1
+            break
+print(count)
+' || true
+    )"
+    failed_pods="${failed_pods:-0}"
+    missing_pvc_pods="${missing_pvc_pods:-0}"
+    if [ "${failed_pods}" -gt 0 ] || [ "${missing_pvc_pods}" -gt 0 ]; then
       recoverable+=("${cluster}")
     fi
   done
 
   if [ "${#recoverable[@]}" -eq 0 ]; then
-    echo "No failed CNPG initdb bootstraps found in namespace ${namespace}."
+    echo "No failed or missing-PVC CNPG initdb bootstraps found in namespace ${namespace}."
     return 0
   fi
 
-  echo "Resetting failed CNPG initdb bootstraps before Helm upgrade: ${recoverable[*]}"
+  echo "Resetting failed or missing-PVC CNPG initdb bootstraps before Helm upgrade: ${recoverable[*]}"
   kube -n "${namespace}" delete clusters.postgresql.cnpg.io "${recoverable[@]}" --ignore-not-found --timeout="${timeout}" || true
   for cluster in "${recoverable[@]}"; do
     kube -n "${namespace}" delete job "${cluster}-1-initdb" --ignore-not-found --timeout="${timeout}" || true

@@ -4840,6 +4840,57 @@ def pending_pvc_summaries(args: argparse.Namespace) -> list[str]:
     return summaries
 
 
+def cnpg_missing_pvc_summaries(
+    clusters: list[dict[str, Any]],
+    pvcs: list[dict[str, Any]],
+    pods: list[dict[str, Any]],
+) -> list[str]:
+    existing_pvcs = {
+        str((pvc.get("metadata", {}) or {}).get("name", ""))
+        for pvc in pvcs
+        if (pvc.get("metadata", {}) or {}).get("name")
+    }
+    missing_pvc_evidence: dict[str, set[str]] = {}
+    for pod in pods:
+        metadata = pod.get("metadata", {}) or {}
+        labels = metadata.get("labels", {}) or {}
+        cluster_name = str(labels.get("cnpg.io/cluster") or "")
+        if not cluster_name or labels.get("cnpg.io/jobRole") != "initdb":
+            continue
+        status = pod.get("status", {}) or {}
+        for condition in status.get("conditions", []) or []:
+            message = str(condition.get("message") or "")
+            if "persistentvolumeclaim" not in message.lower() or "not found" not in message.lower():
+                continue
+            for pvc_name in re.findall(r'persistentvolumeclaim "([^"]+)" not found', message, flags=re.IGNORECASE):
+                missing_pvc_evidence.setdefault(cluster_name, set()).add(pvc_name)
+
+    summaries: list[str] = []
+    for cluster in clusters:
+        metadata = cluster.get("metadata", {}) or {}
+        spec = cluster.get("spec", {}) or {}
+        status = cluster.get("status", {}) or {}
+        name = str(metadata.get("name", "unknown"))
+        try:
+            desired = max(1, int(spec.get("instances") or status.get("instances") or 1))
+        except (TypeError, ValueError):
+            desired = 1
+        phase = str(status.get("phase") or "Unknown")
+        ready = status.get("readyInstances") or 0
+        if phase in {"Cluster in healthy state", "Online"} and ready == desired:
+            continue
+        missing = [f"{name}-{index}" for index in range(1, desired + 1) if f"{name}-{index}" not in existing_pvcs]
+        evidence = sorted(missing_pvc_evidence.get(name, set()))
+        if not missing and not evidence:
+            continue
+        detail = "; initdb pod reports PVC not found" if evidence else ""
+        missing_display = ", ".join(sorted(set(missing + evidence))[:8])
+        if len(set(missing + evidence)) > 8:
+            missing_display += f", +{len(set(missing + evidence)) - 8} more"
+        summaries.append(f"{name}: missing expected CNPG PVC(s) `{missing_display}`{detail}")
+    return summaries
+
+
 def deployment_ready_status(item: dict[str, Any]) -> tuple[int, int]:
     spec = item.get("spec", {}) or {}
     status = item.get("status", {}) or {}
@@ -4892,8 +4943,17 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
         ).get("items", [])
         ingresses = kubectl_json(args, ["-n", args.namespace, "get", "ingress"]).get("items", [])
         pods = kubectl_json(args, ["-n", args.namespace, "get", "pods"]).get("items", [])
+        try:
+            cnpg_clusters = kubectl_json(args, ["-n", args.namespace, "get", "clusters.postgresql.cnpg.io"]).get("items", [])
+        except RuntimeError:
+            cnpg_clusters = []
+        try:
+            pvcs = kubectl_json(args, ["-n", args.namespace, "get", "pvc"]).get("items", [])
+        except RuntimeError:
+            pvcs = []
         cnpg_summaries = cnpg_cluster_summaries(args)
         pvc_summaries = pending_pvc_summaries(args)
+        cnpg_missing_pvcs = cnpg_missing_pvc_summaries(cnpg_clusters, pvcs, pods)
     except RuntimeError as exc:
         lines.extend(["## Result", "", "- Status: `FAIL`", f"- Error: `{exc}`", ""])
         write_file(output / "post-migration-runtime.md", "\n".join(lines) + "\n")
@@ -4926,7 +4986,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
         if any(token in image.lower() for token in ["postgres", "postgis", "timescale"])
     ]
 
-    status = "PASS" if not not_ready and not nginx_mismatches else "FAIL"
+    status = "PASS" if not any([not_ready, nginx_mismatches, pod_waiting, cnpg_summaries, pvc_summaries, cnpg_missing_pvcs]) else "FAIL"
     lines.extend(
         [
             "## Result",
@@ -4938,6 +4998,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
             f"- Runtime images observed: `{len(runtime_images)}`",
             f"- Pods with waiting containers: `{len(pod_waiting)}`",
             f"- CNPG clusters needing attention: `{len(cnpg_summaries)}`",
+            f"- CNPG expected PVCs missing: `{len(cnpg_missing_pvcs)}`",
             f"- PVCs not bound: `{len(pvc_summaries)}`",
             f"- nginx version mismatches: `{len(nginx_mismatches)}`",
             "",
@@ -4963,6 +5024,12 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
         lines.extend(f"- {item}" for item in cnpg_summaries)
     else:
         lines.append("- All observed CloudNativePG clusters report ready instances.")
+
+    lines.extend(["", "## CloudNativePG Missing PVCs", ""])
+    if cnpg_missing_pvcs:
+        lines.extend(f"- {item}" for item in cnpg_missing_pvcs)
+    else:
+        lines.append("- No missing expected CloudNativePG instance PVCs were observed.")
 
     lines.extend(["", "## PersistentVolumeClaims", ""])
     if pvc_summaries:
@@ -5005,6 +5072,8 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
             problems.append(f"{len(pod_waiting)} pod waiting reason(s)")
         if cnpg_summaries:
             problems.append(f"{len(cnpg_summaries)} CNPG cluster issue(s)")
+        if cnpg_missing_pvcs:
+            problems.append(f"{len(cnpg_missing_pvcs)} CNPG missing PVC issue(s)")
         if pvc_summaries:
             problems.append(f"{len(pvc_summaries)} non-bound PVC(s)")
         raise SystemExit(f"Post-migration runtime validation found {'; '.join(problems)}")
