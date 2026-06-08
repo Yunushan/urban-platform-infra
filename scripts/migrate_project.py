@@ -45,7 +45,7 @@ MEMORY_QUANTITY_RE = re.compile(r"^([0-9]+)(Ki|Mi|Gi|Ti)?$")
 CPU_QUANTITY_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(m)?$")
 PRIVATE_IPV4_RE = re.compile(r"\b(?:10|192\.168|172\.(?:1[6-9]|2[0-9]|3[01]))(?:\.[0-9]{1,3}){2}\b")
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 9
+MANIFEST_GENERATOR_VERSION = 10
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -2432,6 +2432,7 @@ def migration_stage_scope(args: argparse.Namespace, stage: str, service_pairs: l
         "registry": args.registry if stage in {"images", "manifests"} else "",
         "importSecurityContext": args.import_security_context if stage == "manifests" else "",
         "ingressHost": args.ingress_host if stage == "manifests" else "",
+        "clusterVip": args.cluster_vip if stage == "manifests" else "",
         "tlsMode": selected_tls_mode(args) if stage == "manifests" else "",
         "tlsCertFingerprint": file_fingerprint(Path(args.tls_cert_file).expanduser()) if stage == "manifests" and args.tls_cert_file else "",
         "tlsKeyFingerprint": file_fingerprint(Path(args.tls_key_file).expanduser()) if stage == "manifests" and args.tls_key_file else "",
@@ -3163,6 +3164,7 @@ def generate_bundle(
         f'MIGRATION_PRIVATE_DIR="${{MIGRATION_PRIVATE_DIR:-{args.private_dir}}}"\n'
         f'MIGRATION_KUBECONFIG="${{MIGRATION_KUBECONFIG:-{args.kubeconfig}}}"\n'
         f'MIGRATION_INGRESS_HOST="${{MIGRATION_INGRESS_HOST:-{args.ingress_host}}}"\n'
+        f'MIGRATION_CLUSTER_VIP="${{MIGRATION_CLUSTER_VIP:-{args.cluster_vip}}}"\n'
         f'MIGRATION_TLS_MODE="${{MIGRATION_TLS_MODE:-{args.tls_mode}}}"\n'
         f'MIGRATION_TLS_CERT_FILE="${{MIGRATION_TLS_CERT_FILE:-{args.tls_cert_file}}}"\n'
         f'MIGRATION_TLS_KEY_FILE="${{MIGRATION_TLS_KEY_FILE:-{args.tls_key_file}}}"\n'
@@ -3242,7 +3244,7 @@ def generate_bundle(
         '"$PYTHON" "$REPO_ROOT/scripts/migrate_project.py" '
         '--project-path "$PROJECT_PATH" --values "$VALUES" --namespace "$NAMESPACE" '
         '--output "$MIGRATION_OUTPUT" --private-dir "$MIGRATION_PRIVATE_DIR" --kubeconfig "$MIGRATION_KUBECONFIG" --auto-prepare '
-        '--ingress-host "$MIGRATION_INGRESS_HOST" '
+        '--ingress-host "$MIGRATION_INGRESS_HOST" --cluster-vip "$MIGRATION_CLUSTER_VIP" '
         '--tls-mode "$MIGRATION_TLS_MODE" --tls-cert-file "$MIGRATION_TLS_CERT_FILE" --tls-key-file "$MIGRATION_TLS_KEY_FILE" '
         '--tls-extra-hosts "$MIGRATION_TLS_EXTRA_HOSTS" --tls-pfx-file "$MIGRATION_TLS_PFX_FILE" '
         '--tls-pfx-password-file "$MIGRATION_TLS_PFX_PASSWORD_FILE" --tls-duration-days "$MIGRATION_TLS_DURATION_DAYS" '
@@ -3938,6 +3940,8 @@ def tls_hosts(args: argparse.Namespace, host: str) -> list[str]:
     hosts = []
     if host:
         hosts.append(host)
+    if getattr(args, "cluster_vip", "") and selected_tls_mode(args) in {"lab-ca", "self-signed"}:
+        hosts.append(args.cluster_vip)
     hosts.extend(split_csv(args.tls_extra_hosts))
     return list(dict.fromkeys(hosts))
 
@@ -4457,6 +4461,7 @@ def canonical_host_http_redirect_manifests(
     name: str,
     backend_service_name: str,
     canonical_host: str,
+    tls_secret_name: str,
 ) -> list[dict[str, Any]]:
     if not canonical_host or host_is_ip_address(canonical_host):
         return []
@@ -4474,7 +4479,7 @@ def canonical_host_http_redirect_manifests(
             },
             "spec": {
                 "redirectRegex": {
-                    "regex": "^http://[^/]+/(.*)",
+                    "regex": "^https?://[^/]+/(.*)",
                     "replacement": f"https://{canonical_host}/${{1}}",
                     "permanent": True,
                 }
@@ -4489,10 +4494,44 @@ def canonical_host_http_redirect_manifests(
                 "annotations": {
                     "traefik.ingress.kubernetes.io/router.entrypoints": "web",
                     "traefik.ingress.kubernetes.io/router.middlewares": traefik_middleware_refs(args, middleware_names),
+                    "traefik.ingress.kubernetes.io/router.priority": "1",
                 },
             },
             "spec": {
                 "ingressClassName": "traefik",
+                "rules": [
+                    {
+                        "http": {
+                            "paths": [
+                                {
+                                    "path": "/",
+                                    "pathType": "Prefix",
+                                    "backend": {
+                                        "service": {"name": backend_service_name, "port": {"number": 80}}
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ],
+            },
+        },
+        {
+            "apiVersion": "networking.k8s.io/v1",
+            "kind": "Ingress",
+            "metadata": {
+                "name": f"{name}-traefik-canonical-host-redirect-https",
+                "namespace": args.namespace,
+                "annotations": {
+                    "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
+                    "traefik.ingress.kubernetes.io/router.middlewares": traefik_middleware_refs(args, middleware_names),
+                    "traefik.ingress.kubernetes.io/router.priority": "1",
+                    "traefik.ingress.kubernetes.io/router.tls": "true",
+                },
+            },
+            "spec": {
+                "ingressClassName": "traefik",
+                "tls": [{"secretName": tls_secret_name}],
                 "rules": [
                     {
                         "http": {
@@ -4608,6 +4647,7 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
                             name=name,
                             backend_service_name=name,
                             canonical_host=rule_host,
+                            tls_secret_name=tls_secret_name,
                         )
                     )
             ingress_manifests.append(
@@ -4936,6 +4976,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--output", default="reports/import-migration")
     parser.add_argument("--namespace", default="urban-platform")
     parser.add_argument("--kubeconfig", default=os.environ.get("KUBECONFIG", ""))
+    parser.add_argument("--cluster-vip", default=os.environ.get("MIGRATION_CLUSTER_VIP", ""))
     parser.add_argument("--ingress-host", default=os.environ.get("MIGRATION_INGRESS_HOST", os.environ.get("MIGRATION_CLUSTER_DOMAIN", "")))
     parser.add_argument("--tls-cert-file", default=os.environ.get("MIGRATION_TLS_CERT_FILE", ""))
     parser.add_argument("--tls-key-file", default=os.environ.get("MIGRATION_TLS_KEY_FILE", ""))

@@ -382,13 +382,15 @@ candidate is still written to `reports/import-migration/manifests/` but is not
 applied as a broken route. Edge Ingress candidates are evaluated across the full
 import set even when a workload batch is selected, so canonical routes continue
 to converge after the edge Service exists.
-When `MIGRATION_INGRESS_HOST` is a DNS name, the import also writes a Traefik
-HTTP catch-all redirect so raw VIP/IP requests such as `http://<cluster-vip>/login`
-are redirected to the canonical FQDN, for example
-`https://app.internal.example/login`. HTTPS-by-IP is intentionally not used as an
-application entrypoint because TLS certificate validation happens before an HTTP
-redirect; enterprise deployments should serve application traffic only through
-the canonical DNS name and its trusted certificate.
+When `MIGRATION_INGRESS_HOST` is a DNS name, the import also writes Traefik
+HTTP and HTTPS catch-all redirects so raw VIP/IP requests such as
+`http://<cluster-vip>/login` and `https://<cluster-vip>/login` are redirected to
+the canonical FQDN, for example `https://app.internal.example/login`. For
+`lab-ca` and `self-signed` modes, `MIGRATION_CLUSTER_VIP` is automatically added
+as an IP SAN in the generated certificate so lab redirect probes can complete.
+The client workstation still needs to trust the generated lab CA; enterprise
+deployments should serve application traffic only through the canonical DNS name
+and its trusted certificate.
 
 No-registry preload example:
 
