@@ -4572,6 +4572,87 @@ def pod_container_images(pod: dict[str, Any]) -> list[str]:
     return images
 
 
+def compact_runtime_message(message: Any, *, limit: int = 240) -> str:
+    text = " ".join(str(message or "").split())
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 3].rstrip()}..."
+
+
+def pod_waiting_summaries(pods: list[dict[str, Any]]) -> list[str]:
+    summaries: list[str] = []
+    for pod in pods:
+        metadata = pod.get("metadata", {}) or {}
+        status = pod.get("status", {}) or {}
+        name = str(metadata.get("name", "unknown"))
+        phase = str(status.get("phase", "Unknown"))
+        node = pod.get("spec", {}).get("nodeName") or "<unscheduled>"
+        for status_key, prefix in [("initContainerStatuses", "init"), ("containerStatuses", "container")]:
+            for container_status in status.get(status_key, []) or []:
+                state = container_status.get("state", {}) or {}
+                waiting = state.get("waiting")
+                if not waiting:
+                    continue
+                container_name = container_status.get("name", "unknown")
+                reason = waiting.get("reason", "Waiting")
+                message = compact_runtime_message(waiting.get("message"))
+                detail = f": {message}" if message else ""
+                summaries.append(f"{name} ({phase} on {node}) {prefix} `{container_name}` waiting: `{reason}`{detail}")
+        if phase == "Pending":
+            for condition in status.get("conditions", []) or []:
+                if condition.get("type") == "PodScheduled" and condition.get("status") == "False":
+                    reason = condition.get("reason", "Scheduling")
+                    message = compact_runtime_message(condition.get("message"))
+                    detail = f": {message}" if message else ""
+                    summaries.append(f"{name} pending scheduling: `{reason}`{detail}")
+    return sorted(dict.fromkeys(summaries))
+
+
+def cnpg_cluster_summaries(args: argparse.Namespace) -> list[str]:
+    try:
+        clusters = kubectl_json(args, ["-n", args.namespace, "get", "clusters.postgresql.cnpg.io"]).get("items", [])
+    except RuntimeError as exc:
+        details = compact_runtime_message(exc)
+        return [f"Could not read CloudNativePG clusters: `{details}`"]
+    summaries: list[str] = []
+    for cluster in clusters:
+        metadata = cluster.get("metadata", {}) or {}
+        status = cluster.get("status", {}) or {}
+        name = str(metadata.get("name", "unknown"))
+        phase = str(status.get("phase") or status.get("currentPrimary") or "Unknown")
+        ready_instances = status.get("readyInstances")
+        instances = status.get("instances")
+        if phase not in {"Cluster in healthy state", "Online"} or ready_instances != instances:
+            details = []
+            if instances is not None:
+                details.append(f"instances={instances}")
+            if ready_instances is not None:
+                details.append(f"ready={ready_instances}")
+            if status.get("currentPrimary"):
+                details.append(f"primary={status.get('currentPrimary')}")
+            suffix = f" ({', '.join(details)})" if details else ""
+            summaries.append(f"{name}: `{phase}`{suffix}")
+    return summaries
+
+
+def pending_pvc_summaries(args: argparse.Namespace) -> list[str]:
+    try:
+        pvcs = kubectl_json(args, ["-n", args.namespace, "get", "pvc"]).get("items", [])
+    except RuntimeError as exc:
+        details = compact_runtime_message(exc)
+        return [f"Could not read PVCs: `{details}`"]
+    summaries: list[str] = []
+    for pvc in pvcs:
+        metadata = pvc.get("metadata", {}) or {}
+        status = pvc.get("status", {}) or {}
+        phase = str(status.get("phase", "Unknown"))
+        if phase == "Bound":
+            continue
+        storage_class = pvc.get("spec", {}).get("storageClassName") or "<default>"
+        summaries.append(f"{metadata.get('name', 'unknown')}: `{phase}` storageClass=`{storage_class}`")
+    return summaries
+
+
 def deployment_ready_status(item: dict[str, Any]) -> tuple[int, int]:
     spec = item.get("spec", {}) or {}
     status = item.get("status", {}) or {}
@@ -4624,6 +4705,8 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
         ).get("items", [])
         ingresses = kubectl_json(args, ["-n", args.namespace, "get", "ingress"]).get("items", [])
         pods = kubectl_json(args, ["-n", args.namespace, "get", "pods"]).get("items", [])
+        cnpg_summaries = cnpg_cluster_summaries(args)
+        pvc_summaries = pending_pvc_summaries(args)
     except RuntimeError as exc:
         lines.extend(["## Result", "", "- Status: `FAIL`", f"- Error: `{exc}`", ""])
         write_file(output / "post-migration-runtime.md", "\n".join(lines) + "\n")
@@ -4631,6 +4714,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
 
     not_ready: list[str] = []
     nginx_versions: list[str] = []
+    pod_waiting = pod_waiting_summaries(pods)
     for item in deployments:
         name = item.get("metadata", {}).get("name", "unknown")
         ready, desired = deployment_ready_status(item)
@@ -4657,6 +4741,9 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
             f"- Imported services: `{len(services)}`",
             f"- Ingresses in namespace: `{len(ingresses)}`",
             f"- Runtime images observed: `{len(runtime_images)}`",
+            f"- Pods with waiting containers: `{len(pod_waiting)}`",
+            f"- CNPG clusters needing attention: `{len(cnpg_summaries)}`",
+            f"- PVCs not bound: `{len(pvc_summaries)}`",
             "",
             "## Deployment Readiness",
             "",
@@ -4666,6 +4753,28 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
         lines.extend(f"- Not ready: `{item}`" for item in not_ready)
     else:
         lines.append("- All imported deployments report desired ready replicas.")
+
+    lines.extend(["", "## Pod Waiting Reasons", ""])
+    if pod_waiting:
+        lines.extend(f"- {item}" for item in pod_waiting[:120])
+        if len(pod_waiting) > 120:
+            lines.append(f"- `+{len(pod_waiting) - 120}` more")
+    else:
+        lines.append("- No waiting container reasons were observed.")
+
+    lines.extend(["", "## CloudNativePG Status", ""])
+    if cnpg_summaries:
+        lines.extend(f"- {item}" for item in cnpg_summaries)
+    else:
+        lines.append("- All observed CloudNativePG clusters report ready instances.")
+
+    lines.extend(["", "## PersistentVolumeClaims", ""])
+    if pvc_summaries:
+        lines.extend(f"- {item}" for item in pvc_summaries[:120])
+        if len(pvc_summaries) > 120:
+            lines.append(f"- `+{len(pvc_summaries) - 120}` more")
+    else:
+        lines.append("- All observed PVCs are bound.")
 
     lines.extend(["", "## nginx Runtime", ""])
     if nginx_versions:
@@ -4687,8 +4796,17 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
     report_path = output / "post-migration-runtime.md"
     write_file(report_path, "\n".join(lines) + "\n")
     print(f"Post-migration runtime validation written to {report_path}")
-    if status != "PASS":
-        raise SystemExit(f"Post-migration runtime validation found not-ready deployment(s): {', '.join(not_ready)}")
+    if status != "PASS" or pod_waiting or cnpg_summaries or pvc_summaries:
+        problems = []
+        if not_ready:
+            problems.append(f"not-ready deployment(s): {', '.join(not_ready[:20])}")
+        if pod_waiting:
+            problems.append(f"{len(pod_waiting)} pod waiting reason(s)")
+        if cnpg_summaries:
+            problems.append(f"{len(cnpg_summaries)} CNPG cluster issue(s)")
+        if pvc_summaries:
+            problems.append(f"{len(pvc_summaries)} non-bound PVC(s)")
+        raise SystemExit(f"Post-migration runtime validation found {'; '.join(problems)}")
 
 
 def stage_validate(args: argparse.Namespace) -> None:
