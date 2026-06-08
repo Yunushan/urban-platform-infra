@@ -45,7 +45,7 @@ MEMORY_QUANTITY_RE = re.compile(r"^([0-9]+)(Ki|Mi|Gi|Ti)?$")
 CPU_QUANTITY_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(m)?$")
 PRIVATE_IPV4_RE = re.compile(r"\b(?:10|192\.168|172\.(?:1[6-9]|2[0-9]|3[01]))(?:\.[0-9]{1,3}){2}\b")
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 7
+MANIFEST_GENERATOR_VERSION = 8
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -3867,6 +3867,10 @@ def traefik_middleware_ref(args: argparse.Namespace, name: str) -> str:
     return f"{args.namespace}-{name}@kubernetescrd"
 
 
+def traefik_middleware_refs(args: argparse.Namespace, names: list[str]) -> str:
+    return ",".join(traefik_middleware_ref(args, name) for name in names)
+
+
 def kubernetes_secret_exists(args: argparse.Namespace, name: str) -> bool:
     command = kubectl_command(args, ["-n", args.namespace, "get", "secret", name, "--request-timeout=15s"])
     return subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
@@ -4446,6 +4450,69 @@ def ensure_ingress_tls_secret(args: argparse.Namespace, values: dict[str, Any], 
     write_tls_report(args, mode=mode, secret_name=secret_name, hosts=hosts, ca_file=ca_file)
 
 
+def canonical_host_http_redirect_manifests(
+    args: argparse.Namespace,
+    values: dict[str, Any],
+    *,
+    name: str,
+    backend_service_name: str,
+    canonical_host: str,
+) -> list[dict[str, Any]]:
+    if not canonical_host or host_is_ip_address(canonical_host):
+        return []
+    middleware_name = k8s_name(f"{name}-canonical-host")
+    middleware_names = [middleware_name]
+    if ingress_source_allowlist_cidrs(values):
+        middleware_names.insert(0, "source-allow-list")
+    return [
+        {
+            "apiVersion": "traefik.io/v1alpha1",
+            "kind": "Middleware",
+            "metadata": {
+                "name": middleware_name,
+                "namespace": args.namespace,
+            },
+            "spec": {
+                "redirectRegex": {
+                    "regex": "^http://[^/]+/(.*)",
+                    "replacement": f"https://{canonical_host}/${{1}}",
+                    "permanent": True,
+                }
+            },
+        },
+        {
+            "apiVersion": "networking.k8s.io/v1",
+            "kind": "Ingress",
+            "metadata": {
+                "name": f"{name}-traefik-canonical-host-redirect",
+                "namespace": args.namespace,
+                "annotations": {
+                    "traefik.ingress.kubernetes.io/router.entrypoints": "web",
+                    "traefik.ingress.kubernetes.io/router.middlewares": traefik_middleware_refs(args, middleware_names),
+                },
+            },
+            "spec": {
+                "ingressClassName": "traefik",
+                "rules": [
+                    {
+                        "http": {
+                            "paths": [
+                                {
+                                    "path": "/",
+                                    "pathType": "Prefix",
+                                    "backend": {
+                                        "service": {"name": backend_service_name, "port": {"number": 80}}
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ],
+            },
+        },
+    ]
+
+
 def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]], values: dict[str, Any]) -> None:
     output = Path(args.output).expanduser()
     scoped_service_pairs = filter_service_pairs_for_import_batch(args, service_pairs)
@@ -4526,6 +4593,16 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
                         },
                     }
                 )
+                if rule_host:
+                    ingress_manifests.extend(
+                        canonical_host_http_redirect_manifests(
+                            args,
+                            values,
+                            name=name,
+                            backend_service_name=name,
+                            canonical_host=rule_host,
+                        )
+                    )
             ingress_manifests.append(
                 {
                     "apiVersion": "networking.k8s.io/v1",

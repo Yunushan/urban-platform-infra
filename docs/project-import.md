@@ -380,6 +380,13 @@ their backend Kubernetes Service already exists in the target namespace. If the
 Compose edge service has not been converted to a chart workload yet, the
 candidate is still written to `reports/import-migration/manifests/` but is not
 applied as a broken route.
+When `MIGRATION_INGRESS_HOST` is a DNS name, the import also writes a Traefik
+HTTP catch-all redirect so raw VIP/IP requests such as `http://<cluster-vip>/login`
+are redirected to the canonical FQDN, for example
+`https://app.internal.example/login`. HTTPS-by-IP is intentionally not used as an
+application entrypoint because TLS certificate validation happens before an HTTP
+redirect; enterprise deployments should serve application traffic only through
+the canonical DNS name and its trusted certificate.
 
 No-registry preload example:
 
