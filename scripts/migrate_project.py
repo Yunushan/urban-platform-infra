@@ -4907,6 +4907,114 @@ def nginx_deployment_version(args: argparse.Namespace, name: str) -> str:
     return details or "unknown"
 
 
+def imported_deployments(args: argparse.Namespace) -> list[dict[str, Any]]:
+    return kubectl_json(
+        args,
+        [
+            "-n",
+            args.namespace,
+            "get",
+            "deploy",
+            "-l",
+            "app.kubernetes.io/managed-by=urban-platform-import",
+        ],
+    ).get("items", [])
+
+
+def imported_pods(args: argparse.Namespace) -> list[dict[str, Any]]:
+    return kubectl_json(
+        args,
+        [
+            "-n",
+            args.namespace,
+            "get",
+            "pods",
+            "-l",
+            "app.kubernetes.io/managed-by=urban-platform-import",
+        ],
+    ).get("items", [])
+
+
+def runtime_blockers_for_wait(args: argparse.Namespace) -> tuple[list[str], list[str]]:
+    deployments = imported_deployments(args)
+    workload_pods = imported_pods(args)
+    all_pods = kubectl_json(args, ["-n", args.namespace, "get", "pods"]).get("items", [])
+    try:
+        cnpg_clusters = kubectl_json(args, ["-n", args.namespace, "get", "clusters.postgresql.cnpg.io"]).get("items", [])
+    except RuntimeError:
+        cnpg_clusters = []
+    try:
+        pvcs = kubectl_json(args, ["-n", args.namespace, "get", "pvc"]).get("items", [])
+    except RuntimeError:
+        pvcs = []
+
+    not_ready: list[str] = []
+    for item in deployments:
+        name = item.get("metadata", {}).get("name", "unknown")
+        ready, desired = deployment_ready_status(item)
+        if ready < desired:
+            not_ready.append(f"{name} ({ready}/{desired})")
+
+    pod_waiting = pod_waiting_summaries(workload_pods)
+    cnpg_summaries = cnpg_cluster_summaries(args)
+    pvc_summaries = pending_pvc_summaries(args)
+    cnpg_missing_pvcs = cnpg_missing_pvc_summaries(cnpg_clusters, pvcs, all_pods)
+
+    blockers: list[str] = []
+    if not_ready:
+        blockers.append(f"{len(not_ready)} imported deployment(s) not ready")
+    if pod_waiting:
+        blockers.append(f"{len(pod_waiting)} imported pod waiting reason(s)")
+    if cnpg_summaries:
+        blockers.append(f"{len(cnpg_summaries)} CNPG cluster issue(s)")
+    if cnpg_missing_pvcs:
+        blockers.append(f"{len(cnpg_missing_pvcs)} CNPG missing PVC issue(s)")
+    if pvc_summaries:
+        blockers.append(f"{len(pvc_summaries)} non-bound PVC(s)")
+    samples = [*not_ready[:5], *pod_waiting[:5], *cnpg_summaries[:5], *cnpg_missing_pvcs[:5], *pvc_summaries[:5]]
+    return blockers, samples[:10]
+
+
+def wait_for_post_migration_runtime(args: argparse.Namespace) -> None:
+    timeout = max(0, int(args.runtime_validation_timeout or 0))
+    if timeout <= 0:
+        return
+    interval = max(1, int(args.runtime_validation_interval or 10))
+    deadline = time.monotonic() + timeout
+    attempt = 0
+    last_blockers: list[str] = []
+    last_samples: list[str] = []
+    print(f"Waiting up to {timeout}s for post-migration runtime readiness before validation.")
+    while True:
+        attempt += 1
+        try:
+            blockers, samples = runtime_blockers_for_wait(args)
+        except RuntimeError as exc:
+            blockers = [f"Kubernetes runtime query failed: {compact_runtime_message(exc)}"]
+            samples = []
+        if not blockers:
+            print(f"Post-migration runtime readiness observed after {attempt} check(s).")
+            return
+
+        last_blockers = blockers
+        last_samples = samples
+        remaining = int(deadline - time.monotonic())
+        if remaining <= 0:
+            print(f"Post-migration runtime readiness wait timed out after {timeout}s; writing diagnostics.")
+            print(f"Last runtime readiness summary: {'; '.join(last_blockers)}")
+            if last_samples:
+                print("First runtime blockers:")
+                for sample in last_samples[:8]:
+                    print(f"- {sample}")
+            return
+
+        if attempt == 1 or attempt % 6 == 0:
+            print(f"Runtime readiness still pending ({'; '.join(blockers)}); {remaining}s remaining.")
+            if samples:
+                print(f"First blocker: {samples[0]}")
+        time.sleep(interval)
+
+
 def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
     output = Path(args.output).expanduser()
     lines = [
@@ -4919,17 +5027,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
         "",
     ]
     try:
-        deployments = kubectl_json(
-            args,
-            [
-                "-n",
-                args.namespace,
-                "get",
-                "deploy",
-                "-l",
-                "app.kubernetes.io/managed-by=urban-platform-import",
-            ],
-        ).get("items", [])
+        deployments = imported_deployments(args)
         services = kubectl_json(
             args,
             [
@@ -4943,6 +5041,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
         ).get("items", [])
         ingresses = kubectl_json(args, ["-n", args.namespace, "get", "ingress"]).get("items", [])
         pods = kubectl_json(args, ["-n", args.namespace, "get", "pods"]).get("items", [])
+        workload_pods = imported_pods(args)
         try:
             cnpg_clusters = kubectl_json(args, ["-n", args.namespace, "get", "clusters.postgresql.cnpg.io"]).get("items", [])
         except RuntimeError:
@@ -4962,7 +5061,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
     not_ready: list[str] = []
     nginx_versions: list[str] = []
     nginx_mismatches: list[str] = []
-    pod_waiting = pod_waiting_summaries(pods)
+    pod_waiting = pod_waiting_summaries(workload_pods)
     for item in deployments:
         name = item.get("metadata", {}).get("name", "unknown")
         ready, desired = deployment_ready_status(item)
@@ -4996,7 +5095,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
             f"- Imported services: `{len(services)}`",
             f"- Ingresses in namespace: `{len(ingresses)}`",
             f"- Runtime images observed: `{len(runtime_images)}`",
-            f"- Pods with waiting containers: `{len(pod_waiting)}`",
+            f"- Imported pods with waiting containers: `{len(pod_waiting)}`",
             f"- CNPG clusters needing attention: `{len(cnpg_summaries)}`",
             f"- CNPG expected PVCs missing: `{len(cnpg_missing_pvcs)}`",
             f"- PVCs not bound: `{len(pvc_summaries)}`",
@@ -5069,13 +5168,17 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
         if nginx_mismatches:
             problems.append(f"{len(nginx_mismatches)} nginx version mismatch(es)")
         if pod_waiting:
-            problems.append(f"{len(pod_waiting)} pod waiting reason(s)")
+            problems.append(f"{len(pod_waiting)} imported pod waiting reason(s)")
         if cnpg_summaries:
             problems.append(f"{len(cnpg_summaries)} CNPG cluster issue(s)")
         if cnpg_missing_pvcs:
             problems.append(f"{len(cnpg_missing_pvcs)} CNPG missing PVC issue(s)")
         if pvc_summaries:
             problems.append(f"{len(pvc_summaries)} non-bound PVC(s)")
+        if pod_waiting or cnpg_summaries or cnpg_missing_pvcs or pvc_summaries:
+            print("First runtime validation blockers:")
+            for item in [*pod_waiting[:5], *cnpg_summaries[:5], *cnpg_missing_pvcs[:5], *pvc_summaries[:5]][:10]:
+                print(f"- {item}")
         raise SystemExit(f"Post-migration runtime validation found {'; '.join(problems)}")
 
 
@@ -5106,6 +5209,7 @@ def stage_validate(args: argparse.Namespace) -> None:
     if args.execute:
         run_command(command)
         print(f"Source compatibility backlog written to {Path(args.output).expanduser() / 'post-migration-check.md'}")
+        wait_for_post_migration_runtime(args)
         write_post_migration_runtime_report(args)
     else:
         print("Validation command:")
@@ -5142,6 +5246,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--webserver", choices=["nginx", "apache-httpd", "apache-tomcat", "traefik"], default="nginx")
     parser.add_argument("--database", default="postgresql")
     parser.add_argument("--profile", choices=["lab", "production"], default=os.environ.get("MIGRATION_PROFILE", "lab"))
+    parser.add_argument("--runtime-validation-timeout", type=int, default=int(os.environ["MIGRATION_RUNTIME_VALIDATION_TIMEOUT"]) if os.environ.get("MIGRATION_RUNTIME_VALIDATION_TIMEOUT") else None)
+    parser.add_argument("--runtime-validation-interval", type=int, default=int(os.environ["MIGRATION_RUNTIME_VALIDATION_INTERVAL"]) if os.environ.get("MIGRATION_RUNTIME_VALIDATION_INTERVAL") else 10)
     parser.add_argument("--import-security-context", choices=["restricted", "compat"], default=os.environ.get("MIGRATION_IMPORT_SECURITY_CONTEXT", "restricted"))
     parser.add_argument("--lab-workload-cpu-request", default=os.environ.get("MIGRATION_LAB_WORKLOAD_CPU_REQUEST", "25m"))
     parser.add_argument("--lab-workload-memory-request", default=os.environ.get("MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST", "64Mi"))
@@ -5204,6 +5310,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         parser.error(f"argument --image-mode: invalid choice: {args.image_mode!r} (choose from {', '.join(image_modes)})")
     if args.preflight_require_ingress_endpoint is None:
         args.preflight_require_ingress_endpoint = args.profile == "production"
+    if args.runtime_validation_timeout is None:
+        args.runtime_validation_timeout = 600 if args.profile == "lab" else 900
+    args.runtime_validation_interval = max(1, args.runtime_validation_interval)
     if args.preflight_max_imported_workloads is None:
         args.preflight_max_imported_workloads = 40 if args.profile == "lab" else 0
     if not args.preflight_capacity_utilization_limit:

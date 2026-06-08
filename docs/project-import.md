@@ -420,6 +420,20 @@ Kubernetes state: imported Deployment readiness, Services, Ingresses, observed
 runtime images, database-family runtime images, and nginx runtime version checks
 for imported nginx workloads.
 
+When execution is enabled, runtime validation waits before failing so freshly
+applied workloads have time to pull images, start containers, bind PVCs, and let
+CloudNativePG settle. The defaults are lab-safe and can be overridden per run:
+
+```bash
+make import-auto PROJECT_PATH=/path/to/compose-project \
+  MIGRATION_RUNTIME_VALIDATION_TIMEOUT=900 \
+  MIGRATION_RUNTIME_VALIDATION_INTERVAL=10
+```
+
+If the timeout expires, the terminal prints the first imported workload waiting
+reasons and CNPG/PVC blockers, while the full public-safe detail remains in
+`reports/import-migration/post-migration-runtime.md`.
+
 PostgreSQL-family database dump/restore is performed by the automation when
 execution is enabled. The restore step uses the generated private DB target map.
 For CloudNativePG targets from the selected Helm values, the map points at the
