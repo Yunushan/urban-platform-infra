@@ -45,7 +45,7 @@ MEMORY_QUANTITY_RE = re.compile(r"^([0-9]+)(Ki|Mi|Gi|Ti)?$")
 CPU_QUANTITY_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(m)?$")
 PRIVATE_IPV4_RE = re.compile(r"\b(?:10|192\.168|172\.(?:1[6-9]|2[0-9]|3[01]))(?:\.[0-9]{1,3}){2}\b")
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 11
+MANIFEST_GENERATOR_VERSION = 12
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -1048,10 +1048,58 @@ def apisix_config_text(record: import_project.ServiceRecord, target: str) -> boo
     return "apisix" in identity and "/conf/" in target
 
 
-def normalize_imported_config_text(record: import_project.ServiceRecord, target: str, value: str) -> str:
+def nginx_unprivileged_port_map(args: argparse.Namespace, record: import_project.ServiceRecord) -> dict[int, int]:
+    base_image = nginx_platform_base_image(args, record) or ""
+    if "nginx-unprivileged" not in base_image:
+        return {}
+    return {80: 8080, 443: 8443}
+
+
+def nginx_internal_port(args: argparse.Namespace, record: import_project.ServiceRecord, port: int) -> int:
+    return nginx_unprivileged_port_map(args, record).get(port, port)
+
+
+def nginx_service_target_ports(args: argparse.Namespace, record: import_project.ServiceRecord, ports: list[int]) -> dict[int, int]:
+    return {port: nginx_internal_port(args, record, port) for port in ports}
+
+
+def nginx_container_ports(args: argparse.Namespace, record: import_project.ServiceRecord, ports: list[int]) -> list[dict[str, Any]]:
+    seen: set[int] = set()
+    container_ports: list[dict[str, Any]] = []
+    for port in ports:
+        container_port = nginx_internal_port(args, record, port)
+        if container_port in seen:
+            continue
+        seen.add(container_port)
+        container_ports.append(
+            {
+                "name": kubernetes_service_port_name(port),
+                "containerPort": container_port,
+                "protocol": "TCP",
+            }
+        )
+    return container_ports
+
+
+def rewrite_nginx_listen_ports_for_unprivileged(args: argparse.Namespace, record: import_project.ServiceRecord, value: str) -> str:
+    for external_port, internal_port in nginx_unprivileged_port_map(args, record).items():
+        pattern = re.compile(
+            rf"(?m)(?P<head>^\s*listen\s+)(?P<address>(?:\[[^\]]+\]|[0-9.*]+):)?{external_port}(?P<tail>\b)"
+        )
+
+        def replace(match: re.Match[str]) -> str:
+            return f"{match.group('head')}{match.group('address') or ''}{internal_port}{match.group('tail')}"
+
+        value = pattern.sub(replace, value)
+    return value
+
+
+def normalize_imported_config_text(args: argparse.Namespace, record: import_project.ServiceRecord, target: str, value: str) -> str:
     if apisix_config_text(record, target):
         value = re.sub(r"(?<![A-Za-z0-9.-])127[.]0[.]0[.]1:2379\b", "etcd:2379", value)
         value = re.sub(r"(?<![A-Za-z0-9.-])localhost:2379\b", "etcd:2379", value)
+    if record.kind == "nginx" and (target == "/etc/nginx/nginx.conf" or target.startswith("/etc/nginx/")):
+        value = rewrite_nginx_listen_ports_for_unprivileged(args, record, value)
     return value
 
 
@@ -1094,7 +1142,7 @@ def configmap_mount_manifests(
             key = configmap_key(Path(source_path.name), used_keys)
             kind, value = entry
             if kind == "text":
-                value = normalize_imported_config_text(record, target, value)
+                value = normalize_imported_config_text(args, record, target, value)
             total_size += len(value.encode("utf-8"))
             if kind == "text":
                 data[key] = value
@@ -1127,7 +1175,7 @@ def configmap_mount_manifests(
                 key = configmap_key(relative_path, used_keys)
                 kind, value = entry
                 if kind == "text":
-                    value = normalize_imported_config_text(record, f"{target}/{relative_path.as_posix()}", value)
+                    value = normalize_imported_config_text(args, record, f"{target}/{relative_path.as_posix()}", value)
                 entry_size = len(value.encode("utf-8"))
                 if total_size + entry_size > CONFIGMAP_TOTAL_MAX_BYTES:
                     flush_config_map_chunk()
@@ -1190,6 +1238,7 @@ def kubernetes_service_manifest(
     namespace: str,
     labels: dict[str, str],
     ports: list[int],
+    target_ports: dict[int, int] | None = None,
     annotations: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     metadata: dict[str, Any] = {"name": name, "namespace": namespace, "labels": labels}
@@ -1206,7 +1255,7 @@ def kubernetes_service_manifest(
                 {
                     "name": kubernetes_service_port_name(port),
                     "port": port,
-                    "targetPort": port,
+                    "targetPort": (target_ports or {}).get(port, port),
                     "protocol": "TCP",
                 }
                 for port in ports
@@ -1259,6 +1308,8 @@ def kubernetes_workload_manifests(
         name = kubernetes_workload_name(record)
         generate_tcp_probes = should_generate_tcp_probes(record, service)
         probe_mode = "tcp" if generate_tcp_probes else "disabled-background-service"
+        service_target_ports = nginx_service_target_ports(args, record, ports)
+        container_ports = nginx_container_ports(args, record, ports)
         labels = {
             "app.kubernetes.io/name": name,
             "app.kubernetes.io/part-of": "urban-platform-import",
@@ -1274,14 +1325,15 @@ def kubernetes_workload_manifests(
             "name": name,
             "image": image,
             "imagePullPolicy": "IfNotPresent",
-            "ports": [{"name": kubernetes_service_port_name(port), "containerPort": port, "protocol": "TCP"} for port in ports],
+            "ports": container_ports,
         }
         container_security_context = imported_workload_container_security_context(args)
         if container_security_context:
             container["securityContext"] = container_security_context
         if generate_tcp_probes:
-            container["readinessProbe"] = {"tcpSocket": {"port": ports[0]}, "initialDelaySeconds": 15, "periodSeconds": 10}
-            container["livenessProbe"] = {"tcpSocket": {"port": ports[0]}, "initialDelaySeconds": 45, "periodSeconds": 20}
+            probe_port = nginx_internal_port(args, record, ports[0])
+            container["readinessProbe"] = {"tcpSocket": {"port": probe_port}, "initialDelaySeconds": 15, "periodSeconds": 10}
+            container["livenessProbe"] = {"tcpSocket": {"port": probe_port}, "initialDelaySeconds": 45, "periodSeconds": 20}
         if env:
             container["env"] = env
         if secret_entries(service):
@@ -1332,7 +1384,13 @@ def kubernetes_workload_manifests(
                 },
             },
         }
-        primary_service = kubernetes_service_manifest(name=name, namespace=args.namespace, labels=labels, ports=ports)
+        primary_service = kubernetes_service_manifest(
+            name=name,
+            namespace=args.namespace,
+            labels=labels,
+            ports=ports,
+            target_ports=service_target_ports,
+        )
         manifests.extend(config_map_manifests + [deployment, primary_service])
 
         alias = compose_service_dns_alias(record)
@@ -1343,6 +1401,7 @@ def kubernetes_workload_manifests(
                     namespace=args.namespace,
                     labels=labels,
                     ports=ports,
+                    target_ports=service_target_ports,
                     annotations={
                         "urban-platform.io/compose-service-alias": record.name,
                         "urban-platform.io/alias-target": name,
