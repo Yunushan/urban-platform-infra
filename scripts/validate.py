@@ -1653,7 +1653,7 @@ for makefile_helm_token in [
     'MIGRATION_TLS_MODE ?= auto',
     'MIGRATION_TLS_PFX_FILE ?=',
     'MIGRATION_TLS_LE_CREATE_ISSUER ?= true',
-    'MIGRATION_IMPORT_SECURITY_CONTEXT ?= restricted',
+    'MIGRATION_IMPORT_SECURITY_CONTEXT ?= $(if $(filter production,$(MIGRATION_PROFILE)),restricted,compat)',
     '--tls-mode "$(MIGRATION_TLS_MODE)"',
     '--tls-pfx-file "$(MIGRATION_TLS_PFX_FILE)"',
     '--tls-le-email "$(MIGRATION_TLS_LE_EMAIL)"',

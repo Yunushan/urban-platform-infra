@@ -4971,8 +4971,12 @@ def runtime_blockers_for_wait(args: argparse.Namespace) -> tuple[list[str], list
         blockers.append(f"{len(cnpg_missing_pvcs)} CNPG missing PVC issue(s)")
     if pvc_summaries:
         blockers.append(f"{len(pvc_summaries)} non-bound PVC(s)")
-    samples = [*not_ready[:5], *pod_waiting[:5], *cnpg_summaries[:5], *cnpg_missing_pvcs[:5], *pvc_summaries[:5]]
+    samples = [*pod_waiting[:5], *cnpg_summaries[:5], *cnpg_missing_pvcs[:5], *pvc_summaries[:5], *not_ready[:5]]
     return blockers, samples[:10]
+
+
+def has_run_as_non_root_rejection(waiting: list[str]) -> bool:
+    return any("runAsNonRoot" in item or "will run as root" in item or "non-numeric user" in item for item in waiting)
 
 
 def wait_for_post_migration_runtime(args: argparse.Namespace) -> None:
@@ -5179,6 +5183,12 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
             print("First runtime validation blockers:")
             for item in [*pod_waiting[:5], *cnpg_summaries[:5], *cnpg_missing_pvcs[:5], *pvc_summaries[:5]][:10]:
                 print(f"- {item}")
+            if has_run_as_non_root_rejection(pod_waiting):
+                print(
+                    "Detected imported legacy images rejected by runAsNonRoot. "
+                    "Lab imports default to MIGRATION_IMPORT_SECURITY_CONTEXT=compat; "
+                    "production should rebuild those images to run as a numeric non-root user."
+                )
         raise SystemExit(f"Post-migration runtime validation found {'; '.join(problems)}")
 
 
@@ -5248,7 +5258,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--profile", choices=["lab", "production"], default=os.environ.get("MIGRATION_PROFILE", "lab"))
     parser.add_argument("--runtime-validation-timeout", type=int, default=int(os.environ["MIGRATION_RUNTIME_VALIDATION_TIMEOUT"]) if os.environ.get("MIGRATION_RUNTIME_VALIDATION_TIMEOUT") else None)
     parser.add_argument("--runtime-validation-interval", type=int, default=int(os.environ["MIGRATION_RUNTIME_VALIDATION_INTERVAL"]) if os.environ.get("MIGRATION_RUNTIME_VALIDATION_INTERVAL") else 10)
-    parser.add_argument("--import-security-context", choices=["restricted", "compat"], default=os.environ.get("MIGRATION_IMPORT_SECURITY_CONTEXT", "restricted"))
+    parser.add_argument("--import-security-context", choices=["restricted", "compat"], default=os.environ.get("MIGRATION_IMPORT_SECURITY_CONTEXT", ""))
     parser.add_argument("--lab-workload-cpu-request", default=os.environ.get("MIGRATION_LAB_WORKLOAD_CPU_REQUEST", "25m"))
     parser.add_argument("--lab-workload-memory-request", default=os.environ.get("MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST", "64Mi"))
     parser.add_argument("--lab-workload-cpu-limit", default=os.environ.get("MIGRATION_LAB_WORKLOAD_CPU_LIMIT", "250m"))
@@ -5310,6 +5320,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         parser.error(f"argument --image-mode: invalid choice: {args.image_mode!r} (choose from {', '.join(image_modes)})")
     if args.preflight_require_ingress_endpoint is None:
         args.preflight_require_ingress_endpoint = args.profile == "production"
+    if not args.import_security_context:
+        args.import_security_context = "restricted" if args.profile == "production" else "compat"
     if args.runtime_validation_timeout is None:
         args.runtime_validation_timeout = 600 if args.profile == "lab" else 900
     args.runtime_validation_interval = max(1, args.runtime_validation_interval)

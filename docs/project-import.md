@@ -142,13 +142,15 @@ stateful stages in `/var/lib/urban-platform/private/migration-state.yaml`.
 The lab profile keeps imported workloads to one replica, adds small CPU/memory
 requests and limits to generated imported Deployment manifests, keeps
 autoscaling, observability, backups, and optional platform capabilities
-disabled, applies restricted-compatible pod/container security contexts to
-generated imports, and constrains platform database, Kafka, ZooKeeper, and
-Redis defaults for small clusters. If a legacy image cannot run as non-root yet,
-use `MIGRATION_IMPORT_SECURITY_CONTEXT=compat` only as a temporary migration
-escape hatch; the default `restricted` mode removes Pod Security warn/audit
-noise by setting `RuntimeDefault` seccomp, `runAsNonRoot`, dropped Linux
-capabilities, and disabled privilege escalation. In lab mode,
+disabled, defaults imported app workloads to
+`MIGRATION_IMPORT_SECURITY_CONTEXT=compat` so legacy Compose images that run as
+root or use named users can start during migration, and constrains platform
+database, Kafka, ZooKeeper, and Redis defaults for small clusters. Production
+defaults to `MIGRATION_IMPORT_SECURITY_CONTEXT=restricted`, which removes Pod
+Security warn/audit noise by setting `RuntimeDefault` seccomp, `runAsNonRoot`,
+dropped Linux capabilities, and disabled privilege escalation. Use the
+production default after imported images have been rebuilt to run as numeric
+non-root users. In lab mode,
 `MIGRATION_IMAGE_MODE` defaults to `preload`
 and unavailable database sources are skipped with a private report entry so a
 small lab can continue. `MIGRATION_RELAX_RESOURCE_QUOTA=true` is the lab
