@@ -1,43 +1,102 @@
 # Helmfile for platform operators and optional observability backends.
 # Install with: helmfile -f deploy/helmfile.yaml.gotmpl sync
 
+{{- $installExternalSecrets := eq (env "INSTALL_EXTERNAL_SECRETS" | default "false") "true" -}}
+{{- $installCertManager := eq (env "INSTALL_CERT_MANAGER" | default "true") "true" -}}
+{{- $installCnpg := eq (env "INSTALL_CNPG" | default "true") "true" -}}
+{{- $installVelero := eq (env "INSTALL_VELERO" | default "false") "true" -}}
+{{- $installMinio := eq (env "INSTALL_MINIO" | default "false") "true" -}}
+{{- $installRabbitmq := eq (env "INSTALL_RABBITMQ" | default "false") "true" -}}
+{{- $installKeycloak := eq (env "INSTALL_KEYCLOAK" | default "false") "true" -}}
+{{- $installEmqx := eq (env "INSTALL_EMQX" | default "false") "true" -}}
+{{- $installNats := eq (env "INSTALL_NATS" | default "false") "true" -}}
+{{- $installVault := eq (env "INSTALL_VAULT" | default "false") "true" -}}
+{{- $installKyverno := eq (env "INSTALL_KYVERNO" | default "false") "true" -}}
+{{- $installTemporal := eq (env "INSTALL_TEMPORAL" | default "false") "true" -}}
+{{- $installArgoWorkflows := eq (env "INSTALL_ARGO_WORKFLOWS" | default "false") "true" -}}
+{{- $installLinkerd := eq (env "INSTALL_LINKERD" | default "false") "true" -}}
+{{- $installIstio := eq (env "INSTALL_ISTIO" | default "false") "true" -}}
+{{- $installEck := eq (env "INSTALL_ECK" | default "true") "true" -}}
+{{- $installPrometheus := eq (env "INSTALL_PROMETHEUS" | default "false") "true" -}}
+{{- $installOpentelemetry := eq (env "INSTALL_OPENTELEMETRY" | default "false") "true" -}}
+{{- $installLoki := eq (env "INSTALL_LOKI" | default "false") "true" -}}
+{{- $installOpensearch := eq (env "INSTALL_OPENSEARCH" | default "false") "true" -}}
+{{- $installClickhouse := eq (env "INSTALL_CLICKHOUSE" | default "false") "true" -}}
+{{- $installBitnami := or $installMinio $installRabbitmq $installKeycloak $installClickhouse -}}
+
 repositories:
+{{- if $installCertManager }}
   - name: jetstack
     url: https://charts.jetstack.io
+{{- end }}
+{{- if $installLoki }}
   - name: grafana
     url: https://grafana.github.io/helm-charts
+{{- end }}
+{{- if $installEck }}
   - name: elastic
     url: https://helm.elastic.co
+{{- end }}
+{{- if $installCnpg }}
   - name: cloudnative-pg
     url: https://cloudnative-pg.github.io/charts
+{{- end }}
+{{- if $installPrometheus }}
   - name: prometheus-community
     url: https://prometheus-community.github.io/helm-charts
+{{- end }}
+{{- if $installOpentelemetry }}
   - name: open-telemetry
     url: https://open-telemetry.github.io/opentelemetry-helm-charts
+{{- end }}
+{{- if $installOpensearch }}
   - name: opensearch
     url: https://opensearch-project.github.io/helm-charts
+{{- end }}
+{{- if $installBitnami }}
   - name: bitnami
     url: https://charts.bitnami.com/bitnami
+{{- end }}
+{{- if $installExternalSecrets }}
   - name: external-secrets
     url: https://charts.external-secrets.io
+{{- end }}
+{{- if $installVelero }}
   - name: vmware-tanzu
     url: https://vmware-tanzu.github.io/helm-charts
+{{- end }}
+{{- if $installEmqx }}
   - name: emqx
     url: https://repos.emqx.io/charts
+{{- end }}
+{{- if $installNats }}
   - name: nats
     url: https://nats-io.github.io/k8s/helm/charts/
+{{- end }}
+{{- if $installVault }}
   - name: hashicorp
     url: https://helm.releases.hashicorp.com
+{{- end }}
+{{- if $installKyverno }}
   - name: kyverno
     url: https://kyverno.github.io/kyverno/
+{{- end }}
+{{- if $installArgoWorkflows }}
   - name: argo
     url: https://argoproj.github.io/argo-helm
+{{- end }}
+{{- if $installTemporal }}
   - name: temporal
     url: https://go.temporal.io/helm-charts
+{{- end }}
+{{- if $installLinkerd }}
   - name: linkerd
     url: https://helm.linkerd.io/stable
+{{- end }}
+{{- if $installIstio }}
   - name: istio
     url: https://istio-release.storage.googleapis.com/charts
+{{- end }}
 
 releases:
   - name: external-secrets

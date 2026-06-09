@@ -1811,6 +1811,8 @@ for makefile_helm_token in [
 
 helmfile_text = (ROOT / 'deploy/helmfile.yaml.gotmpl').read_text(encoding='utf-8')
 for helmfile_backup_token in [
+    '$installVelero',
+    '{{- if $installVelero }}',
     'https://vmware-tanzu.github.io/helm-charts',
     'name: velero',
     'chart: vmware-tanzu/velero',
@@ -1822,6 +1824,16 @@ for helmfile_backup_token in [
         errors.append(f'Helmfile missing optional backup operator token: {helmfile_backup_token}')
 
 for helmfile_capability_token in [
+    '$installBitnami := or $installMinio $installRabbitmq $installKeycloak $installClickhouse',
+    '{{- if $installBitnami }}',
+    '{{- if $installEmqx }}',
+    '{{- if $installNats }}',
+    '{{- if $installVault }}',
+    '{{- if $installKyverno }}',
+    '{{- if $installArgoWorkflows }}',
+    '{{- if $installTemporal }}',
+    '{{- if $installLinkerd }}',
+    '{{- if $installIstio }}',
     'https://repos.emqx.io/charts',
     'https://nats-io.github.io/k8s/helm/charts/',
     'https://helm.releases.hashicorp.com',
@@ -1870,6 +1882,19 @@ for helmfile_capability_token in [
 ]:
     if helmfile_capability_token not in helmfile_text:
         errors.append(f'Helmfile missing optional platform capability token: {helmfile_capability_token}')
+
+for helmfile_observability_repo_token in [
+    '{{- if $installCertManager }}',
+    '{{- if $installCnpg }}',
+    '{{- if $installEck }}',
+    '{{- if $installPrometheus }}',
+    '{{- if $installOpentelemetry }}',
+    '{{- if $installLoki }}',
+    '{{- if $installOpensearch }}',
+    'https://grafana.github.io/helm-charts',
+]:
+    if helmfile_observability_repo_token not in helmfile_text:
+        errors.append(f'Helmfile missing conditional observability repository token: {helmfile_observability_repo_token}')
 
 project_import_text = (ROOT / 'scripts/import_project.py').read_text(encoding='utf-8')
 for project_import_token in [
