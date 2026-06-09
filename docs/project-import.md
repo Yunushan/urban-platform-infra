@@ -145,7 +145,10 @@ autoscaling, observability, backups, and optional platform capabilities
 disabled, defaults imported app workloads to
 `MIGRATION_IMPORT_SECURITY_CONTEXT=compat` so legacy Compose images that run as
 root or use named users can start during migration, and constrains platform
-database, Kafka, ZooKeeper, and Redis defaults for small clusters. Production
+database, Kafka, ZooKeeper, and Redis defaults for small clusters. Compat mode
+still sets `RuntimeDefault` seccomp, drops Linux capabilities, and disables
+privilege escalation, but it intentionally omits `runAsNonRoot` for legacy
+images until they are rebuilt. Production
 defaults to `MIGRATION_IMPORT_SECURITY_CONTEXT=restricted`, which removes Pod
 Security warn/audit noise by setting `RuntimeDefault` seccomp, `runAsNonRoot`,
 dropped Linux capabilities, and disabled privilege escalation. Use the

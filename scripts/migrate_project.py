@@ -49,7 +49,7 @@ KAFKA_ENDPOINT_RE = re.compile(
 )
 KAFKA_CONTEXT_RE = re.compile(r"kafka|bootstrapservers?|bootstrap_servers?|broker", re.IGNORECASE)
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 14
+MANIFEST_GENERATOR_VERSION = 15
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -1366,22 +1366,20 @@ def imported_workload_uses_restricted_security_context(
 
 
 def imported_workload_pod_security_context(args: argparse.Namespace, record: import_project.ServiceRecord) -> dict[str, Any]:
-    if not imported_workload_uses_restricted_security_context(args, record):
-        return {}
-    return {
-        "runAsNonRoot": True,
-        "seccompProfile": {"type": "RuntimeDefault"},
-    }
+    context: dict[str, Any] = {"seccompProfile": {"type": "RuntimeDefault"}}
+    if imported_workload_uses_restricted_security_context(args, record):
+        context["runAsNonRoot"] = True
+    return context
 
 
 def imported_workload_container_security_context(args: argparse.Namespace, record: import_project.ServiceRecord) -> dict[str, Any]:
-    if not imported_workload_uses_restricted_security_context(args, record):
-        return {}
-    return {
+    context: dict[str, Any] = {
         "allowPrivilegeEscalation": False,
-        "runAsNonRoot": True,
         "capabilities": {"drop": ["ALL"]},
     }
+    if imported_workload_uses_restricted_security_context(args, record):
+        context["runAsNonRoot"] = True
+    return context
 
 
 def kubernetes_workload_manifests(
