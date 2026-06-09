@@ -1963,6 +1963,8 @@ for migration_automation_token in [
     'imported_workload_pod_security_context',
     'imported_workload_container_security_context',
     'pod_waiting_summaries',
+    'write_private_runtime_diagnostics',
+    'post-migration-runtime-diagnostics.md',
     'wait_for_post_migration_runtime',
     'runtime_blockers_for_wait',
     'cleanup_stale_restricted_import_workloads',

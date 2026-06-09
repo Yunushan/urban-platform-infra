@@ -4795,6 +4795,125 @@ def pod_waiting_summaries(pods: list[dict[str, Any]]) -> list[str]:
     return sorted(dict.fromkeys(summaries))
 
 
+def pod_waiting_log_targets(pods: list[dict[str, Any]]) -> list[tuple[str, str, str]]:
+    targets: list[tuple[str, str, str]] = []
+    for pod in pods:
+        metadata = pod.get("metadata", {}) or {}
+        status = pod.get("status", {}) or {}
+        name = str(metadata.get("name", ""))
+        if not name:
+            continue
+        for status_key in ["initContainerStatuses", "containerStatuses"]:
+            for container_status in status.get(status_key, []) or []:
+                state = container_status.get("state", {}) or {}
+                waiting = state.get("waiting")
+                if not waiting:
+                    continue
+                reason = str(waiting.get("reason") or "Waiting")
+                if reason not in {"CrashLoopBackOff", "RunContainerError", "CreateContainerConfigError"}:
+                    continue
+                container_name = str(container_status.get("name") or "")
+                if container_name:
+                    targets.append((name, container_name, reason))
+    return list(dict.fromkeys(targets))
+
+
+def runtime_log_excerpt(text: str, *, limit: int = 12000) -> str:
+    compact = text.replace("```", "` ` `").strip()
+    if len(compact) <= limit:
+        return compact or "<empty>"
+    return f"{compact[-limit:]}\n<truncated to last {limit} characters>"
+
+
+def capture_container_logs(args: argparse.Namespace, pod_name: str, container_name: str) -> tuple[str, str]:
+    previous = kubectl_capture(
+        args,
+        [
+            "-n",
+            args.namespace,
+            "logs",
+            pod_name,
+            "-c",
+            container_name,
+            "--previous",
+            "--tail=160",
+            "--request-timeout=20s",
+        ],
+    )
+    current = kubectl_capture(
+        args,
+        [
+            "-n",
+            args.namespace,
+            "logs",
+            pod_name,
+            "-c",
+            container_name,
+            "--tail=80",
+            "--request-timeout=20s",
+        ],
+    )
+    previous_details = command_details(previous) if previous.returncode == 0 else f"kubectl logs --previous failed: {command_details(previous)}"
+    current_details = command_details(current) if current.returncode == 0 else f"kubectl logs failed: {command_details(current)}"
+    return previous_details, current_details
+
+
+def write_private_runtime_diagnostics(
+    args: argparse.Namespace,
+    pods: list[dict[str, Any]],
+    pod_waiting: list[str],
+) -> Path | None:
+    targets = pod_waiting_log_targets(pods)
+    if not targets:
+        return None
+    private_dir = Path(args.private_dir).expanduser()
+    secure_directory(private_dir)
+    path = private_dir / "post-migration-runtime-diagnostics.md"
+    lines = [
+        "# Private Post-Migration Runtime Diagnostics",
+        "",
+        "This file can contain application logs and runtime details. Keep it private and do not commit it.",
+        "",
+        f"- Namespace: `{args.namespace}`",
+        f"- Generated at: `{utc_timestamp()}`",
+        f"- Public runtime report: `{Path(args.output).expanduser() / 'post-migration-runtime.md'}`",
+        "",
+        "## Waiting Reasons",
+        "",
+    ]
+    lines.extend(f"- {item}" for item in pod_waiting[:80])
+    if len(pod_waiting) > 80:
+        lines.append(f"- `+{len(pod_waiting) - 80}` more")
+
+    lines.extend(["", "## Container Logs", ""])
+    for pod_name, container_name, reason in targets[:10]:
+        previous, current = capture_container_logs(args, pod_name, container_name)
+        lines.extend(
+            [
+                f"### `{pod_name}` / `{container_name}`",
+                "",
+                f"- Waiting reason: `{reason}`",
+                "",
+                "Previous container log:",
+                "",
+                "```text",
+                runtime_log_excerpt(previous),
+                "```",
+                "",
+                "Current container log:",
+                "",
+                "```text",
+                runtime_log_excerpt(current),
+                "```",
+                "",
+            ]
+        )
+    write_file(path, "\n".join(lines) + "\n")
+    secure_file(path)
+    print(f"Private runtime diagnostics written to {path}")
+    return path
+
+
 def cnpg_cluster_summaries(args: argparse.Namespace) -> list[str]:
     try:
         clusters = kubectl_json(args, ["-n", args.namespace, "get", "clusters.postgresql.cnpg.io"]).get("items", [])
@@ -5134,6 +5253,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
     nginx_versions: list[str] = []
     nginx_mismatches: list[str] = []
     pod_waiting = pod_waiting_summaries(workload_pods)
+    private_diagnostics_path = write_private_runtime_diagnostics(args, workload_pods, pod_waiting) if pod_waiting else None
     for item in deployments:
         name = item.get("metadata", {}).get("name", "unknown")
         ready, desired = deployment_ready_status(item)
@@ -5172,6 +5292,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
             f"- CNPG expected PVCs missing: `{len(cnpg_missing_pvcs)}`",
             f"- PVCs not bound: `{len(pvc_summaries)}`",
             f"- nginx version mismatches: `{len(nginx_mismatches)}`",
+            f"- Private diagnostics: `{private_diagnostics_path or 'not generated'}`",
             "",
             "## Deployment Readiness",
             "",
