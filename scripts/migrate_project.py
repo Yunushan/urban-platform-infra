@@ -49,7 +49,7 @@ KAFKA_ENDPOINT_RE = re.compile(
 )
 KAFKA_CONTEXT_RE = re.compile(r"kafka|bootstrapservers?|bootstrap_servers?|broker", re.IGNORECASE)
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 13
+MANIFEST_GENERATOR_VERSION = 14
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -1356,8 +1356,17 @@ def kubernetes_service_manifest(
     }
 
 
-def imported_workload_pod_security_context(args: argparse.Namespace) -> dict[str, Any]:
-    if args.import_security_context == "compat":
+def imported_workload_uses_restricted_security_context(
+    args: argparse.Namespace,
+    record: import_project.ServiceRecord,
+) -> bool:
+    if args.import_security_context != "compat":
+        return True
+    return bool(nginx_unprivileged_port_map(args, record))
+
+
+def imported_workload_pod_security_context(args: argparse.Namespace, record: import_project.ServiceRecord) -> dict[str, Any]:
+    if not imported_workload_uses_restricted_security_context(args, record):
         return {}
     return {
         "runAsNonRoot": True,
@@ -1365,8 +1374,8 @@ def imported_workload_pod_security_context(args: argparse.Namespace) -> dict[str
     }
 
 
-def imported_workload_container_security_context(args: argparse.Namespace) -> dict[str, Any]:
-    if args.import_security_context == "compat":
+def imported_workload_container_security_context(args: argparse.Namespace, record: import_project.ServiceRecord) -> dict[str, Any]:
+    if not imported_workload_uses_restricted_security_context(args, record):
         return {}
     return {
         "allowPrivilegeEscalation": False,
@@ -1419,7 +1428,7 @@ def kubernetes_workload_manifests(
             "imagePullPolicy": "IfNotPresent",
             "ports": container_ports,
         }
-        container_security_context = imported_workload_container_security_context(args)
+        container_security_context = imported_workload_container_security_context(args, record)
         if container_security_context:
             container["securityContext"] = container_security_context
         if generate_tcp_probes:
@@ -1440,7 +1449,7 @@ def kubernetes_workload_manifests(
             "enableServiceLinks": False,
             "containers": [container],
         }
-        pod_security_context = imported_workload_pod_security_context(args)
+        pod_security_context = imported_workload_pod_security_context(args, record)
         if pod_security_context:
             pod_spec["securityContext"] = pod_security_context
         if volumes:
@@ -5204,6 +5213,12 @@ def pod_template_has_run_as_non_root(template: dict[str, Any]) -> bool:
     return False
 
 
+def pod_template_is_platform_nginx(template: dict[str, Any]) -> bool:
+    metadata = template.get("metadata", {}) or {}
+    annotations = metadata.get("annotations", {}) or {}
+    return bool(annotations.get("urban-platform.io/nginx-base-image"))
+
+
 def cleanup_stale_restricted_import_workloads(args: argparse.Namespace) -> None:
     if not args.execute or args.import_security_context != "compat":
         return
@@ -5227,12 +5242,16 @@ def cleanup_stale_restricted_import_workloads(args: argparse.Namespace) -> None:
     stale_replica_sets = [
         str((item.get("metadata", {}) or {}).get("name"))
         for item in replica_sets
-        if (item.get("metadata", {}) or {}).get("name") and pod_template_has_run_as_non_root((item.get("spec", {}) or {}).get("template", {}) or {})
+        if (item.get("metadata", {}) or {}).get("name")
+        and pod_template_has_run_as_non_root((item.get("spec", {}) or {}).get("template", {}) or {})
+        and not pod_template_is_platform_nginx((item.get("spec", {}) or {}).get("template", {}) or {})
     ]
     stale_pods = [
         str((item.get("metadata", {}) or {}).get("name"))
         for item in pods
-        if (item.get("metadata", {}) or {}).get("name") and pod_template_has_run_as_non_root({"spec": (item.get("spec", {}) or {})})
+        if (item.get("metadata", {}) or {}).get("name")
+        and pod_template_has_run_as_non_root({"spec": (item.get("spec", {}) or {})})
+        and not pod_template_is_platform_nginx({"metadata": (item.get("metadata", {}) or {}), "spec": (item.get("spec", {}) or {})})
     ]
 
     if not stale_replica_sets and not stale_pods:
