@@ -49,7 +49,7 @@ KAFKA_ENDPOINT_RE = re.compile(
 )
 KAFKA_CONTEXT_RE = re.compile(r"kafka|bootstrapservers?|bootstrap_servers?|broker", re.IGNORECASE)
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 15
+MANIFEST_GENERATOR_VERSION = 16
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -1369,6 +1369,9 @@ def imported_workload_pod_security_context(args: argparse.Namespace, record: imp
     context: dict[str, Any] = {"seccompProfile": {"type": "RuntimeDefault"}}
     if imported_workload_uses_restricted_security_context(args, record):
         context["runAsNonRoot"] = True
+    if nginx_unprivileged_port_map(args, record):
+        context["fsGroup"] = 101
+        context["fsGroupChangePolicy"] = "OnRootMismatch"
     return context
 
 
@@ -1379,7 +1382,31 @@ def imported_workload_container_security_context(args: argparse.Namespace, recor
     }
     if imported_workload_uses_restricted_security_context(args, record):
         context["runAsNonRoot"] = True
+    if nginx_unprivileged_port_map(args, record):
+        context["runAsUser"] = 101
+        context["runAsGroup"] = 101
     return context
+
+
+def nginx_unprivileged_startup_script(args: argparse.Namespace, record: import_project.ServiceRecord) -> str | None:
+    if not nginx_unprivileged_port_map(args, record):
+        return None
+    return "\n".join(
+        [
+            "set -eu",
+            "mkdir -p /tmp/nginx/client_body /tmp/nginx/proxy /tmp/nginx/fastcgi /tmp/nginx/uwsgi /tmp/nginx/scgi",
+            "sed \\",
+            "  -e 's#/var/run/nginx[.]pid#/tmp/nginx.pid#g' \\",
+            "  -e 's#/run/nginx[.]pid#/tmp/nginx.pid#g' \\",
+            "  -e 's#/var/cache/nginx/client_temp#/tmp/nginx/client_body#g' \\",
+            "  -e 's#/var/cache/nginx/proxy_temp#/tmp/nginx/proxy#g' \\",
+            "  -e 's#/var/cache/nginx/fastcgi_temp#/tmp/nginx/fastcgi#g' \\",
+            "  -e 's#/var/cache/nginx/uwsgi_temp#/tmp/nginx/uwsgi#g' \\",
+            "  -e 's#/var/cache/nginx/scgi_temp#/tmp/nginx/scgi#g' \\",
+            "  /etc/nginx/nginx.conf > /tmp/nginx.conf",
+            "exec nginx -c /tmp/nginx.conf -g 'daemon off;'",
+        ]
+    )
 
 
 def kubernetes_workload_manifests(
@@ -1441,6 +1468,9 @@ def kubernetes_workload_manifests(
         if resources:
             container["resources"] = resources
         config_map_manifests, volumes, volume_mounts = configmap_mount_manifests(args, record, service, labels)
+        if startup_script := nginx_unprivileged_startup_script(args, record):
+            container["command"] = ["/bin/sh", "-ec"]
+            container["args"] = [startup_script]
         if volume_mounts:
             container["volumeMounts"] = volume_mounts
         pod_spec: dict[str, Any] = {
