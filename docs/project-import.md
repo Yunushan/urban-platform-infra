@@ -160,9 +160,12 @@ small lab can continue. `MIGRATION_RELAX_RESOURCE_QUOTA=true` is the lab
 default on `import-auto`; it deploys the platform with
 `namespace.resourceQuota.enabled=false` so migration batches, CNPG init jobs,
 and local-path PVC first-consumer scheduling are not blocked by the chart's
-production guardrail quota. Set `MIGRATION_RELAX_RESOURCE_QUOTA=false` when the
-namespace quota has already been sized for the selected batch. For very large
-Compose projects, import a subset first
+production guardrail quota. `deploy-auto` also removes the stale Helm-managed
+ResourceQuota when quota is disabled, so Kafka, ZooKeeper, Redis, and imported
+workloads are not left blocked by an old lab quota after a rerun. Set
+`MIGRATION_RELAX_RESOURCE_QUOTA=false` when the namespace quota has already
+been sized for the selected batch. For very large Compose projects, import a
+subset first
 or deliberately raise `MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS`; the default
 limit is meant to protect 4 GiB lab nodes from starting too many small-request
 pods at once. Batch selection applies to service-specific secrets, image

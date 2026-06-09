@@ -1784,6 +1784,7 @@ for makefile_helm_token in [
     'INSTALL_ARGO_WORKFLOWS="$(DEPLOY_ENABLE_ARGO_WORKFLOWS)"',
     'INSTALL_LINKERD="$(DEPLOY_ENABLE_LINKERD)"',
     'INSTALL_ISTIO="$(DEPLOY_ENABLE_ISTIO)"',
+    'deploy-auto: DEPLOY_NAMESPACE_RESOURCE_QUOTA = false',
     'deploy-auto: MIGRATION_AUTO_REPAIR_CLUSTER = true',
     'configure-edge-ports:',
     'Using recovered private inventory for edge ports',
@@ -1800,6 +1801,8 @@ for makefile_helm_token in [
     'kubectl get namespace $(NAMESPACE)',
     'kubectl create namespace $(NAMESPACE)',
     'kubectl label namespace $(NAMESPACE)',
+    'ResourceQuota disabled for this deploy; removing stale $(PROJECT)-quota if present.',
+    'kubectl -n $(NAMESPACE) delete resourcequota $(PROJECT)-quota --ignore-not-found',
     '--set namespace.create=false',
     'deploy: install-operators ensure-namespace',
 ]:

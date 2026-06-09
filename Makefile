@@ -769,6 +769,10 @@ ensure-namespace: ## Create and label the target namespace before deploying the 
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl get namespace $(NAMESPACE) >/dev/null 2>&1 || \
 		KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl create namespace $(NAMESPACE)
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl label namespace $(NAMESPACE) pod-security.kubernetes.io/enforce=baseline pod-security.kubernetes.io/audit=restricted pod-security.kubernetes.io/warn=restricted pod-security.kubernetes.io/enforce-version=latest pod-security.kubernetes.io/audit-version=latest pod-security.kubernetes.io/warn-version=latest --overwrite
+	@if [ "$(DEPLOY_NAMESPACE_RESOURCE_QUOTA)" = "false" ]; then \
+		echo "ResourceQuota disabled for this deploy; removing stale $(PROJECT)-quota if present."; \
+		KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl -n $(NAMESPACE) delete resourcequota $(PROJECT)-quota --ignore-not-found; \
+	fi
 
 recover-helm-release: operator-kubeconfig ensure-namespace ## Recover a failed, uninstalling, or stale platform Helm release before redeploying.
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) HELM=$(HELM) PROJECT=$(PROJECT) NAMESPACE=$(NAMESPACE) HELM_TIMEOUT=$(HELM_TIMEOUT) DEPLOY_RECOVER_FAILED_RELEASE=$(DEPLOY_RECOVER_FAILED_RELEASE) DEPLOY_RECOVER_STALE_RESOURCES=$(DEPLOY_RECOVER_STALE_RESOURCES) DEPLOY_RECOVER_PENDING_PVCS=$(DEPLOY_RECOVER_PENDING_PVCS) DEPLOY_RECOVER_DELETE_PVCS=$(DEPLOY_RECOVER_DELETE_PVCS) DEPLOY_RECOVER_STATEFULSETS=$(DEPLOY_RECOVER_STATEFULSETS) DEPLOY_RECOVER_CNPG_INITDB=$(DEPLOY_RECOVER_CNPG_INITDB) bash $(HELM_RECOVERY_SCRIPT)
@@ -823,6 +827,7 @@ deploy-auto: DEPLOY_REDIS_SENTINEL = false
 deploy-auto: DEPLOY_TLS_SECRET_NAME = urban-platform-tls
 deploy-auto: DEPLOY_TLS_CREATE_SECRET = false
 deploy-auto: DEPLOY_CONFIGURE_EDGE_PORTS = true
+deploy-auto: DEPLOY_NAMESPACE_RESOURCE_QUOTA = false
 deploy-auto: MIGRATION_AUTO_REPAIR_CLUSTER = true
 deploy-auto: deploy ## Automatically recover common lab/import deploy failures and use compact local-path storage sizes.
 
