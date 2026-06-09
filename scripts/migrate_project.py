@@ -44,8 +44,12 @@ OFFICIAL_LIBRARY_PULL_IMAGES = {"nginx"}
 MEMORY_QUANTITY_RE = re.compile(r"^([0-9]+)(Ki|Mi|Gi|Ti)?$")
 CPU_QUANTITY_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(m)?$")
 PRIVATE_IPV4_RE = re.compile(r"\b(?:10|192\.168|172\.(?:1[6-9]|2[0-9]|3[01]))(?:\.[0-9]{1,3}){2}\b")
+KAFKA_ENDPOINT_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])(?:(?:10|192[.]168|172[.](?:1[6-9]|2[0-9]|3[01]))(?:[.][0-9]{1,3}){2}|127[.]0[.]0[.]1|localhost):(?:9092|29092)\b"
+)
+KAFKA_CONTEXT_RE = re.compile(r"kafka|bootstrapservers?|bootstrap_servers?|broker", re.IGNORECASE)
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 12
+MANIFEST_GENERATOR_VERSION = 13
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -1015,6 +1019,39 @@ def service_looks_like_dotnet(record: import_project.ServiceRecord, service: dic
     )
 
 
+def selected_kafka_bootstrap_servers(args: argparse.Namespace) -> str:
+    return str(getattr(args, "kafka_bootstrap_servers", "") or "").strip()
+
+
+def normalize_kafka_endpoint_text(args: argparse.Namespace, value: str) -> str:
+    kafka_bootstrap_servers = selected_kafka_bootstrap_servers(args)
+    if not kafka_bootstrap_servers:
+        return value
+    return KAFKA_ENDPOINT_RE.sub(kafka_bootstrap_servers, value)
+
+
+def normalize_imported_env_value(args: argparse.Namespace, key: str, value: str) -> str:
+    if KAFKA_CONTEXT_RE.search(key) or KAFKA_CONTEXT_RE.search(value):
+        return normalize_kafka_endpoint_text(args, value)
+    return value
+
+
+def imported_kafka_environment_defaults(args: argparse.Namespace) -> dict[str, str]:
+    kafka_bootstrap_servers = selected_kafka_bootstrap_servers(args)
+    if not kafka_bootstrap_servers:
+        return {}
+    return {
+        "KAFKA_BOOTSTRAP_SERVERS": kafka_bootstrap_servers,
+        "Kafka__BootstrapServers": kafka_bootstrap_servers,
+        "Kafka__BootstrapServer": kafka_bootstrap_servers,
+        "Kafka__Broker": kafka_bootstrap_servers,
+        "Kafka__Brokers__0": kafka_bootstrap_servers,
+        "KafkaOptions__BootstrapServers": kafka_bootstrap_servers,
+        "KafkaOptions__Broker": kafka_bootstrap_servers,
+        "MassTransit__Kafka__BootstrapServers": kafka_bootstrap_servers,
+    }
+
+
 def merge_container_env(env: list[dict[str, str]], defaults: dict[str, str]) -> list[dict[str, str]]:
     existing = {entry["name"] for entry in env if "name" in entry}
     merged = list(env)
@@ -1024,7 +1061,7 @@ def merge_container_env(env: list[dict[str, str]], defaults: dict[str, str]) -> 
     return merged
 
 
-def default_import_environment(record: import_project.ServiceRecord, service: dict[str, Any]) -> dict[str, str]:
+def default_import_environment(args: argparse.Namespace, record: import_project.ServiceRecord, service: dict[str, Any]) -> dict[str, str]:
     # These are harmless for non-.NET workloads, and they stop imported .NET
     # services from exhausting shared host inotify limits in dense lab clusters.
     defaults: dict[str, str] = {
@@ -1033,6 +1070,7 @@ def default_import_environment(record: import_project.ServiceRecord, service: di
         "DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE": "false",
         "ASPNETCORE_HOSTBUILDER__RELOADCONFIGONCHANGE": "false",
     }
+    defaults.update(imported_kafka_environment_defaults(args))
     return defaults
 
 
@@ -1094,12 +1132,66 @@ def rewrite_nginx_listen_ports_for_unprivileged(args: argparse.Namespace, record
     return value
 
 
+def ensure_nginx_main_pid_path(value: str) -> str:
+    pid_line = "pid /tmp/nginx.pid;"
+    if re.search(r"(?m)^\s*pid\s+[^;]+;", value):
+        return re.sub(r"(?m)^(\s*)pid\s+[^;]+;", rf"\1{pid_line}", value, count=1)
+    user_match = re.search(r"(?m)^\s*user\s+[^;]+;\s*$", value)
+    if user_match:
+        insert_at = user_match.end()
+        return f"{value[:insert_at]}\n{pid_line}{value[insert_at:]}"
+    return f"{pid_line}\n{value}"
+
+
+def ensure_nginx_http_temp_paths(value: str) -> str:
+    directives = [
+        "client_body_temp_path /tmp/nginx/client_body;",
+        "proxy_temp_path /tmp/nginx/proxy;",
+        "fastcgi_temp_path /tmp/nginx/fastcgi;",
+        "uwsgi_temp_path /tmp/nginx/uwsgi;",
+        "scgi_temp_path /tmp/nginx/scgi;",
+    ]
+    missing = [directive for directive in directives if not re.search(rf"(?m)^\s*{directive.split()[0]}\s+", value)]
+    if not missing:
+        return value
+    match = re.search(r"(?m)^(?P<indent>\s*)http\s*\{\s*$", value)
+    if match is None:
+        return value
+    indent = f"{match.group('indent')}    "
+    inserted = "\n" + "\n".join(f"{indent}{directive}" for directive in missing)
+    return f"{value[:match.end()]}{inserted}{value[match.end():]}"
+
+
+def rewrite_nginx_runtime_paths_for_unprivileged(
+    args: argparse.Namespace,
+    record: import_project.ServiceRecord,
+    target: str,
+    value: str,
+) -> str:
+    if not nginx_unprivileged_port_map(args, record):
+        return value
+    value = re.sub(r"(?<![A-Za-z0-9_/.-])/var/run/nginx[.]pid\b", "/tmp/nginx.pid", value)
+    value = re.sub(r"(?<![A-Za-z0-9_/.-])/run/nginx[.]pid\b", "/tmp/nginx.pid", value)
+    value = re.sub(r"(?<![A-Za-z0-9_/.-])/var/cache/nginx/client_temp\b", "/tmp/nginx/client_body", value)
+    value = re.sub(r"(?<![A-Za-z0-9_/.-])/var/cache/nginx/proxy_temp\b", "/tmp/nginx/proxy", value)
+    value = re.sub(r"(?<![A-Za-z0-9_/.-])/var/cache/nginx/fastcgi_temp\b", "/tmp/nginx/fastcgi", value)
+    value = re.sub(r"(?<![A-Za-z0-9_/.-])/var/cache/nginx/uwsgi_temp\b", "/tmp/nginx/uwsgi", value)
+    value = re.sub(r"(?<![A-Za-z0-9_/.-])/var/cache/nginx/scgi_temp\b", "/tmp/nginx/scgi", value)
+    if target == "/etc/nginx/nginx.conf":
+        value = ensure_nginx_main_pid_path(value)
+        value = ensure_nginx_http_temp_paths(value)
+    return value
+
+
 def normalize_imported_config_text(args: argparse.Namespace, record: import_project.ServiceRecord, target: str, value: str) -> str:
     if apisix_config_text(record, target):
         value = re.sub(r"(?<![A-Za-z0-9.-])127[.]0[.]0[.]1:2379\b", "etcd:2379", value)
         value = re.sub(r"(?<![A-Za-z0-9.-])localhost:2379\b", "etcd:2379", value)
+    if KAFKA_CONTEXT_RE.search(target) or KAFKA_CONTEXT_RE.search(value):
+        value = normalize_kafka_endpoint_text(args, value)
     if record.kind == "nginx" and (target == "/etc/nginx/nginx.conf" or target.startswith("/etc/nginx/")):
         value = rewrite_nginx_listen_ports_for_unprivileged(args, record, value)
+        value = rewrite_nginx_runtime_paths_for_unprivileged(args, record, target, value)
     return value
 
 
@@ -1316,11 +1408,11 @@ def kubernetes_workload_manifests(
             "app.kubernetes.io/managed-by": "urban-platform-import",
         }
         env = [
-            {"name": key, "value": value}
+            {"name": key, "value": normalize_imported_env_value(args, key, value)}
             for key, value in import_project.environment_entries(service.get("environment"))
             if value is not None and not SECRET_ENV_RE.search(key) and KUBERNETES_ENV_NAME_RE.fullmatch(key)
         ]
-        env = merge_container_env(env, default_import_environment(record, service))
+        env = merge_container_env(env, default_import_environment(args, record, service))
         container: dict[str, Any] = {
             "name": name,
             "image": image,
@@ -3247,6 +3339,7 @@ def generate_bundle(
         f'MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST="${{MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST:-{args.lab_workload_memory_request}}}"\n'
         f'MIGRATION_LAB_WORKLOAD_CPU_LIMIT="${{MIGRATION_LAB_WORKLOAD_CPU_LIMIT:-{args.lab_workload_cpu_limit}}}"\n'
         f'MIGRATION_LAB_WORKLOAD_MEMORY_LIMIT="${{MIGRATION_LAB_WORKLOAD_MEMORY_LIMIT:-{args.lab_workload_memory_limit}}}"\n'
+        f'MIGRATION_KAFKA_BOOTSTRAP_SERVERS="${{MIGRATION_KAFKA_BOOTSTRAP_SERVERS:-{args.kafka_bootstrap_servers}}}"\n'
         f'MIGRATION_PREFLIGHT_MIN_NODE_MEMORY="${{MIGRATION_PREFLIGHT_MIN_NODE_MEMORY:-{args.preflight_min_node_memory}}}"\n'
         f'MIGRATION_PREFLIGHT_MIN_NODE_DISK_FREE="${{MIGRATION_PREFLIGHT_MIN_NODE_DISK_FREE:-{args.preflight_min_node_disk_free}}}"\n'
         f'MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS="${{MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS:-{args.preflight_max_imported_workloads}}}"\n'
@@ -3320,6 +3413,7 @@ def generate_bundle(
         '--lab-workload-memory-request "$MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST" '
         '--lab-workload-cpu-limit "$MIGRATION_LAB_WORKLOAD_CPU_LIMIT" '
         '--lab-workload-memory-limit "$MIGRATION_LAB_WORKLOAD_MEMORY_LIMIT" '
+        '--kafka-bootstrap-servers "$MIGRATION_KAFKA_BOOTSTRAP_SERVERS" '
         '--preflight-min-node-memory "$MIGRATION_PREFLIGHT_MIN_NODE_MEMORY" '
         '--preflight-min-node-disk-free "$MIGRATION_PREFLIGHT_MIN_NODE_DISK_FREE" '
         '--preflight-max-imported-workloads "$MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS" '
@@ -5447,6 +5541,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--profile", choices=["lab", "production"], default=os.environ.get("MIGRATION_PROFILE", "lab"))
     parser.add_argument("--runtime-validation-timeout", type=int, default=int(os.environ["MIGRATION_RUNTIME_VALIDATION_TIMEOUT"]) if os.environ.get("MIGRATION_RUNTIME_VALIDATION_TIMEOUT") else None)
     parser.add_argument("--runtime-validation-interval", type=int, default=int(os.environ["MIGRATION_RUNTIME_VALIDATION_INTERVAL"]) if os.environ.get("MIGRATION_RUNTIME_VALIDATION_INTERVAL") else 10)
+    parser.add_argument("--kafka-bootstrap-servers", default=os.environ.get("MIGRATION_KAFKA_BOOTSTRAP_SERVERS", "kafka:9092"))
     parser.add_argument("--import-security-context", choices=["restricted", "compat"], default=os.environ.get("MIGRATION_IMPORT_SECURITY_CONTEXT", ""))
     parser.add_argument("--lab-workload-cpu-request", default=os.environ.get("MIGRATION_LAB_WORKLOAD_CPU_REQUEST", "25m"))
     parser.add_argument("--lab-workload-memory-request", default=os.environ.get("MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST", "64Mi"))

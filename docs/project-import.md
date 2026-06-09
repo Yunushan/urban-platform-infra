@@ -170,11 +170,22 @@ global because databases are shared dependencies controlled by
 `registry` and unavailable database sources fail the run unless explicitly
 overridden.
 
+`MIGRATION_KAFKA_BOOTSTRAP_SERVERS` defaults to `kafka:9092` so imported
+workloads do not keep old Compose, host-network, or private-IP Kafka bootstrap
+endpoints during a platform import. The importer rewrites matching non-secret
+environment values and imported config text when the key or content is
+Kafka-related, and injects common .NET/Kafka override variables. Set it to an
+external broker list, or to an empty value, when a migration intentionally keeps
+managed Kafka outside the cluster.
+
 Imported nginx edge/static services are rebuilt or retagged from the selected
 platform nginx image. In preload mode, nginx platform imports use a stable
 nginx-base suffix and force-refresh the node-side RKE2/containerd image ref, so
 a previous `nginx:1.18` import cannot silently satisfy a later
 `nginxinc/nginx-unprivileged:1.30.2` rollout.
+When the selected platform image is `nginxinc/nginx-unprivileged`, imported
+nginx config text is also normalized for unprivileged runtime paths, including
+`pid /tmp/nginx.pid;` and writable temporary directories under `/tmp/nginx`.
 
 To run later lab batches after the first automatic batch, rerun the same
 `import-auto` command. Resume state skips completed batch stages and
