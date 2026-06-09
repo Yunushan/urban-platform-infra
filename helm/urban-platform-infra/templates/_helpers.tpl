@@ -184,6 +184,23 @@ capabilities:
     {{- end }}
 {{- end -}}
 
+{{- define "cip.compatPodSecurityContext" -}}
+{{- if .Values.global.podSecurityContext.enabled }}
+seccompProfile:
+  type: {{ .Values.global.podSecurityContext.seccompProfile.type | default "RuntimeDefault" | quote }}
+{{- end }}
+{{- end -}}
+
+{{- define "cip.compatSecurityContext" -}}
+allowPrivilegeEscalation: {{ .Values.global.security.allowPrivilegeEscalation | default false }}
+readOnlyRootFilesystem: false
+capabilities:
+  drop:
+    {{- range .Values.global.security.capabilities.drop }}
+    - {{ . | quote }}
+    {{- end }}
+{{- end -}}
+
 {{- define "cip.topologySpreadConstraints" -}}
 {{- $root := index . 0 -}}
 {{- $appName := index . 1 -}}

@@ -781,6 +781,7 @@ webserver:
 messaging:
   kafka:
     enabled: true
+    compatibilitySecurityContext: true
     replicas: 1
     image:
       repository: confluentinc/cp-kafka
@@ -831,6 +832,7 @@ messaging:
       port: 8080
   redis:
     enabled: true
+    compatibilitySecurityContext: true
     replicas: 1
     image:
       repository: redis

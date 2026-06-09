@@ -4127,6 +4127,9 @@ for kafka_template_token in [
     '.Values.messaging.kafka.zookeeper.resources',
     '.Values.messaging.kafka.resources',
     '.Values.messaging.kafka.ui.resources',
+    'compatibilitySecurityContext',
+    'cip.compatPodSecurityContext',
+    'cip.compatSecurityContext',
     'cip.podSecurityContext',
     'cip.securityContext',
 ]:
@@ -4139,6 +4142,9 @@ for redis_template_token in [
     'sentinel monitor mymaster',
     '.Values.messaging.redis.resources',
     '.Values.messaging.redis.sentinel.resources',
+    'compatibilitySecurityContext',
+    'cip.compatPodSecurityContext',
+    'cip.compatSecurityContext',
     'cip.podSecurityContext',
     'cip.securityContext',
 ]:
