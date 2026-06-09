@@ -5002,6 +5002,18 @@ def wait_for_post_migration_runtime(args: argparse.Namespace) -> None:
 
         last_blockers = blockers
         last_samples = samples
+        if has_run_as_non_root_rejection(samples):
+            print("Post-migration runtime readiness has a non-recoverable imported image security-context blocker.")
+            print("Imported legacy image(s) are rejected by runAsNonRoot; waiting longer will not fix this.")
+            print(
+                "Use MIGRATION_IMPORT_SECURITY_CONTEXT=compat for lab imports, "
+                "or rebuild the image(s) to run as numeric non-root users before using restricted mode."
+            )
+            if samples:
+                print("First runtime blockers:")
+                for sample in samples[:8]:
+                    print(f"- {sample}")
+            return
         remaining = int(deadline - time.monotonic())
         if remaining <= 0:
             print(f"Post-migration runtime readiness wait timed out after {timeout}s; writing diagnostics.")
