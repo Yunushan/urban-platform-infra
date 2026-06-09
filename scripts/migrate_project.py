@@ -4979,6 +4979,62 @@ def has_run_as_non_root_rejection(waiting: list[str]) -> bool:
     return any("runAsNonRoot" in item or "will run as root" in item or "non-numeric user" in item for item in waiting)
 
 
+def pod_template_has_run_as_non_root(template: dict[str, Any]) -> bool:
+    spec = template.get("spec", {}) or {}
+    pod_security_context = spec.get("securityContext", {}) or {}
+    if pod_security_context.get("runAsNonRoot") is True:
+        return True
+    for container in spec.get("containers", []) or []:
+        security_context = container.get("securityContext", {}) or {}
+        if security_context.get("runAsNonRoot") is True:
+            return True
+    return False
+
+
+def cleanup_stale_restricted_import_workloads(args: argparse.Namespace) -> None:
+    if not args.execute or args.import_security_context != "compat":
+        return
+    try:
+        replica_sets = kubectl_json(
+            args,
+            [
+                "-n",
+                args.namespace,
+                "get",
+                "rs",
+                "-l",
+                "app.kubernetes.io/managed-by=urban-platform-import",
+            ],
+        ).get("items", [])
+        pods = imported_pods(args)
+    except RuntimeError as exc:
+        print(f"Could not inspect stale restricted imported pods for cleanup: {compact_runtime_message(exc)}")
+        return
+
+    stale_replica_sets = [
+        str((item.get("metadata", {}) or {}).get("name"))
+        for item in replica_sets
+        if (item.get("metadata", {}) or {}).get("name") and pod_template_has_run_as_non_root((item.get("spec", {}) or {}).get("template", {}) or {})
+    ]
+    stale_pods = [
+        str((item.get("metadata", {}) or {}).get("name"))
+        for item in pods
+        if (item.get("metadata", {}) or {}).get("name") and pod_template_has_run_as_non_root({"spec": (item.get("spec", {}) or {})})
+    ]
+
+    if not stale_replica_sets and not stale_pods:
+        return
+
+    print(
+        "Removing stale restricted imported ReplicaSets/Pods after compat manifest apply "
+        "so lab legacy images are recreated without runAsNonRoot."
+    )
+    for name in stale_replica_sets:
+        run_command(kubectl_command(args, ["-n", args.namespace, "delete", "rs", name, "--ignore-not-found=true"]))
+    for name in stale_pods:
+        run_command(kubectl_command(args, ["-n", args.namespace, "delete", "pod", name, "--ignore-not-found=true"]))
+
+
 def wait_for_post_migration_runtime(args: argparse.Namespace) -> None:
     timeout = max(0, int(args.runtime_validation_timeout or 0))
     if timeout <= 0:
@@ -5002,7 +5058,7 @@ def wait_for_post_migration_runtime(args: argparse.Namespace) -> None:
 
         last_blockers = blockers
         last_samples = samples
-        if has_run_as_non_root_rejection(samples):
+        if args.import_security_context != "compat" and has_run_as_non_root_rejection(samples):
             print("Post-migration runtime readiness has a non-recoverable imported image security-context blocker.")
             print("Imported legacy image(s) are rejected by runAsNonRoot; waiting longer will not fix this.")
             print(
@@ -5398,6 +5454,7 @@ def main(argv: list[str]) -> int:
         if not migration_stage_completed(args, "manifests", service_pairs):
             stage_manifests(args, service_pairs, values)
             mark_migration_stage_completed(args, "manifests", service_pairs)
+        cleanup_stale_restricted_import_workloads(args)
     if args.stage in {"validate", "all"}:
         stage_validate(args)
     return 0

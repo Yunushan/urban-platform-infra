@@ -1965,6 +1965,7 @@ for migration_automation_token in [
     'pod_waiting_summaries',
     'wait_for_post_migration_runtime',
     'runtime_blockers_for_wait',
+    'cleanup_stale_restricted_import_workloads',
     'cnpg_cluster_summaries',
     'cnpg_missing_pvc_summaries',
     'pending_pvc_summaries',
