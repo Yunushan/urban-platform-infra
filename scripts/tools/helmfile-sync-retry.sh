@@ -9,6 +9,7 @@ kubeconfig_script="${KUBECONFIG_SCRIPT:-scripts/tools/ensure-kubeconfig.sh}"
 kubectl_bin="${KUBECTL:-kubectl}"
 retries="${HELMFILE_SYNC_RETRIES:-4}"
 retry_delay="${HELMFILE_SYNC_RETRY_DELAY:-20}"
+sync_attempt_timeout="${HELMFILE_SYNC_ATTEMPT_TIMEOUT:-240}"
 pending_wait_timeout="${HELMFILE_PENDING_WAIT_TIMEOUT:-180}"
 pending_wait_delay="${HELMFILE_PENDING_WAIT_DELAY:-10}"
 pending_rollback_timeout="${HELMFILE_PENDING_ROLLBACK_TIMEOUT:-10m}"
@@ -30,6 +31,43 @@ if ! command -v "${helm_bin}" >/dev/null 2>&1; then
   echo "helm is required to recover operator release locks." >&2
   exit 1
 fi
+
+diagnose_helmfile_output() {
+  local output_file="$1"
+
+  if grep -Eiq 'context deadline exceeded|Client\.Timeout|not a valid chart repository|cannot be reached' "${output_file}"; then
+    echo "Helmfile detected a chart repository or network timeout during this attempt." >&2
+    echo "Disabled optional stacks are skipped by the Helmfile template; if a disabled repo is named here, pull the latest repo code and rerun deploy-auto." >&2
+  fi
+
+  if grep -Eiq 'grafana\.github\.io|helm\.linkerd\.io|go\.temporal\.io' "${output_file}"; then
+    echo "Helmfile touched an optional repository. That should only happen when the matching component is enabled." >&2
+  fi
+}
+
+run_helmfile_sync() {
+  local output_file
+  local status
+
+  output_file="$(mktemp "${TMPDIR:-/tmp}/urban-platform-helmfile.XXXXXX.log")"
+  set +e
+  if command -v timeout >/dev/null 2>&1 && [ "${sync_attempt_timeout}" != "0" ]; then
+    KUBECONFIG="${kubeconfig_path}" timeout "${sync_attempt_timeout}" "${helmfile_bin}" -f "${helmfile_config}" sync 2>&1 | tee "${output_file}"
+    status="${PIPESTATUS[0]}"
+  else
+    KUBECONFIG="${kubeconfig_path}" "${helmfile_bin}" -f "${helmfile_config}" sync 2>&1 | tee "${output_file}"
+    status="${PIPESTATUS[0]}"
+  fi
+  set -e
+
+  diagnose_helmfile_output "${output_file}" || true
+  rm -f "${output_file}"
+
+  if [ "${status}" -eq 124 ]; then
+    echo "Helmfile sync attempt timed out after ${sync_attempt_timeout}s; retry control will continue if attempts remain." >&2
+  fi
+  return "${status}"
+}
 
 refresh_kubeconfig() {
   if [ ! -x "${kubeconfig_script}" ] && [ ! -f "${kubeconfig_script}" ]; then
@@ -206,10 +244,10 @@ recover_pending_releases() {
 
 attempt=1
 while true; do
-  echo "Running helmfile sync (attempt ${attempt}/${retries})."
+  echo "Running helmfile sync (attempt ${attempt}/${retries}, attempt timeout ${sync_attempt_timeout}s)."
   status=0
   if wait_for_stable_api && recover_pending_releases; then
-    if KUBECONFIG="${kubeconfig_path}" "${helmfile_bin}" -f "${helmfile_config}" sync; then
+    if run_helmfile_sync; then
       exit 0
     fi
     status=$?

@@ -176,6 +176,13 @@ global because databases are shared dependencies controlled by
 `registry` and unavailable database sources fail the run unless explicitly
 overridden.
 
+`deploy-auto` bounds each Helmfile operator-install attempt with
+`HELMFILE_SYNC_ATTEMPT_TIMEOUT` and reports chart-repository/network timeouts
+before retrying. Optional Helm repositories are rendered only when their matching
+component is enabled, so a disabled observability, workflow, backup, or service
+mesh add-on should not block a base import because its public chart repository is
+slow or unreachable.
+
 `MIGRATION_KAFKA_BOOTSTRAP_SERVERS` defaults to `kafka:9092` so imported
 workloads do not keep old Compose, host-network, or private-IP Kafka bootstrap
 endpoints during a platform import. The importer rewrites matching non-secret
