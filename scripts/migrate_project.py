@@ -1909,7 +1909,8 @@ def create_nginx_static_dockerfile(base_image: str, frontend_base_url: str = "")
     dockerfile_path = Path(path)
     with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(f"FROM {base_image}\n")
-        handle.write("COPY . /usr/share/nginx/html/\n")
+        handle.write("USER root\n")
+        handle.write("COPY --chown=101:0 . /usr/share/nginx/html/\n")
         if frontend_base_url:
             private_host_pattern = (
                 r"10([.][0-9]{1,3}){3}|192[.]168([.][0-9]{1,3}){2}|"
@@ -1923,6 +1924,7 @@ def create_nginx_static_dockerfile(base_image: str, frontend_base_url: str = "")
                 f"{suffix_expr} "
                 f"\\) -exec sed -i -E {shlex.quote(f's#{url_pattern}#{replacement}#g')} {{}} +\n"
             )
+        handle.write("USER 101\n")
     return dockerfile_path
 
 
