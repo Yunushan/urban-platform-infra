@@ -47,6 +47,10 @@ PRIVATE_OR_LOCAL_HOST_RE = (
     r"(?:10(?:[.][0-9]{1,3}){3}|192[.]168(?:[.][0-9]{1,3}){2}|"
     r"172[.](?:1[6-9]|2[0-9]|3[01])(?:[.][0-9]{1,3}){2}|127[.]0[.]0[.]1|localhost)"
 )
+PRIVATE_OR_LOCAL_HOST_SED_RE = (
+    r"10([.][0-9]{1,3}){3}|192[.]168([.][0-9]{1,3}){2}|"
+    r"172[.](1[6-9]|2[0-9]|3[01])([.][0-9]{1,3}){2}|127[.]0[.]0[.]1|localhost"
+)
 PRIVATE_IPV4_RE = re.compile(
     r"\b(?:10(?:\.[0-9]{1,3}){3}|192\.168(?:\.[0-9]{1,3}){2}|172\.(?:1[6-9]|2[0-9]|3[01])(?:\.[0-9]{1,3}){2})\b"
 )
@@ -73,10 +77,25 @@ FRONTEND_STATIC_TEXT_SUFFIXES = {
     ".txt",
     ".xml",
 }
+IMAGE_CONFIG_TEXT_SUFFIXES = {
+    ".config",
+    ".conf",
+    ".env",
+    ".ini",
+    ".js",
+    ".json",
+    ".mjs",
+    ".properties",
+    ".toml",
+    ".txt",
+    ".xml",
+    ".yaml",
+    ".yml",
+}
 POSTGRES_HOST_KEY_RE = re.compile(r"^(?:PGHOST|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*HOST.*)$", re.IGNORECASE)
 POSTGRES_PORT_KEY_RE = re.compile(r"^(?:PGPORT|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*PORT.*)$", re.IGNORECASE)
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 18
+MANIFEST_GENERATOR_VERSION = 19
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -1940,12 +1959,8 @@ def create_nginx_static_dockerfile(base_image: str, frontend_base_url: str = "")
         handle.write("USER root\n")
         handle.write("COPY --chown=101:0 . /usr/share/nginx/html/\n")
         if frontend_base_url:
-            private_host_pattern = (
-                r"10([.][0-9]{1,3}){3}|192[.]168([.][0-9]{1,3}){2}|"
-                r"172[.](1[6-9]|2[0-9]|3[01])([.][0-9]{1,3}){2}|127[.]0[.]0[.]1|localhost"
-            )
-            url_pattern = rf"https?://({private_host_pattern})(:[0-9]{{2,5}})?"
-            replacement = frontend_base_url.replace("\\", "\\\\").replace("&", r"\&").replace("#", r"\#")
+            url_pattern = rf"https?://({PRIVATE_OR_LOCAL_HOST_SED_RE})(:[0-9]{{2,5}})?"
+            replacement = sed_replacement(frontend_base_url)
             suffix_expr = " -o ".join(f"-name '*{suffix}'" for suffix in sorted(FRONTEND_STATIC_TEXT_SUFFIXES))
             handle.write(
                 "RUN find /usr/share/nginx/html -type f \\( "
@@ -1954,6 +1969,131 @@ def create_nginx_static_dockerfile(base_image: str, frontend_base_url: str = "")
             )
         handle.write("USER 101\n")
     return dockerfile_path
+
+
+def sed_replacement(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("&", r"\&").replace("#", r"\#")
+
+
+def image_config_rewrite_required(
+    record: import_project.ServiceRecord,
+    db_rewrites: dict[str, dict[str, str]],
+) -> bool:
+    return record.kind == "application" and bool(db_rewrites)
+
+
+def image_config_rewrite_sed_scripts(
+    db_rewrites: dict[str, dict[str, str]],
+    service_endpoint: dict[str, str] | None,
+) -> list[str]:
+    scripts: list[str] = []
+    for source_port, endpoint in sorted(db_rewrites.items()):
+        target_pair = sed_replacement(f"{endpoint['host']}:{endpoint['port']}")
+        target_port = sed_replacement(endpoint["port"])
+        source_port_pattern = re.escape(source_port)
+        scripts.append(
+            rf"s#(tcp://)?({PRIVATE_OR_LOCAL_HOST_SED_RE}):{source_port_pattern}#{target_pair}#g"
+        )
+        scripts.append(
+            rf"s#([Pp]ort[[:space:]]*=[[:space:]]*){source_port_pattern}([^0-9]|$)#\1{target_port}\2#g"
+        )
+        scripts.append(
+            rf"s#([\"']?[Pp]ort[\"']?[[:space:]]*:[[:space:]]*[\"']?){source_port_pattern}([\"']?)#\1{target_port}\2#g"
+        )
+    if service_endpoint:
+        target_host = sed_replacement(service_endpoint["host"])
+        scripts.append(
+            rf"s#((Host|Server|Data Source|Address|Addr|Network Address)[[:space:]]*=[[:space:]]*)(tcp://)?({PRIVATE_OR_LOCAL_HOST_SED_RE})#\1{target_host}#g"
+        )
+        scripts.append(
+            rf"s#([\"']?(Host|Server|Data Source|Address|Addr|Network Address)[\"']?[[:space:]]*:[[:space:]]*[\"']?)(tcp://)?({PRIVATE_OR_LOCAL_HOST_SED_RE})#\1{target_host}#g"
+        )
+    return scripts
+
+
+def safe_dockerfile_user(user: str) -> str:
+    user = user.strip()
+    if not user:
+        return ""
+    if re.match(r"^[A-Za-z0-9_][A-Za-z0-9_.:-]*$", user):
+        return user
+    return ""
+
+
+def container_image_user(args: argparse.Namespace, image: str) -> str:
+    result = subprocess.run(container_command(args, "image", "inspect", image), text=True, capture_output=True)
+    if result.returncode != 0:
+        return ""
+    try:
+        inspect = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return ""
+    if not isinstance(inspect, list) or not inspect:
+        return ""
+    config = inspect[0].get("Config") if isinstance(inspect[0], dict) else None
+    if not isinstance(config, dict):
+        return ""
+    return safe_dockerfile_user(str(config.get("User") or ""))
+
+
+def create_image_config_rewrite_dockerfile(base_image: str, sed_scripts: list[str], final_user: str = "") -> Path:
+    fd, path = tempfile.mkstemp(prefix="urban-image-config-rewrite-", suffix=".Dockerfile")
+    dockerfile_path = Path(path)
+    suffix_expr = " -o ".join(f"-name '*{suffix}'" for suffix in sorted(IMAGE_CONFIG_TEXT_SUFFIXES))
+    sed_args = " ".join(f"-e {shlex.quote(script)}" for script in sed_scripts)
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(f"FROM {base_image}\n")
+        handle.write("USER root\n")
+        handle.write(
+            "RUN set -eu; "
+            "for dir in /app /src /opt /srv /usr/share /var/www; do "
+            "[ -d \"$dir\" ] || continue; "
+            f"find \"$dir\" -type f \\( {suffix_expr} \\) -size -5M -exec sed -i -E {sed_args} {{}} +; "
+            "done\n"
+        )
+        if final_user:
+            handle.write(f"USER {final_user}\n")
+    return dockerfile_path
+
+
+def rewrite_image_runtime_config(
+    args: argparse.Namespace,
+    record: import_project.ServiceRecord,
+    service: dict[str, Any],
+    target_image: str,
+    db_rewrites: dict[str, dict[str, str]],
+) -> str | None:
+    if not image_config_rewrite_required(record, db_rewrites):
+        return None
+    service_endpoint = service_postgres_target_endpoint(service, db_rewrites)
+    sed_scripts = image_config_rewrite_sed_scripts(db_rewrites, service_endpoint)
+    if not sed_scripts:
+        return None
+    digest = hashlib.sha256(
+        json.dumps(
+            {
+                "dbRewrites": db_rewrites,
+                "record": record.name,
+                "serviceEndpoint": service_endpoint,
+                "version": MANIFEST_GENERATOR_VERSION,
+            },
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()[:8]
+    rewrite_image = f"{target_image}-cfg-{digest}"
+    final_user = container_image_user(args, target_image)
+    dockerfile = create_image_config_rewrite_dockerfile(target_image, sed_scripts, final_user)
+    try:
+        print(f"Rewriting baked runtime config in {target_image} for imported PostgreSQL endpoints.")
+        run_command(container_command(args, "build", "-t", rewrite_image, "-f", str(dockerfile), "."), cwd=dockerfile.parent)
+        run_command(container_command(args, "tag", rewrite_image, target_image))
+    finally:
+        try:
+            dockerfile.unlink()
+        except OSError:
+            pass
+        cleanup_operator_container_tags(args, [rewrite_image])
+    return rewrite_image
 
 
 def cleanup_operator_container_tags(args: argparse.Namespace, images: list[str]) -> None:
@@ -3960,11 +4100,17 @@ def stage_secrets(args: argparse.Namespace, service_pairs: list[tuple[import_pro
         )
 
 
-def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]]) -> None:
+def stage_images(
+    args: argparse.Namespace,
+    project_path: Path,
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+    values: dict[str, Any],
+) -> None:
     scoped_service_pairs = filter_service_pairs_for_import_batch(args, service_pairs)
     plan = import_batch_plan(args, service_pairs)
     if plan["selectedBatch"] is not None:
         print(f"Import batch {plan['selectedBatch']}/{plan['totalBatches']} selected for image migration.")
+    db_rewrites = database_endpoint_rewrites(args, service_pairs, values)
     candidates = []
     for record, service in scoped_service_pairs:
         if args.skip_docker_socket_services and service_has_docker_socket(service):
@@ -4021,7 +4167,8 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
         archive_path = archive_dir / image_archive_name(record) if args.image_mode == "preload" else None
         retry_build: tuple[Path, str] | None = None
         static_source = nginx_static_html_bind_source(args, record, service)
-        refresh_preload_image = nginx_requires_platform_import(args, record)
+        image_config_rewrite = image_config_rewrite_required(record, db_rewrites)
+        refresh_preload_image = nginx_requires_platform_import(args, record) or image_config_rewrite
         temporary_dockerfile: Path | None = None
         try:
             if (
@@ -4079,7 +4226,7 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                 source_ready, source_cleanup_images = ensure_source_image(args, record)
                 if not source_ready:
                     reused_source_refs = source_preloaded_refs.get(record.image.display, [])
-                    if not reused_source_refs and preload_streaming:
+                    if not reused_source_refs and preload_streaming and not image_config_rewrite:
                         for sibling_record in source_image_records.get(record.image.display, []):
                             if sibling_record is record:
                                 continue
@@ -4088,7 +4235,7 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                                 reused_source_refs = sibling_refs
                                 source_preloaded_refs.setdefault(record.image.display, sibling_refs)
                                 break
-                    if not reused_source_refs and preload_streaming:
+                    if not reused_source_refs and preload_streaming and not image_config_rewrite:
                         for alias in sorted(image_reference_aliases(record.image.display)):
                             for sibling_record in alias_image_records.get(alias, []):
                                 if sibling_record is record:
@@ -4103,14 +4250,19 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                                     break
                             if reused_source_refs:
                                 break
-                    if reused_source_refs and preload_streaming and tag_preloaded_image_on_nodes(args, reused_source_refs, image_refs):
+                    if (
+                        reused_source_refs
+                        and preload_streaming
+                        and not image_config_rewrite
+                        and tag_preloaded_image_on_nodes(args, reused_source_refs, image_refs)
+                    ):
                         print(
                             f"Source image {record.image.display} is unavailable; "
                             f"tagged existing preloaded sibling image as {image_refs[0]} on all RKE2 nodes."
                         )
                         source_preloaded_refs.setdefault(record.image.display, image_refs)
                         continue
-                    if archive_path is not None and archive_path.exists():
+                    if not image_config_rewrite and archive_path is not None and archive_path.exists():
                         print(
                             f"Source image {record.image.display} is unavailable; "
                             f"reusing existing preload archive {archive_path}."
@@ -4134,6 +4286,7 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                     continue
                 pulled_source_images.extend(source_cleanup_images)
                 run_command(container_command(args, "tag", record.image.display, target_image))
+            rewrite_image_runtime_config(args, record, service, target_image, db_rewrites)
             verify_nginx_import_image(args, record, target_image)
             generated_images.append(target_image)
             if args.image_mode == "registry":
@@ -6071,7 +6224,7 @@ def main(argv: list[str]) -> int:
             mark_migration_stage_completed(args, "secrets", service_pairs)
     if args.stage in {"images", "all"}:
         if not migration_stage_completed(args, "images", service_pairs):
-            stage_images(args, project_path, service_pairs)
+            stage_images(args, project_path, service_pairs, values)
             mark_migration_stage_completed(args, "images", service_pairs)
             images_stage_ran = True
     if args.stage in {"databases", "all"}:
@@ -6082,7 +6235,7 @@ def main(argv: list[str]) -> int:
         reconcile_import_namespace_pod_security(args)
         if args.execute and args.image_mode == "preload" and args.rke2_nodes and not images_stage_ran:
             print("Reconciling selected preload images on RKE2 nodes before applying workload manifests.")
-            stage_images(args, project_path, service_pairs)
+            stage_images(args, project_path, service_pairs, values)
         if not migration_stage_completed(args, "manifests", service_pairs):
             stage_manifests(args, service_pairs, values)
             mark_migration_stage_completed(args, "manifests", service_pairs)
