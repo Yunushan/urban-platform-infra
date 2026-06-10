@@ -48,8 +48,15 @@ KAFKA_ENDPOINT_RE = re.compile(
     r"(?<![A-Za-z0-9_.-])(?:(?:10|192[.]168|172[.](?:1[6-9]|2[0-9]|3[01]))(?:[.][0-9]{1,3}){2}|127[.]0[.]0[.]1|localhost):(?:9092|29092)\b"
 )
 KAFKA_CONTEXT_RE = re.compile(r"kafka|bootstrapservers?|bootstrap_servers?|broker", re.IGNORECASE)
+POSTGRES_CONTEXT_RE = re.compile(
+    r"postgres|postgis|timescale|npgsql|database|db|connectionstrings?|connection_strings?|conn(?:ection)?",
+    re.IGNORECASE,
+)
+PRIVATE_OR_LOCAL_HOST_RE = r"(?:(?:10|192[.]168|172[.](?:1[6-9]|2[0-9]|3[01]))(?:[.][0-9]{1,3}){2}|127[.]0[.]0[.]1|localhost)"
+POSTGRES_HOST_KEY_RE = re.compile(r"^(?:PGHOST|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*HOST.*)$", re.IGNORECASE)
+POSTGRES_PORT_KEY_RE = re.compile(r"^(?:PGPORT|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*PORT.*)$", re.IGNORECASE)
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 16
+MANIFEST_GENERATOR_VERSION = 17
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -1030,10 +1037,149 @@ def normalize_kafka_endpoint_text(args: argparse.Namespace, value: str) -> str:
     return KAFKA_ENDPOINT_RE.sub(kafka_bootstrap_servers, value)
 
 
-def normalize_imported_env_value(args: argparse.Namespace, key: str, value: str) -> str:
-    if KAFKA_CONTEXT_RE.search(key) or KAFKA_CONTEXT_RE.search(value):
-        return normalize_kafka_endpoint_text(args, value)
+def database_target_endpoint(target: Any) -> dict[str, str] | None:
+    if not isinstance(target, dict):
+        return None
+    host = str(target.get("host") or "").strip()
+    port = str(target.get("port") or "5432").strip()
+    if not host or "<" in host or not port or "<" in port:
+        return None
+    return {"host": host, "port": port}
+
+
+def database_endpoint_rewrites(
+    args: argparse.Namespace,
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+    values: dict[str, Any],
+) -> dict[str, dict[str, str]]:
+    targets: dict[str, Any] = {}
+    target_path = database_targets_path(args)
+    if target_path.exists():
+        targets = read_database_targets(str(target_path))
+    if not targets:
+        targets = generated_database_targets(service_pairs, values, args.namespace).get("databaseTargets", {})
+
+    rewrites: dict[str, dict[str, str]] = {}
+    for record, _service in service_pairs:
+        if record.kind not in POSTGRES_FAMILY_KINDS:
+            continue
+        source_port = published_port(record)
+        if not source_port:
+            continue
+        endpoint = database_target_endpoint(targets.get(record.name))
+        if endpoint:
+            rewrites[str(source_port)] = endpoint
+    return rewrites
+
+
+def service_postgres_target_endpoint(
+    service: dict[str, Any],
+    rewrites: dict[str, dict[str, str]],
+) -> dict[str, str] | None:
+    if not rewrites:
+        return None
+    values = [
+        str(value)
+        for _key, value in import_project.environment_entries(service.get("environment"))
+        if value is not None
+    ]
+    joined = "\n".join(values)
+    matches = {
+        source_port: endpoint
+        for source_port, endpoint in rewrites.items()
+        if re.search(rf"(?<![0-9]){re.escape(source_port)}(?![0-9])", joined)
+    }
+    if len(matches) == 1:
+        return next(iter(matches.values()))
+    return None
+
+
+def replace_postgres_host_port_pair(value: str, source_port: str, endpoint: dict[str, str]) -> str:
+    host_pattern = PRIVATE_OR_LOCAL_HOST_RE
+    replacement = f"{endpoint['host']}:{endpoint['port']}"
+    value = re.sub(rf"(?<![A-Za-z0-9_.-])(?:tcp://)?{host_pattern}:{re.escape(source_port)}\b", replacement, value)
+    value = re.sub(
+        rf"(?i)(?P<key>\b(?:Host|Server|Data Source|Address|Addr|Network Address)\s*=\s*)(?:tcp://)?{host_pattern}(?P<tail>\s*(?:;|$))",
+        lambda match: f"{match.group('key')}{endpoint['host']}{match.group('tail')}"
+        if re.search(rf"(?i)\bPort\s*=\s*{re.escape(source_port)}\b", value)
+        else match.group(0),
+        value,
+    )
+    value = re.sub(
+        rf"(?i)(?P<key>\bPort\s*=\s*){re.escape(source_port)}(?P<tail>\s*(?:;|$))",
+        rf"\g<key>{endpoint['port']}\g<tail>",
+        value,
+    )
     return value
+
+
+def normalize_postgres_endpoint_text(
+    value: str,
+    rewrites: dict[str, dict[str, str]],
+    service_endpoint: dict[str, str] | None = None,
+) -> str:
+    for source_port, endpoint in rewrites.items():
+        value = replace_postgres_host_port_pair(value, source_port, endpoint)
+    if service_endpoint:
+        value = re.sub(
+            rf"(?i)(?P<key>\b(?:Host|Server|Data Source|Address|Addr|Network Address)\s*=\s*)(?:tcp://)?{PRIVATE_OR_LOCAL_HOST_RE}(?P<tail>\s*(?:;|$))",
+            rf"\g<key>{service_endpoint['host']}\g<tail>",
+            value,
+        )
+    return value
+
+
+def normalize_imported_env_value(
+    args: argparse.Namespace,
+    key: str,
+    value: str,
+    *,
+    db_rewrites: dict[str, dict[str, str]] | None = None,
+    service_db_endpoint: dict[str, str] | None = None,
+) -> str:
+    if KAFKA_CONTEXT_RE.search(key) or KAFKA_CONTEXT_RE.search(value):
+        value = normalize_kafka_endpoint_text(args, value)
+    if db_rewrites and (POSTGRES_CONTEXT_RE.search(key) or POSTGRES_CONTEXT_RE.search(value)):
+        value = normalize_postgres_endpoint_text(value, db_rewrites, service_db_endpoint)
+    if service_db_endpoint and POSTGRES_HOST_KEY_RE.fullmatch(key) and re.fullmatch(PRIVATE_OR_LOCAL_HOST_RE, value.strip(), re.IGNORECASE):
+        value = service_db_endpoint["host"]
+    if service_db_endpoint and db_rewrites and POSTGRES_PORT_KEY_RE.fullmatch(key) and value.strip() in db_rewrites:
+        value = service_db_endpoint["port"]
+    return value
+
+
+def normalize_imported_secret_entries(
+    args: argparse.Namespace,
+    service: dict[str, Any],
+    entries: dict[str, str],
+    db_rewrites: dict[str, dict[str, str]],
+) -> dict[str, str]:
+    service_db_endpoint = service_postgres_target_endpoint(service, db_rewrites)
+    return {
+        key: normalize_imported_env_value(
+            args,
+            key,
+            value,
+            db_rewrites=db_rewrites,
+            service_db_endpoint=service_db_endpoint,
+        )
+        for key, value in entries.items()
+    }
+
+
+def env_rewrite_fingerprint(
+    record: import_project.ServiceRecord,
+    service: dict[str, Any],
+    db_rewrites: dict[str, dict[str, str]],
+) -> str:
+    service_endpoint = service_postgres_target_endpoint(service, db_rewrites) or {}
+    public_material = {
+        "generator": MANIFEST_GENERATOR_VERSION,
+        "record": [record.file, record.name],
+        "databaseEndpoint": service_endpoint,
+        "kafkaBootstrap": False,
+    }
+    return hashlib.sha256(json.dumps(public_material, sort_keys=True).encode("utf-8")).hexdigest()[:12]
 
 
 def imported_kafka_environment_defaults(args: argparse.Namespace) -> dict[str, str]:
@@ -1412,11 +1558,15 @@ def nginx_unprivileged_startup_script(args: argparse.Namespace, record: import_p
 def kubernetes_workload_manifests(
     args: argparse.Namespace,
     service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+    values: dict[str, Any],
+    *,
+    database_service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]] | None = None,
 ) -> list[dict[str, Any]]:
     manifests: list[dict[str, Any]] = []
     workload_inputs: list[tuple[import_project.ServiceRecord, dict[str, Any], str, list[int]]] = []
     generated_names: set[str] = set()
     alias_counts: dict[str, int] = {}
+    db_rewrites = database_endpoint_rewrites(args, database_service_pairs or service_pairs, values)
 
     for record, service in service_pairs:
         if not should_generate_kubernetes_workload(args, record, service):
@@ -1441,8 +1591,18 @@ def kubernetes_workload_manifests(
             "app.kubernetes.io/part-of": "urban-platform-import",
             "app.kubernetes.io/managed-by": "urban-platform-import",
         }
+        service_db_endpoint = service_postgres_target_endpoint(service, db_rewrites)
         env = [
-            {"name": key, "value": normalize_imported_env_value(args, key, value)}
+            {
+                "name": key,
+                "value": normalize_imported_env_value(
+                    args,
+                    key,
+                    value,
+                    db_rewrites=db_rewrites,
+                    service_db_endpoint=service_db_endpoint,
+                ),
+            }
             for key, value in import_project.environment_entries(service.get("environment"))
             if value is not None and not SECRET_ENV_RE.search(key) and KUBERNETES_ENV_NAME_RE.fullmatch(key)
         ]
@@ -1489,6 +1649,12 @@ def kubernetes_workload_manifests(
             "urban-platform.io/probe-mode": probe_mode,
         }
         pod_template_annotations = {"urban-platform.io/probe-mode": probe_mode}
+        if db_rewrites or selected_kafka_bootstrap_servers(args):
+            pod_template_annotations["urban-platform.io/env-rewrite-fingerprint"] = env_rewrite_fingerprint(
+                record,
+                service,
+                db_rewrites,
+            )
         if nginx_base_image := nginx_rollout_base_image(args, record):
             pod_template_annotations["urban-platform.io/nginx-base-image"] = nginx_base_image
             rollout_fingerprint = hashlib.sha256(
@@ -3616,14 +3782,15 @@ def write_secret_provider_report(
     write_file(output / "import-secret-provider.md", "\n".join(lines) + "\n")
 
 
-def stage_secrets(args: argparse.Namespace, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]]) -> None:
+def stage_secrets(args: argparse.Namespace, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]], values: dict[str, Any]) -> None:
     scoped_service_pairs = filter_service_pairs_for_import_batch(args, service_pairs)
     plan = import_batch_plan(args, service_pairs)
     if plan["selectedBatch"] is not None:
         print(f"Import batch {plan['selectedBatch']}/{plan['totalBatches']} selected for service-specific secrets.")
+    db_rewrites = database_endpoint_rewrites(args, service_pairs, values)
     secrets = []
     for record, service in scoped_service_pairs:
-        entries = secret_entries(service)
+        entries = normalize_imported_secret_entries(args, service, secret_entries(service), db_rewrites)
         if entries:
             secrets.append((record, entries))
     print(f"Secret-bearing services: {len(secrets)}")
@@ -4752,7 +4919,12 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
     plan = import_batch_plan(args, service_pairs)
     if plan["selectedBatch"] is not None:
         print(f"Import batch {plan['selectedBatch']}/{plan['totalBatches']} selected for workload manifests.")
-    workload_manifests = kubernetes_workload_manifests(args, scoped_service_pairs)
+    workload_manifests = kubernetes_workload_manifests(
+        args,
+        scoped_service_pairs,
+        values,
+        database_service_pairs=service_pairs,
+    )
     ingress_manifests: list[dict[str, Any]] = []
     host = ingress_host(args, values)
     rule_host = ingress_rule_host(host)
@@ -5699,7 +5871,7 @@ def main(argv: list[str]) -> int:
     images_stage_ran = False
     if args.stage in {"secrets", "all"}:
         if not migration_stage_completed(args, "secrets", service_pairs):
-            stage_secrets(args, service_pairs)
+            stage_secrets(args, service_pairs, values)
             mark_migration_stage_completed(args, "secrets", service_pairs)
     if args.stage in {"images", "all"}:
         if not migration_stage_completed(args, "images", service_pairs):
