@@ -1168,6 +1168,7 @@ def normalize_imported_secret_entries(
 
 
 def env_rewrite_fingerprint(
+    args: argparse.Namespace,
     record: import_project.ServiceRecord,
     service: dict[str, Any],
     db_rewrites: dict[str, dict[str, str]],
@@ -1177,7 +1178,7 @@ def env_rewrite_fingerprint(
         "generator": MANIFEST_GENERATOR_VERSION,
         "record": [record.file, record.name],
         "databaseEndpoint": service_endpoint,
-        "kafkaBootstrap": False,
+        "kafkaBootstrap": selected_kafka_bootstrap_servers(args),
     }
     return hashlib.sha256(json.dumps(public_material, sort_keys=True).encode("utf-8")).hexdigest()[:12]
 
@@ -1329,12 +1330,22 @@ def rewrite_nginx_runtime_paths_for_unprivileged(
     return value
 
 
-def normalize_imported_config_text(args: argparse.Namespace, record: import_project.ServiceRecord, target: str, value: str) -> str:
+def normalize_imported_config_text(
+    args: argparse.Namespace,
+    record: import_project.ServiceRecord,
+    target: str,
+    value: str,
+    *,
+    db_rewrites: dict[str, dict[str, str]] | None = None,
+    service_db_endpoint: dict[str, str] | None = None,
+) -> str:
     if apisix_config_text(record, target):
         value = re.sub(r"(?<![A-Za-z0-9.-])127[.]0[.]0[.]1:2379\b", "etcd:2379", value)
         value = re.sub(r"(?<![A-Za-z0-9.-])localhost:2379\b", "etcd:2379", value)
     if KAFKA_CONTEXT_RE.search(target) or KAFKA_CONTEXT_RE.search(value):
         value = normalize_kafka_endpoint_text(args, value)
+    if db_rewrites and (POSTGRES_CONTEXT_RE.search(target) or POSTGRES_CONTEXT_RE.search(value)):
+        value = normalize_postgres_endpoint_text(value, db_rewrites, service_db_endpoint)
     if record.kind == "nginx" and (target == "/etc/nginx/nginx.conf" or target.startswith("/etc/nginx/")):
         value = rewrite_nginx_listen_ports_for_unprivileged(args, record, value)
         value = rewrite_nginx_runtime_paths_for_unprivileged(args, record, target, value)
@@ -1352,6 +1363,9 @@ def configmap_mount_manifests(
     record: import_project.ServiceRecord,
     service: dict[str, Any],
     labels: dict[str, str],
+    *,
+    db_rewrites: dict[str, dict[str, str]] | None = None,
+    service_db_endpoint: dict[str, str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     manifests: list[dict[str, Any]] = []
     volumes: list[dict[str, Any]] = []
@@ -1380,7 +1394,14 @@ def configmap_mount_manifests(
             key = configmap_key(Path(source_path.name), used_keys)
             kind, value = entry
             if kind == "text":
-                value = normalize_imported_config_text(args, record, target, value)
+                value = normalize_imported_config_text(
+                    args,
+                    record,
+                    target,
+                    value,
+                    db_rewrites=db_rewrites,
+                    service_db_endpoint=service_db_endpoint,
+                )
             total_size += len(value.encode("utf-8"))
             if kind == "text":
                 data[key] = value
@@ -1413,7 +1434,14 @@ def configmap_mount_manifests(
                 key = configmap_key(relative_path, used_keys)
                 kind, value = entry
                 if kind == "text":
-                    value = normalize_imported_config_text(args, record, f"{target}/{relative_path.as_posix()}", value)
+                    value = normalize_imported_config_text(
+                        args,
+                        record,
+                        f"{target}/{relative_path.as_posix()}",
+                        value,
+                        db_rewrites=db_rewrites,
+                        service_db_endpoint=service_db_endpoint,
+                    )
                 entry_size = len(value.encode("utf-8"))
                 if total_size + entry_size > CONFIGMAP_TOTAL_MAX_BYTES:
                     flush_config_map_chunk()
@@ -1627,7 +1655,14 @@ def kubernetes_workload_manifests(
         resources = imported_workload_resources(args)
         if resources:
             container["resources"] = resources
-        config_map_manifests, volumes, volume_mounts = configmap_mount_manifests(args, record, service, labels)
+        config_map_manifests, volumes, volume_mounts = configmap_mount_manifests(
+            args,
+            record,
+            service,
+            labels,
+            db_rewrites=db_rewrites,
+            service_db_endpoint=service_db_endpoint,
+        )
         if startup_script := nginx_unprivileged_startup_script(args, record):
             container["command"] = ["/bin/sh", "-ec"]
             container["args"] = [startup_script]
@@ -1651,6 +1686,7 @@ def kubernetes_workload_manifests(
         pod_template_annotations = {"urban-platform.io/probe-mode": probe_mode}
         if db_rewrites or selected_kafka_bootstrap_servers(args):
             pod_template_annotations["urban-platform.io/env-rewrite-fingerprint"] = env_rewrite_fingerprint(
+                args,
                 record,
                 service,
                 db_rewrites,
