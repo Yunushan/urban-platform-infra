@@ -1977,9 +1977,31 @@ def sed_replacement(value: str) -> str:
 
 def image_config_rewrite_required(
     record: import_project.ServiceRecord,
+    service: dict[str, Any],
     db_rewrites: dict[str, dict[str, str]],
 ) -> bool:
-    return record.kind == "application" and bool(db_rewrites)
+    if record.kind != "application" or not db_rewrites:
+        return False
+    values = [
+        str(value)
+        for key, value in import_project.environment_entries(service.get("environment"))
+        if key is not None or value is not None
+    ]
+    joined = "\n".join(values)
+    if service_postgres_target_endpoint(service, db_rewrites):
+        return True
+    return bool(POSTGRES_CONTEXT_RE.search(joined)) and any(
+        re.search(rf"(?<![0-9]){re.escape(source_port)}(?![0-9])", joined)
+        for source_port in db_rewrites
+    )
+
+
+def preloaded_image_reuse_allowed(
+    record: import_project.ServiceRecord,
+    service: dict[str, Any],
+    db_rewrites: dict[str, dict[str, str]],
+) -> bool:
+    return not image_config_rewrite_required(record, service, db_rewrites)
 
 
 def image_config_rewrite_sed_scripts(
@@ -2063,7 +2085,7 @@ def rewrite_image_runtime_config(
     target_image: str,
     db_rewrites: dict[str, dict[str, str]],
 ) -> str | None:
-    if not image_config_rewrite_required(record, db_rewrites):
+    if not image_config_rewrite_required(record, service, db_rewrites):
         return None
     service_endpoint = service_postgres_target_endpoint(service, db_rewrites)
     sed_scripts = image_config_rewrite_sed_scripts(db_rewrites, service_endpoint)
@@ -4167,7 +4189,8 @@ def stage_images(
         archive_path = archive_dir / image_archive_name(record) if args.image_mode == "preload" else None
         retry_build: tuple[Path, str] | None = None
         static_source = nginx_static_html_bind_source(args, record, service)
-        image_config_rewrite = image_config_rewrite_required(record, db_rewrites)
+        image_config_rewrite = image_config_rewrite_required(record, service, db_rewrites)
+        preloaded_reuse_allowed = preloaded_image_reuse_allowed(record, service, db_rewrites)
         refresh_preload_image = nginx_requires_platform_import(args, record) or image_config_rewrite
         temporary_dockerfile: Path | None = None
         try:
@@ -4226,7 +4249,7 @@ def stage_images(
                 source_ready, source_cleanup_images = ensure_source_image(args, record)
                 if not source_ready:
                     reused_source_refs = source_preloaded_refs.get(record.image.display, [])
-                    if not reused_source_refs and preload_streaming and not image_config_rewrite:
+                    if not reused_source_refs and preload_streaming and preloaded_reuse_allowed:
                         for sibling_record in source_image_records.get(record.image.display, []):
                             if sibling_record is record:
                                 continue
@@ -4235,7 +4258,7 @@ def stage_images(
                                 reused_source_refs = sibling_refs
                                 source_preloaded_refs.setdefault(record.image.display, sibling_refs)
                                 break
-                    if not reused_source_refs and preload_streaming and not image_config_rewrite:
+                    if not reused_source_refs and preload_streaming and preloaded_reuse_allowed:
                         for alias in sorted(image_reference_aliases(record.image.display)):
                             for sibling_record in alias_image_records.get(alias, []):
                                 if sibling_record is record:
@@ -4253,7 +4276,7 @@ def stage_images(
                     if (
                         reused_source_refs
                         and preload_streaming
-                        and not image_config_rewrite
+                        and preloaded_reuse_allowed
                         and tag_preloaded_image_on_nodes(args, reused_source_refs, image_refs)
                     ):
                         print(
@@ -4262,7 +4285,7 @@ def stage_images(
                         )
                         source_preloaded_refs.setdefault(record.image.display, image_refs)
                         continue
-                    if not image_config_rewrite and archive_path is not None and archive_path.exists():
+                    if preloaded_reuse_allowed and archive_path is not None and archive_path.exists():
                         print(
                             f"Source image {record.image.display} is unavailable; "
                             f"reusing existing preload archive {archive_path}."
