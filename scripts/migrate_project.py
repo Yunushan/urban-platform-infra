@@ -43,20 +43,40 @@ CONFIGMAP_TOTAL_MAX_BYTES = 950 * 1024
 OFFICIAL_LIBRARY_PULL_IMAGES = {"nginx"}
 MEMORY_QUANTITY_RE = re.compile(r"^([0-9]+)(Ki|Mi|Gi|Ti)?$")
 CPU_QUANTITY_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(m)?$")
-PRIVATE_IPV4_RE = re.compile(r"\b(?:10|192\.168|172\.(?:1[6-9]|2[0-9]|3[01]))(?:\.[0-9]{1,3}){2}\b")
+PRIVATE_OR_LOCAL_HOST_RE = (
+    r"(?:10(?:[.][0-9]{1,3}){3}|192[.]168(?:[.][0-9]{1,3}){2}|"
+    r"172[.](?:1[6-9]|2[0-9]|3[01])(?:[.][0-9]{1,3}){2}|127[.]0[.]0[.]1|localhost)"
+)
+PRIVATE_IPV4_RE = re.compile(
+    r"\b(?:10(?:\.[0-9]{1,3}){3}|192\.168(?:\.[0-9]{1,3}){2}|172\.(?:1[6-9]|2[0-9]|3[01])(?:\.[0-9]{1,3}){2})\b"
+)
 KAFKA_ENDPOINT_RE = re.compile(
-    r"(?<![A-Za-z0-9_.-])(?:(?:10|192[.]168|172[.](?:1[6-9]|2[0-9]|3[01]))(?:[.][0-9]{1,3}){2}|127[.]0[.]0[.]1|localhost):(?:9092|29092)\b"
+    rf"(?<![A-Za-z0-9_.-]){PRIVATE_OR_LOCAL_HOST_RE}:(?:9092|29092)\b"
 )
 KAFKA_CONTEXT_RE = re.compile(r"kafka|bootstrapservers?|bootstrap_servers?|broker", re.IGNORECASE)
 POSTGRES_CONTEXT_RE = re.compile(
     r"postgres|postgis|timescale|npgsql|database|db|connectionstrings?|connection_strings?|conn(?:ection)?",
     re.IGNORECASE,
 )
-PRIVATE_OR_LOCAL_HOST_RE = r"(?:(?:10|192[.]168|172[.](?:1[6-9]|2[0-9]|3[01]))(?:[.][0-9]{1,3}){2}|127[.]0[.]0[.]1|localhost)"
+FRONTEND_PRIVATE_HTTP_URL_RE = re.compile(
+    rf"\b(?P<scheme>https?)://(?P<host>{PRIVATE_OR_LOCAL_HOST_RE})(?::(?P<port>[0-9]{{2,5}}))?(?P<path>/[^\s\"'<>)]*)?",
+    re.IGNORECASE,
+)
+FRONTEND_STATIC_TEXT_SUFFIXES = {
+    ".css",
+    ".html",
+    ".htm",
+    ".js",
+    ".json",
+    ".map",
+    ".mjs",
+    ".txt",
+    ".xml",
+}
 POSTGRES_HOST_KEY_RE = re.compile(r"^(?:PGHOST|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*HOST.*)$", re.IGNORECASE)
 POSTGRES_PORT_KEY_RE = re.compile(r"^(?:PGPORT|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*PORT.*)$", re.IGNORECASE)
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 17
+MANIFEST_GENERATOR_VERSION = 18
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -1129,6 +1149,37 @@ def normalize_postgres_endpoint_text(
     return value
 
 
+def frontend_static_config_target(record: import_project.ServiceRecord, target: str) -> bool:
+    if record.kind != "nginx":
+        return False
+    normalized_target = target.replace("\\", "/")
+    if not normalized_target.startswith("/usr/share/nginx/html"):
+        return False
+    suffix = Path(normalized_target).suffix.lower()
+    return not suffix or suffix in FRONTEND_STATIC_TEXT_SUFFIXES
+
+
+def canonical_frontend_base_url(args: argparse.Namespace) -> str:
+    host = str(getattr(args, "ingress_host", "") or "").strip().rstrip("/")
+    if not host:
+        return ""
+    if re.match(r"^https?://", host, re.IGNORECASE):
+        return host
+    return f"https://{host}"
+
+
+def normalize_private_frontend_http_endpoints(args: argparse.Namespace, value: str) -> str:
+    base_url = canonical_frontend_base_url(args)
+    if not base_url:
+        return value
+
+    def replace_url(match: re.Match[str]) -> str:
+        path = match.group("path") or ""
+        return f"{base_url}{path}"
+
+    return FRONTEND_PRIVATE_HTTP_URL_RE.sub(replace_url, value)
+
+
 def normalize_imported_env_value(
     args: argparse.Namespace,
     key: str,
@@ -1179,6 +1230,15 @@ def env_rewrite_fingerprint(
         "record": [record.file, record.name],
         "databaseEndpoint": service_endpoint,
         "kafkaBootstrap": selected_kafka_bootstrap_servers(args),
+    }
+    return hashlib.sha256(json.dumps(public_material, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+
+
+def config_rewrite_fingerprint(args: argparse.Namespace, record: import_project.ServiceRecord) -> str:
+    public_material = {
+        "generator": MANIFEST_GENERATOR_VERSION,
+        "record": [record.file, record.name],
+        "frontendBaseUrl": canonical_frontend_base_url(args),
     }
     return hashlib.sha256(json.dumps(public_material, sort_keys=True).encode("utf-8")).hexdigest()[:12]
 
@@ -1346,6 +1406,8 @@ def normalize_imported_config_text(
         value = normalize_kafka_endpoint_text(args, value)
     if db_rewrites and (POSTGRES_CONTEXT_RE.search(target) or POSTGRES_CONTEXT_RE.search(value)):
         value = normalize_postgres_endpoint_text(value, db_rewrites, service_db_endpoint)
+    if frontend_static_config_target(record, target):
+        value = normalize_private_frontend_http_endpoints(args, value)
     if record.kind == "nginx" and (target == "/etc/nginx/nginx.conf" or target.startswith("/etc/nginx/")):
         value = rewrite_nginx_listen_ports_for_unprivileged(args, record, value)
         value = rewrite_nginx_runtime_paths_for_unprivileged(args, record, target, value)
@@ -1691,6 +1753,8 @@ def kubernetes_workload_manifests(
                 service,
                 db_rewrites,
             )
+        if record.kind == "nginx" and canonical_frontend_base_url(args):
+            pod_template_annotations["urban-platform.io/config-rewrite-fingerprint"] = config_rewrite_fingerprint(args, record)
         if nginx_base_image := nginx_rollout_base_image(args, record):
             pod_template_annotations["urban-platform.io/nginx-base-image"] = nginx_base_image
             rollout_fingerprint = hashlib.sha256(
@@ -1840,12 +1904,25 @@ def ensure_source_image(args: argparse.Namespace, record: import_project.Service
     return False, []
 
 
-def create_nginx_static_dockerfile(base_image: str) -> Path:
+def create_nginx_static_dockerfile(base_image: str, frontend_base_url: str = "") -> Path:
     fd, path = tempfile.mkstemp(prefix="urban-nginx-static-", suffix=".Dockerfile")
     dockerfile_path = Path(path)
     with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(f"FROM {base_image}\n")
         handle.write("COPY . /usr/share/nginx/html/\n")
+        if frontend_base_url:
+            private_host_pattern = (
+                r"10([.][0-9]{1,3}){3}|192[.]168([.][0-9]{1,3}){2}|"
+                r"172[.](1[6-9]|2[0-9]|3[01])([.][0-9]{1,3}){2}|127[.]0[.]0[.]1|localhost"
+            )
+            url_pattern = rf"https?://({private_host_pattern})(:[0-9]{{2,5}})?"
+            replacement = frontend_base_url.replace("\\", "\\\\").replace("&", r"\&").replace("#", r"\#")
+            suffix_expr = " -o ".join(f"-name '*{suffix}'" for suffix in sorted(FRONTEND_STATIC_TEXT_SUFFIXES))
+            handle.write(
+                "RUN find /usr/share/nginx/html -type f \\( "
+                f"{suffix_expr} "
+                f"\\) -exec sed -i -E {shlex.quote(f's#{url_pattern}#{replacement}#g')} {{}} +\n"
+            )
     return dockerfile_path
 
 
@@ -3939,7 +4016,7 @@ def stage_images(args: argparse.Namespace, project_path: Path, service_pairs: li
                 ensure_container_image(args, base_image, "Platform nginx base")
                 if not base_was_local:
                     pulled_source_images.append(base_image)
-                temporary_dockerfile = create_nginx_static_dockerfile(base_image)
+                temporary_dockerfile = create_nginx_static_dockerfile(base_image, canonical_frontend_base_url(args))
                 retry_build = (static_source, str(temporary_dockerfile))
                 if record.image is not None and base_image != record.image.display:
                     print(f"Aligning nginx service {record.name} from {record.image.display} to platform image {base_image}.")
