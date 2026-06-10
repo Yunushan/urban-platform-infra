@@ -95,7 +95,7 @@ IMAGE_CONFIG_TEXT_SUFFIXES = {
 POSTGRES_HOST_KEY_RE = re.compile(r"^(?:PGHOST|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*HOST.*)$", re.IGNORECASE)
 POSTGRES_PORT_KEY_RE = re.compile(r"^(?:PGPORT|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*PORT.*)$", re.IGNORECASE)
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 19
+MANIFEST_GENERATOR_VERSION = 20
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -1980,20 +1980,7 @@ def image_config_rewrite_required(
     service: dict[str, Any],
     db_rewrites: dict[str, dict[str, str]],
 ) -> bool:
-    if record.kind != "application" or not db_rewrites:
-        return False
-    values = [
-        str(value)
-        for key, value in import_project.environment_entries(service.get("environment"))
-        if key is not None or value is not None
-    ]
-    joined = "\n".join(values)
-    if service_postgres_target_endpoint(service, db_rewrites):
-        return True
-    return bool(POSTGRES_CONTEXT_RE.search(joined)) and any(
-        re.search(rf"(?<![0-9]){re.escape(source_port)}(?![0-9])", joined)
-        for source_port in db_rewrites
-    )
+    return record.kind == "application" and bool(db_rewrites)
 
 
 def preloaded_image_reuse_allowed(
@@ -2001,7 +1988,7 @@ def preloaded_image_reuse_allowed(
     service: dict[str, Any],
     db_rewrites: dict[str, dict[str, str]],
 ) -> bool:
-    return not image_config_rewrite_required(record, service, db_rewrites)
+    return True
 
 
 def image_config_rewrite_sed_scripts(
@@ -4249,6 +4236,17 @@ def stage_images(
                 source_ready, source_cleanup_images = ensure_source_image(args, record)
                 if not source_ready:
                     reused_source_refs = source_preloaded_refs.get(record.image.display, [])
+                    if (
+                        not reused_source_refs
+                        and preload_streaming
+                        and preloaded_reuse_allowed
+                        and all_preload_nodes_have_image(args, image_refs)
+                    ):
+                        reused_source_refs = image_refs
+                        print(
+                            f"Source image {record.image.display} is unavailable; "
+                            f"reusing existing preloaded imported image {image_refs[0]}."
+                        )
                     if not reused_source_refs and preload_streaming and preloaded_reuse_allowed:
                         for sibling_record in source_image_records.get(record.image.display, []):
                             if sibling_record is record:
