@@ -96,13 +96,16 @@ login is intentionally avoided.
 
 | Layer | Image |
 |---|---|
-| Kafka | `confluentinc/cp-kafka:7.9.6` |
+| Kafka default | `confluentinc/cp-kafka:7.9.6` |
+| Kafka Confluent KRaft profile | `confluentinc/cp-kafka:8.2.0` |
+| Kafka Apache KRaft profile | `apache/kafka:4.2.0`, `apache/kafka:4.3.0` |
+| Strimzi operator profile | `quay.io/strimzi/operator:1.0.0` |
 | ZooKeeper | `confluentinc/cp-zookeeper:7.9.6` |
 | Kafka UI | `provectuslabs/kafka-ui:v0.7.2` |
 | TimescaleDB | `timescale/timescaledb:2.26.4-pg18` |
 | Zabbix agent | `zabbix/zabbix-agent2:ubuntu-7.4.10` |
 
-Kafka remains on the latest ZooKeeper-compatible Confluent Platform 7.9.x line. Moving to Confluent Platform 8.x requires a KRaft migration and removal of the ZooKeeper deployment from the chart and compose profiles.
+Kafka defaults to the ZooKeeper-compatible Confluent Platform 7.9.x line for backward compatibility. Opt-in profiles support Confluent Kafka 8.2 on KRaft, Apache Kafka 4.2/4.3 on KRaft, and Apache Kafka 4.3 managed by the Strimzi operator. Production use should mirror these images into a private registry and pin digests before rollout.
 
 The TimescaleDB tag does not start with a PostgreSQL major version, so the Helm
 chart declares a CloudNativePG `ImageCatalog` entry with `major: 18` and has the

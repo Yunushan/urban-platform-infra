@@ -316,6 +316,7 @@ REQUIRED = [
     'docs/environment-profiles.md',
     'docs/backup-restore.md',
     'docs/platform-capabilities.md',
+    'docs/kafka-profiles.md',
     'helm/urban-platform-infra/topologies/single-node.yaml',
     'helm/urban-platform-infra/topologies/two-node-lab.yaml',
     'helm/urban-platform-infra/topologies/three-node-ha.yaml',
@@ -1704,6 +1705,7 @@ for makefile_helm_token in [
     'DEPLOY_ENABLE_KEYCLOAK',
     'DEPLOY_ENABLE_EMQX',
     'DEPLOY_ENABLE_NATS',
+    'DEPLOY_ENABLE_STRIMZI',
     'DEPLOY_ENABLE_VAULT',
     'DEPLOY_ENABLE_KYVERNO',
     'DEPLOY_ENABLE_TEMPORAL',
@@ -1781,6 +1783,7 @@ for makefile_helm_token in [
     'INSTALL_KEYCLOAK="$(DEPLOY_ENABLE_KEYCLOAK)"',
     'INSTALL_EMQX="$(DEPLOY_ENABLE_EMQX)"',
     'INSTALL_NATS="$(DEPLOY_ENABLE_NATS)"',
+    'INSTALL_STRIMZI="$(DEPLOY_ENABLE_STRIMZI)"',
     'INSTALL_VAULT="$(DEPLOY_ENABLE_VAULT)"',
     'INSTALL_KYVERNO="$(DEPLOY_ENABLE_KYVERNO)"',
     'INSTALL_TEMPORAL="$(DEPLOY_ENABLE_TEMPORAL)"',
@@ -1831,6 +1834,7 @@ for helmfile_capability_token in [
     '{{- if $installBitnami }}',
     '{{- if $installEmqx }}',
     '{{- if $installNats }}',
+    '{{- if $installStrimzi }}',
     '{{- if $installVault }}',
     '{{- if $installKyverno }}',
     '{{- if $installArgoWorkflows }}',
@@ -1839,6 +1843,7 @@ for helmfile_capability_token in [
     '{{- if $installIstio }}',
     'https://repos.emqx.io/charts',
     'https://nats-io.github.io/k8s/helm/charts/',
+    'https://strimzi.io/charts/',
     'https://helm.releases.hashicorp.com',
     'https://kyverno.github.io/kyverno/',
     'https://argoproj.github.io/argo-helm',
@@ -1860,6 +1865,9 @@ for helmfile_capability_token in [
     'name: nats',
     'chart: nats/nats',
     'INSTALL_NATS',
+    'name: strimzi-kafka-operator',
+    'chart: strimzi/strimzi-kafka-operator',
+    'INSTALL_STRIMZI',
     'name: vault',
     'chart: hashicorp/vault',
     'INSTALL_VAULT',
@@ -3564,6 +3572,7 @@ for platform_capability_values_token in [
     'rabbitmq:',
     'nats:',
     'kafkaEcosystem:',
+    'strimziOperator:',
     'schemaRegistry:',
     'kafkaConnect:',
     'debezium:',
@@ -3596,6 +3605,7 @@ for platform_capabilities_config_token in [
     'rabbitmq:',
     'nats:',
     'category: kafka-ecosystem',
+    'kafka-strimzi-operator:',
     'schema-registry:',
     'kafka-connect:',
     'debezium:',
@@ -3626,6 +3636,7 @@ for platform_capabilities_docs_token in [
     'NATS',
     'Keycloak',
     'Schema Registry',
+    'Strimzi',
     'Kafka Connect',
     'Debezium',
     'Vault',
@@ -4045,7 +4056,10 @@ if image_promotion_controls.get('defaultControllerProfile') != 'disabled':
     errors.append('Image policy registry promotion controller must default to disabled')
 for approved_repository in [
     'nginxinc/nginx-unprivileged',
+    'confluentinc/cp-kafka',
+    'apache/kafka',
     'confluentinc/cp-zookeeper',
+    'quay.io/strimzi/operator',
     'provectuslabs/kafka-ui',
     'timescale/timescaledb',
     'zabbix/zabbix-agent2',
@@ -4069,6 +4083,10 @@ for current_runtime_image in [
     'nginxinc/nginx-unprivileged:1.30.2',
     'traefik:v3.7.1',
     'confluentinc/cp-kafka:7.9.6',
+    'confluentinc/cp-kafka:8.2.0',
+    'apache/kafka:4.2.0',
+    'apache/kafka:4.3.0',
+    'quay.io/strimzi/operator:1.0.0',
     'confluentinc/cp-zookeeper:7.9.6',
     'redis:8.6.2',
     'postgres:18.3',
@@ -4184,6 +4202,11 @@ for kafka_template_token in [
     '$zookeeperConnect',
     '$kafkaReplicationFactor',
     '$kafkaMinIsr',
+    '$kafkaControllerVoters',
+    'KAFKA_PROCESS_ROLES',
+    'KAFKA_CONTROLLER_QUORUM_VOTERS',
+    'KAFKA_METADATA_LOG_REPLICATION_FACTOR',
+    'KAFKA_METADATA_LOG_MIN_ISR',
     '.Values.messaging.kafka.zookeeper.resources',
     '.Values.messaging.kafka.resources',
     '.Values.messaging.kafka.ui.resources',
@@ -4195,6 +4218,19 @@ for kafka_template_token in [
 ]:
     if kafka_template_token not in kafka_template_text:
         errors.append(f'Kafka template missing lab replica/security token: {kafka_template_token}')
+strimzi_kafka_template_text = (ROOT / 'helm/urban-platform-infra/templates/messaging-kafka-strimzi.yaml').read_text(encoding='utf-8')
+for strimzi_kafka_template_token in [
+    'KafkaNodePool',
+    'strimzi.io/node-pools: enabled',
+    'strimzi.io/kraft: enabled',
+    '$strimzi.kafkaVersion',
+    'kafka-kafka-bootstrap',
+    'ExternalName',
+    'topicOperator',
+    'userOperator',
+]:
+    if strimzi_kafka_template_token not in strimzi_kafka_template_text:
+        errors.append(f'Strimzi Kafka template missing operator token: {strimzi_kafka_template_token}')
 redis_template_text = (ROOT / 'helm/urban-platform-infra/templates/redis.yaml').read_text(encoding='utf-8')
 for redis_template_token in [
     '$redisReplicas',

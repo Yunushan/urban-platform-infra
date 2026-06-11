@@ -1,0 +1,159 @@
+{{- $kafkaProvider := .Values.messaging.kafka.provider | default "confluent" }}
+{{- if and .Values.messaging.kafka.enabled (eq $kafkaProvider "strimzi") }}
+{{- $kafkaReplicas := int (include "cip.replicaCount" (list . (.Values.messaging.kafka.replicas | default 3))) }}
+{{- $kafkaStorageClass := include "cip.storageClassName" (list . (.Values.messaging.kafka.storage.className | default "") "hot") }}
+{{- $kafkaReplicationFactor := int (min 3 $kafkaReplicas) }}
+{{- $kafkaMinIsr := int (max 1 (sub $kafkaReplicationFactor 1)) }}
+{{- $strimzi := .Values.messaging.kafka.strimzi | default dict }}
+{{- $strimziListeners := $strimzi.listeners | default dict }}
+{{- $strimziPlainListener := $strimziListeners.plain | default dict }}
+{{- $strimziTlsListener := $strimziListeners.tls | default dict }}
+{{- $strimziEntityOperator := $strimzi.entityOperator | default dict }}
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: {{ $strimzi.nodePoolName | default "dual-role" | quote }}
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    strimzi.io/cluster: kafka
+    {{- include "cip.labels" . | nindent 4 }}
+spec:
+  replicas: {{ $kafkaReplicas }}
+  roles:
+    - controller
+    - broker
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: {{ .Values.messaging.kafka.storage.size | default "50Gi" | quote }}
+{{- if $kafkaStorageClass }}
+        class: {{ $kafkaStorageClass | quote }}
+{{- end }}
+        deleteClaim: {{ $strimzi.deleteClaim | default false }}
+  {{- with .Values.messaging.kafka.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: kafka
+  namespace: {{ include "cip.namespace" . }}
+  annotations:
+    strimzi.io/node-pools: enabled
+    strimzi.io/kraft: enabled
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+spec:
+  kafka:
+    version: {{ $strimzi.kafkaVersion | default .Values.messaging.kafka.image.tag | quote }}
+    {{- if $strimzi.metadataVersion }}
+    metadataVersion: {{ $strimzi.metadataVersion | quote }}
+    {{- end }}
+    listeners:
+      {{- if ($strimziPlainListener.enabled | default true) }}
+      - name: plain
+        port: {{ .Values.messaging.kafka.ports.client | default 9092 }}
+        type: internal
+        tls: false
+      {{- end }}
+      {{- if ($strimziTlsListener.enabled | default false) }}
+      - name: tls
+        port: 9093
+        type: internal
+        tls: true
+      {{- end }}
+    config:
+      offsets.topic.replication.factor: {{ $kafkaReplicationFactor }}
+      transaction.state.log.replication.factor: {{ $kafkaReplicationFactor }}
+      transaction.state.log.min.isr: {{ $kafkaMinIsr }}
+      default.replication.factor: {{ $kafkaReplicationFactor }}
+      min.insync.replicas: {{ $kafkaMinIsr }}
+  {{- if ($strimziEntityOperator.enabled | default true) }}
+  entityOperator:
+    {{- if ($strimziEntityOperator.topicOperator | default true) }}
+    topicOperator: {}
+    {{- end }}
+    {{- if ($strimziEntityOperator.userOperator | default true) }}
+    userOperator: {}
+    {{- end }}
+  {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+    app.kubernetes.io/name: kafka
+spec:
+  type: ExternalName
+  externalName: {{ printf "%s.%s.svc.cluster.local" ($strimzi.bootstrapService | default "kafka-kafka-bootstrap") (include "cip.namespace" .) | quote }}
+  ports:
+    - name: client
+      port: {{ .Values.messaging.kafka.ports.client | default 9092 }}
+      targetPort: {{ .Values.messaging.kafka.ports.client | default 9092 }}
+{{- if .Values.messaging.kafka.ui.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-ui
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+    app.kubernetes.io/name: kafka-ui
+spec:
+  replicas: {{ include "cip.replicaCount" (list . (.Values.messaging.kafka.ui.replicas | default 2)) }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka-ui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka-ui
+        app.kubernetes.io/part-of: urban-platform-infra
+    spec:
+      {{- include "cip.podSpecDefaults" . | nindent 6 }}
+      {{- if .Values.global.podSecurityContext.enabled }}
+      securityContext:
+        {{- include "cip.compatPodSecurityContext" . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: kafka-ui
+          image: {{ include "cip.image" (list . .Values.messaging.kafka.ui.image) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy | quote }}
+          securityContext:
+            {{- include "cip.compatSecurityContext" . | nindent 12 }}
+          env:
+            - name: KAFKA_CLUSTERS_0_NAME
+              value: urban-platform
+            - name: KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS
+              value: kafka:9092
+          ports:
+            - name: http
+              containerPort: {{ .Values.messaging.kafka.ui.port | default 8080 }}
+          {{- with .Values.messaging.kafka.ui.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-ui
+  namespace: {{ include "cip.namespace" . }}
+spec:
+  selector:
+    app.kubernetes.io/name: kafka-ui
+  ports:
+    - name: http
+      port: {{ .Values.messaging.kafka.ui.port | default 8080 }}
+      targetPort: {{ .Values.messaging.kafka.ui.port | default 8080 }}
+{{- end }}
+{{- end }}

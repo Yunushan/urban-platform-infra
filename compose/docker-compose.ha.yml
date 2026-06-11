@@ -436,7 +436,7 @@ services:
     deploy:
       replicas: 3
   zookeeper:
-    image: confluentinc/cp-zookeeper:7.9.6
+    image: ${STANDALONE_ZOOKEEPER_IMAGE:-confluentinc/cp-zookeeper:7.9.6}
     restart: unless-stopped
     environment:
     - ZOOKEEPER_CLIENT_PORT=2181
@@ -446,7 +446,7 @@ services:
     deploy:
       replicas: 1
   kafka:
-    image: confluentinc/cp-kafka:7.9.6
+    image: ${STANDALONE_KAFKA_IMAGE:-confluentinc/cp-kafka:7.9.6}
     restart: unless-stopped
     depends_on:
     - zookeeper

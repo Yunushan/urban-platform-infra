@@ -15,6 +15,7 @@ recommendedOrder:
 - rabbitmq
 - keycloak
 - kafka-schema-registry
+- kafka-strimzi-operator
 - kafka-connect
 - debezium
 - vault
@@ -61,6 +62,11 @@ capabilities:
     category: kafka-ecosystem
     role: kafka-event-contract-governance
     labImpact: low
+  kafka-strimzi-operator:
+    enabled: false
+    category: kafka-ecosystem
+    role: apache-kafka-operator-for-kraft-clusters-topics-users-and-rollouts
+    labImpact: medium
   kafka-connect:
     enabled: false
     category: kafka-ecosystem

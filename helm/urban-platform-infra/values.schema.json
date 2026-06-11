@@ -960,7 +960,82 @@
       "type": "object"
     },
     "messaging": {
-      "type": "object"
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "kafka": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "provider": {
+              "type": "string",
+              "enum": [
+                "confluent",
+                "apache",
+                "strimzi",
+                "external"
+              ]
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "zookeeper",
+                "kraft",
+                "operator",
+                "external"
+              ]
+            },
+            "versionProfile": {
+              "type": "string",
+              "enum": [
+                "confluent-7.9-zookeeper",
+                "confluent-8.2-kraft",
+                "apache-4.2-kraft",
+                "apache-4.3-kraft",
+                "apache-4.3-strimzi"
+              ]
+            },
+            "kraft": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "clusterId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "processRoles": {
+                  "type": "string"
+                }
+              }
+            },
+            "strimzi": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "installOperator": {
+                  "type": "boolean"
+                },
+                "kafkaVersion": {
+                  "type": "string",
+                  "enum": [
+                    "4.2.0",
+                    "4.3.0"
+                  ]
+                },
+                "metadataVersion": {
+                  "type": "string"
+                },
+                "nodePoolName": {
+                  "$ref": "#/$defs/kubernetesName"
+                }
+              }
+            }
+          }
+        }
+      }
     },
     "platformCapabilities": {
       "type": "object",

@@ -781,6 +781,38 @@ webserver:
 messaging:
   kafka:
     enabled: true
+    provider: confluent
+    mode: zookeeper
+    versionProfile: confluent-7.9-zookeeper
+    supportedProfiles:
+      confluent-7.9-zookeeper:
+        provider: confluent
+        mode: zookeeper
+        kafkaImage: confluentinc/cp-kafka:7.9.6
+        zookeeperImage: confluentinc/cp-zookeeper:7.9.6
+        enterpriseLicenseRequired: false
+      confluent-8.2-kraft:
+        provider: confluent
+        mode: kraft
+        kafkaImage: confluentinc/cp-kafka:8.2.0
+        enterpriseLicenseRequired: false
+        note: Community Kafka broker image; Confluent enterprise features require an explicit license.
+      apache-4.2-kraft:
+        provider: apache
+        mode: kraft
+        kafkaImage: apache/kafka:4.2.0
+        enterpriseLicenseRequired: false
+      apache-4.3-kraft:
+        provider: apache
+        mode: kraft
+        kafkaImage: apache/kafka:4.3.0
+        enterpriseLicenseRequired: false
+      apache-4.3-strimzi:
+        provider: strimzi
+        mode: operator
+        kafkaVersion: 4.3.0
+        operatorChart: strimzi-kafka-operator
+        enterpriseLicenseRequired: false
     compatibilitySecurityContext: true
     replicas: 1
     image:
@@ -800,6 +832,14 @@ messaging:
       client: 9092
       external: 29092
       jmx: 29094
+      controller: 29093
+    kraft:
+      clusterId: MkU3OEVBNTcwNTJENDM2Qk
+      processRoles: broker,controller
+      controllerListenerName: CONTROLLER
+      interBrokerListenerName: PLAINTEXT
+      metadataLogReplicationFactor: 1
+      metadataLogMinInSyncReplicas: 1
     zookeeper:
       enabled: true
       replicas: 1
@@ -816,6 +856,22 @@ messaging:
       storage:
         size: 1Gi
         className: ''
+    strimzi:
+      installOperator: false
+      kafkaVersion: 4.3.0
+      metadataVersion: ''
+      nodePoolName: dual-role
+      bootstrapService: kafka-kafka-bootstrap
+      deleteClaim: false
+      listeners:
+        plain:
+          enabled: true
+        tls:
+          enabled: false
+      entityOperator:
+        enabled: true
+        topicOperator: true
+        userOperator: true
     ui:
       enabled: true
       replicas: 1
@@ -884,6 +940,9 @@ platformCapabilities:
     nats:
       enabled: false
   kafkaEcosystem:
+    strimziOperator:
+      enabled: false
+      mode: helmfile
     schemaRegistry:
       enabled: false
       mode: external-or-helmfile

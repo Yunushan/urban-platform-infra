@@ -31,3 +31,8 @@ For real Docker HA, initialize Docker Swarm and use `docker stack deploy`:
 docker swarm init
 REGISTRY_PREFIX=registry.example.com/urban-platform docker stack deploy -c docker-compose.ha.yml urban-platform
 ```
+
+Standalone Compose keeps the compatibility Kafka profile on Confluent 7.9 with
+ZooKeeper by default. Use `STANDALONE_KAFKA_IMAGE` and
+`STANDALONE_ZOOKEEPER_IMAGE` for image pin tests; use the Kubernetes/Strimzi
+profile for Apache Kafka 4.x or production KRaft operator management.

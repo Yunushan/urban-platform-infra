@@ -34,6 +34,7 @@
   <a href="docs/environment-profiles.md">Environment Profiles</a> •
   <a href="docs/storage-tiers.md">Storage Tiers</a> •
   <a href="docs/platform-capabilities.md">Capabilities</a> •
+  <a href="docs/kafka-profiles.md">Kafka Profiles</a> •
   <a href="docs/backup-restore.md">Backup/Restore</a> •
   <a href="docs/local-toolchain.md">Local Toolchain</a> •
   <a href="docs/ci-validation.md">CI Validation</a> •
@@ -290,7 +291,7 @@ By default the Kubernetes profile deploys:
 | Time sync | Chrony | Installed on every node |
 | Web gateway | `nginxinc/nginx-unprivileged:1.30.2` | Low-resource default replica, HTTPS redirect, swappable with Apache HTTPD, Tomcat, or Traefik |
 | Application services | Sanitized `example-app-*` images | Skipped by default until real images are configured or imported |
-| Kafka | `confluentinc/cp-kafka:7.9.6` + `confluentinc/cp-zookeeper:7.9.6` | One compact broker and ZooKeeper pod for the lab profile |
+| Kafka | Default `confluentinc/cp-kafka:7.9.6` + ZooKeeper; opt-in Confluent 8.2, Apache Kafka 4.2/4.3, and Strimzi profiles | One compact broker and ZooKeeper pod for the lab profile; KRaft/Strimzi profiles are explicit opt-ins |
 | Redis | `redis:8.6.2` | One compact Redis pod; Sentinel disabled by default |
 | Optional capabilities | Disabled by default | MinIO, MQTT/EMQX, RabbitMQ, NATS, Keycloak, Vault, Kyverno, Temporal, Argo Workflows, Linkerd, Istio, and Kafka ecosystem profiles |
 | PostgreSQL/PostGIS/TimescaleDB | `postgres:18.3`, `postgis/postgis:18-3.6`, `timescale/timescaledb:2.26.4-pg18` | CloudNativePG custom resources with one lab instance and 1 Gi storage override |

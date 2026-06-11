@@ -43,6 +43,8 @@ platformCapabilities:
     nats:
       enabled: false
   kafkaEcosystem:
+    strimziOperator:
+      enabled: false
     schemaRegistry:
       enabled: false
     kafkaConnect:
@@ -79,6 +81,7 @@ make install-operators DEPLOY_ENABLE_RABBITMQ=true
 make install-operators DEPLOY_ENABLE_KEYCLOAK=true
 make install-operators DEPLOY_ENABLE_EMQX=true
 make install-operators DEPLOY_ENABLE_NATS=true
+make install-operators DEPLOY_ENABLE_STRIMZI=true
 make install-operators DEPLOY_ENABLE_VAULT=true
 make install-operators DEPLOY_ENABLE_KYVERNO=true
 make install-operators DEPLOY_ENABLE_TEMPORAL=true
@@ -87,11 +90,12 @@ make install-operators DEPLOY_ENABLE_LINKERD=true
 make install-operators DEPLOY_ENABLE_ISTIO=true
 ```
 
-Kafka Schema Registry, Kafka Connect, Debezium, and Mosquitto are modeled in
-the capability catalog because teams often choose an enterprise distribution,
-operator, managed service, or custom chart for those pieces. Add the selected
-implementation as a private overlay or a reviewed chart integration when the
-target architecture is known.
+Strimzi is available as an opt-in Helmfile operator path for Apache Kafka 4.x
+KRaft clusters. Kafka Schema Registry, Kafka Connect, Debezium, and Mosquitto
+are modeled in the capability catalog because teams often choose an enterprise
+distribution, operator, managed service, or custom chart for those pieces. Add
+the selected implementation as a private overlay or a reviewed chart integration
+when the target architecture is known.
 
 ## Lab Guidance
 

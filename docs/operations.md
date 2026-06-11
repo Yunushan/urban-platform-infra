@@ -252,6 +252,7 @@ make install-operators DEPLOY_ENABLE_RABBITMQ=true
 make install-operators DEPLOY_ENABLE_KEYCLOAK=true
 make install-operators DEPLOY_ENABLE_EMQX=true
 make install-operators DEPLOY_ENABLE_NATS=true
+make install-operators DEPLOY_ENABLE_STRIMZI=true
 make install-operators DEPLOY_ENABLE_VAULT=true
 make install-operators DEPLOY_ENABLE_KYVERNO=true
 make install-operators DEPLOY_ENABLE_TEMPORAL=true

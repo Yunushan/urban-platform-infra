@@ -292,6 +292,40 @@ images:
   - 29092
   - 29094
   replicas: 3
+- name: kafka-confluent-kraft
+  image: confluentinc/cp-kafka:8.2.0
+  category: messaging
+  type: stateful
+  ports:
+  - 9092
+  - 29092
+  - 29093
+  - 29094
+  replicas: 3
+- name: kafka-apache-42
+  image: apache/kafka:4.2.0
+  category: messaging
+  type: stateful
+  ports:
+  - 9092
+  - 29092
+  - 29093
+  replicas: 3
+- name: kafka-apache-43
+  image: apache/kafka:4.3.0
+  category: messaging
+  type: stateful
+  ports:
+  - 9092
+  - 29092
+  - 29093
+  replicas: 3
+- name: strimzi-kafka-operator
+  image: quay.io/strimzi/operator:1.0.0
+  category: messaging
+  type: operator
+  ports: []
+  replicas: 1
 - name: zookeeper
   image: confluentinc/cp-zookeeper:7.9.6
   category: messaging
