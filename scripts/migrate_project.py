@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import fnmatch
 import hashlib
 import ipaddress
 import json
@@ -2904,6 +2905,61 @@ def import_batch_key(record: import_project.ServiceRecord) -> tuple[str, str]:
     return (record.file, record.name)
 
 
+def service_filter_terms(args: argparse.Namespace) -> list[str]:
+    return split_csv(str(getattr(args, "service_filter", "") or ""))
+
+
+def service_filter_candidates(record: import_project.ServiceRecord) -> list[str]:
+    return [
+        record.name,
+        k8s_name(record.name),
+        record.file,
+        f"{record.file}::{record.name}",
+        f"{record.file}::{k8s_name(record.name)}",
+        image_artifact_name(record),
+    ]
+
+
+def service_matches_filter(record: import_project.ServiceRecord, terms: list[str]) -> bool:
+    if not terms:
+        return True
+    candidates = [candidate.lower() for candidate in service_filter_candidates(record)]
+    for raw_term in terms:
+        term = raw_term.strip().lower()
+        if not term:
+            continue
+        wildcard = any(marker in term for marker in "*?[]")
+        for candidate in candidates:
+            if wildcard and fnmatch.fnmatch(candidate, term):
+                return True
+            if candidate == term or term in candidate:
+                return True
+    return False
+
+
+def filter_service_pairs_for_service_filter(
+    args: argparse.Namespace,
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+) -> list[tuple[import_project.ServiceRecord, dict[str, Any]]]:
+    terms = service_filter_terms(args)
+    if not terms:
+        return service_pairs
+    scoped_pairs = [
+        (record, service)
+        for record, service in service_pairs
+        if service_matches_filter(record, terms)
+    ]
+    if not scoped_pairs:
+        raise SystemExit(
+            "MIGRATION_SERVICE_FILTER did not match any Compose services. "
+            "Use comma-separated service names, wildcard patterns, or file::service values."
+        )
+    if not getattr(args, "_service_filter_announced", False):
+        print(f"MIGRATION_SERVICE_FILTER selected {len(scoped_pairs)}/{len(service_pairs)} service(s): {', '.join(terms)}")
+        setattr(args, "_service_filter_announced", True)
+    return scoped_pairs
+
+
 def import_batch_size(args: argparse.Namespace, workload_count: int) -> int:
     configured = int(args.batch_size or 0)
     if configured > 0:
@@ -2926,7 +2982,8 @@ def resolve_import_batch(args: argparse.Namespace, total_batches: int) -> int | 
 
 
 def import_batch_plan(args: argparse.Namespace, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]]) -> dict[str, Any]:
-    records = imported_capacity_candidates(args, service_pairs)
+    scoped_service_pairs = filter_service_pairs_for_service_filter(args, service_pairs)
+    records = imported_capacity_candidates(args, scoped_service_pairs)
     batch_size = import_batch_size(args, len(records))
     total_batches = (len(records) + batch_size - 1) // batch_size if records else 0
     selected_batch = resolve_import_batch(args, total_batches)
@@ -2960,12 +3017,13 @@ def filter_service_pairs_for_import_batch(
     args: argparse.Namespace,
     service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
 ) -> list[tuple[import_project.ServiceRecord, dict[str, Any]]]:
-    selected_keys = selected_import_batch_keys(args, service_pairs)
+    service_filtered_pairs = filter_service_pairs_for_service_filter(args, service_pairs)
+    selected_keys = selected_import_batch_keys(args, service_filtered_pairs)
     if selected_keys is None:
-        return service_pairs
+        return service_filtered_pairs
     return [
         (record, service)
-        for record, service in service_pairs
+        for record, service in service_filtered_pairs
         if import_batch_key(record) in selected_keys
     ]
 
@@ -3075,15 +3133,16 @@ def stage_scope_pairs(
     stage: str,
     service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
 ) -> list[tuple[import_project.ServiceRecord, dict[str, Any]]]:
+    service_filtered_pairs = filter_service_pairs_for_service_filter(args, service_pairs)
     if stage in {"secrets", "images", "manifests"}:
-        return filter_service_pairs_for_import_batch(args, service_pairs)
+        return filter_service_pairs_for_import_batch(args, service_filtered_pairs)
     if stage == "databases":
         return [
             (record, service)
-            for record, service in service_pairs
+            for record, service in service_filtered_pairs
             if record.kind in POSTGRES_FAMILY_KINDS
         ]
-    return service_pairs
+    return service_filtered_pairs
 
 
 def stage_scope_records(
@@ -3124,6 +3183,7 @@ def migration_stage_scope(args: argparse.Namespace, stage: str, service_pairs: l
         "namespace": args.namespace,
         "selectedBatch": selected_batch if selected_batch is not None else "all",
         "batchSize": plan["batchSize"] if stage in {"secrets", "images", "manifests"} else "global",
+        "serviceFilter": service_filter_terms(args),
         "imageMode": args.image_mode if stage in {"images", "manifests"} else "",
         "imageTag": args.image_tag if stage in {"images", "manifests"} else "",
         "registry": args.registry if stage in {"images", "manifests"} else "",
@@ -3801,6 +3861,7 @@ def generate_bundle(
         f"- Dump directory: `{args.dump_dir}`",
         f"- Database target map: `{database_targets_path(args)}`",
         f"- Image mode: `{args.image_mode}`",
+        f"- Service filter: `{args.service_filter or 'all services'}`",
         f"- TLS mode: `{selected_tls_mode(args)}`",
         f"- Imported workload security context: `{args.import_security_context}`",
         f"- Auto prepare: `{str(args.auto_prepare).lower()}`",
@@ -3830,6 +3891,7 @@ def generate_bundle(
         "- Registry login is used only with image mode `registry`. Image mode `preload` avoids registry login by writing image archives and optionally copying them to RKE2 nodes.",
         "- The default `lab` migration profile writes `lab-profile-values.yaml`, forces imported workloads to one replica, and adds small resource requests/limits to imported workloads.",
         "- Lab imports can run in batches. `MIGRATION_IMPORT_BATCH=auto` selects the first batch with pending secret, image, or manifest work.",
+        "- `MIGRATION_SERVICE_FILTER` narrows secret, image, database, and manifest stages to matching Compose services; it accepts comma-separated service names, `file::service`, substrings, or shell-style wildcards.",
         "- Resume is enabled by default. Completed secret, image, database, and manifest stages are recorded in the private `MIGRATION_STATE_FILE` and summarized in `import-resume.md`; reruns advance to the next pending import batch.",
         "- Recovery planning is plan-only by default. Run `make import-recovery-plan IMPORT_REDACT=true` to write `import-recovery-plan.md`, then review resume status, cleanup boundaries, and rollback boundaries before forcing a rerun.",
         "- Use `MIGRATION_PROFILE=production` only after cluster capacity, storage, backups, and strict database migration behavior are ready.",
@@ -3889,6 +3951,7 @@ def generate_bundle(
         f'MIGRATION_PREFLIGHT_REQUIRE_INGRESS_ENDPOINT="${{MIGRATION_PREFLIGHT_REQUIRE_INGRESS_ENDPOINT:-{str(args.preflight_require_ingress_endpoint).lower()}}}"\n'
         f'MIGRATION_BATCH_SIZE="${{MIGRATION_BATCH_SIZE:-{args.batch_size}}}"\n'
         f'MIGRATION_IMPORT_BATCH="${{MIGRATION_IMPORT_BATCH:-{args.import_batch}}}"\n'
+        f'MIGRATION_SERVICE_FILTER="${{MIGRATION_SERVICE_FILTER:-{args.service_filter}}}"\n'
         f'MIGRATION_STATE_FILE="${{MIGRATION_STATE_FILE:-{args.state_file}}}"\n'
         f'MIGRATION_RESUME="${{MIGRATION_RESUME:-{str(args.resume).lower()}}}"\n'
         f'MIGRATION_FORCE_RERUN="${{MIGRATION_FORCE_RERUN:-{str(args.force_rerun).lower()}}}"\n'
@@ -3962,6 +4025,7 @@ def generate_bundle(
         '--preflight-capacity-utilization-limit "$MIGRATION_PREFLIGHT_CAPACITY_UTILIZATION_LIMIT" '
         '$INGRESS_PREFLIGHT_FLAG '
         '--batch-size "$MIGRATION_BATCH_SIZE" --import-batch "$MIGRATION_IMPORT_BATCH" '
+        '--service-filter "$MIGRATION_SERVICE_FILTER" '
         '--state-file "$MIGRATION_STATE_FILE" $RESUME_FLAG $FORCE_RERUN_FLAG '
         '--image-mode "$MIGRATION_IMAGE_MODE" --image-output-dir "$MIGRATION_IMAGE_OUTPUT_DIR" '
         '--rke2-nodes "$MIGRATION_RKE2_NODES" --rke2-image-dir "$MIGRATION_RKE2_IMAGE_DIR" '
@@ -6195,6 +6259,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--no-preflight-require-ingress-endpoint", dest="preflight_require_ingress_endpoint", action="store_false")
     parser.add_argument("--batch-size", type=int, default=int(os.environ["MIGRATION_BATCH_SIZE"]) if os.environ.get("MIGRATION_BATCH_SIZE") else None)
     parser.add_argument("--import-batch", default=os.environ.get("MIGRATION_IMPORT_BATCH", ""))
+    parser.add_argument("--service-filter", default=os.environ.get("MIGRATION_SERVICE_FILTER", ""))
     parser.add_argument("--state-file", default=os.environ.get("MIGRATION_STATE_FILE", ""))
     parser.add_argument("--resume", dest="resume", action="store_true", default=None)
     parser.add_argument("--no-resume", dest="resume", action="store_false")
