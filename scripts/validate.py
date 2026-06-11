@@ -2079,6 +2079,8 @@ for migration_automation_token in [
     'normalize_postgres_endpoint_text',
     'image_config_rewrite_required',
     'preloaded_image_reuse_allowed',
+    'container_image_env',
+    'dockerfile_env_value',
     'create_image_config_rewrite_dockerfile',
     'rewrite_image_runtime_config',
     'Rewriting baked runtime config',

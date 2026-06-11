@@ -95,7 +95,7 @@ IMAGE_CONFIG_TEXT_SUFFIXES = {
 POSTGRES_HOST_KEY_RE = re.compile(r"^(?:PGHOST|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*HOST.*)$", re.IGNORECASE)
 POSTGRES_PORT_KEY_RE = re.compile(r"^(?:PGPORT|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*PORT.*)$", re.IGNORECASE)
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 20
+MANIFEST_GENERATOR_VERSION = 21
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -2045,13 +2045,53 @@ def container_image_user(args: argparse.Namespace, image: str) -> str:
     return safe_dockerfile_user(str(config.get("User") or ""))
 
 
-def create_image_config_rewrite_dockerfile(base_image: str, sed_scripts: list[str], final_user: str = "") -> Path:
+def container_image_env(args: argparse.Namespace, image: str) -> dict[str, str]:
+    result = subprocess.run(container_command(args, "image", "inspect", image), text=True, capture_output=True)
+    if result.returncode != 0:
+        return {}
+    try:
+        inspect = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(inspect, list) or not inspect:
+        return {}
+    config = inspect[0].get("Config") if isinstance(inspect[0], dict) else None
+    if not isinstance(config, dict):
+        return {}
+    env: dict[str, str] = {}
+    for entry in config.get("Env") or []:
+        if not isinstance(entry, str) or "=" not in entry:
+            continue
+        key, value = entry.split("=", 1)
+        if KUBERNETES_ENV_NAME_RE.match(key):
+            env[key] = value
+    return env
+
+
+def dockerfile_env_value(value: str) -> str:
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("$", "\\$")
+        .replace("\n", "\\n")
+    )
+    return f'"{escaped}"'
+
+
+def create_image_config_rewrite_dockerfile(
+    base_image: str,
+    sed_scripts: list[str],
+    env_overrides: dict[str, str],
+    final_user: str = "",
+) -> Path:
     fd, path = tempfile.mkstemp(prefix="urban-image-config-rewrite-", suffix=".Dockerfile")
     dockerfile_path = Path(path)
     suffix_expr = " -o ".join(f"-name '*{suffix}'" for suffix in sorted(IMAGE_CONFIG_TEXT_SUFFIXES))
     sed_args = " ".join(f"-e {shlex.quote(script)}" for script in sed_scripts)
     with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(f"FROM {base_image}\n")
+        for key, value in sorted(env_overrides.items()):
+            handle.write(f"ENV {key}={dockerfile_env_value(value)}\n")
         handle.write("USER root\n")
         handle.write(
             "RUN set -eu; "
@@ -2078,10 +2118,17 @@ def rewrite_image_runtime_config(
     sed_scripts = image_config_rewrite_sed_scripts(db_rewrites, service_endpoint)
     if not sed_scripts:
         return None
+    env_overrides = {
+        key: normalized
+        for key, value in container_image_env(args, target_image).items()
+        for normalized in [normalize_postgres_endpoint_text(value, db_rewrites, service_endpoint)]
+        if normalized != value
+    }
     digest = hashlib.sha256(
         json.dumps(
             {
                 "dbRewrites": db_rewrites,
+                "envOverrides": env_overrides,
                 "record": record.name,
                 "serviceEndpoint": service_endpoint,
                 "version": MANIFEST_GENERATOR_VERSION,
@@ -2091,7 +2138,7 @@ def rewrite_image_runtime_config(
     ).hexdigest()[:8]
     rewrite_image = f"{target_image}-cfg-{digest}"
     final_user = container_image_user(args, target_image)
-    dockerfile = create_image_config_rewrite_dockerfile(target_image, sed_scripts, final_user)
+    dockerfile = create_image_config_rewrite_dockerfile(target_image, sed_scripts, env_overrides, final_user)
     try:
         print(f"Rewriting baked runtime config in {target_image} for imported PostgreSQL endpoints.")
         run_command(container_command(args, "build", "-t", rewrite_image, "-f", str(dockerfile), "."), cwd=dockerfile.parent)
