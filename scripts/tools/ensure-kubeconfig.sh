@@ -222,6 +222,49 @@ recover_become_password_from_fallback_inventory() {
   fi
 }
 
+recover_ssh_context_from_fallback_inventory() {
+  local recovered_ssh_user
+  local recovered_ssh_key
+
+  if [ "${MIGRATION_RECOVER_INVENTORY_SSH_CONTEXT:-true}" != "true" ]; then
+    return 0
+  fi
+  if [ ! -r "${FALLBACK_INVENTORY_PATH}" ]; then
+    return 0
+  fi
+
+  recovered_ssh_user="$(
+    sed -nE "s/^[[:space:]]*ansible_user:[[:space:]]*['\"]?([^'\"]+)['\"]?[[:space:]]*$/\1/p" "${FALLBACK_INVENTORY_PATH}" \
+      | head -n 1
+  )"
+  if [ -n "${recovered_ssh_user}" ] && { [ -z "${MIGRATION_SSH_USER:-}" ] || [ "${MIGRATION_SSH_USER:-}" = "root" ]; }; then
+    export MIGRATION_SSH_USER="${recovered_ssh_user}"
+    echo "Recovered MIGRATION_SSH_USER from ${FALLBACK_INVENTORY_PATH}: ${MIGRATION_SSH_USER}."
+  fi
+
+  if [ -z "${MIGRATION_SSH_KEY:-}" ]; then
+    recovered_ssh_key="$(
+      sed -nE "s/^[[:space:]]*ansible_ssh_private_key_file:[[:space:]]*['\"]?([^'\"]+)['\"]?[[:space:]]*$/\1/p" "${FALLBACK_INVENTORY_PATH}" \
+        | head -n 1
+    )"
+    if [ -z "${recovered_ssh_key}" ]; then
+      for recovered_ssh_key in \
+        "${HOME}/.ssh/id_ed25519_urban_ansible" \
+        "${HOME}/.ssh/id_rsa_urban_ansible" \
+        "${HOME}/.ssh/id_ed25519"; do
+        if [ -r "${recovered_ssh_key}" ]; then
+          break
+        fi
+        recovered_ssh_key=""
+      done
+    fi
+    if [ -n "${recovered_ssh_key}" ] && [ -r "${recovered_ssh_key}" ]; then
+      export MIGRATION_SSH_KEY="${recovered_ssh_key}"
+      echo "Recovered MIGRATION_SSH_KEY from local SSH identity: ${MIGRATION_SSH_KEY}."
+    fi
+  fi
+}
+
 passwordless_sudo_available_on_reachable_nodes() {
   local node
   local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
@@ -808,6 +851,7 @@ if [ ! -f "${INVENTORY_PATH}" ] && [ -z "${MIGRATION_RKE2_NODES:-}" ] && [ -f "$
     echo "Recovered MIGRATION_RKE2_NODES from ${FALLBACK_INVENTORY_PATH}."
   fi
 fi
+recover_ssh_context_from_fallback_inventory
 recover_become_password_from_fallback_inventory
 
 if [ ! -f "${INVENTORY_PATH}" ]; then

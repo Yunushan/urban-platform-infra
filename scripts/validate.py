@@ -1154,6 +1154,9 @@ for kubeconfig_script_token in [
     'Generated temporary operator inventory',
     'Fetching RKE2 kubeconfig directly',
     'MIGRATION_SSH_KEY',
+    'recover_ssh_context_from_fallback_inventory',
+    'Recovered MIGRATION_SSH_USER',
+    'Recovered MIGRATION_SSH_KEY',
     'MIGRATION_RKE2_KUBECONFIG_COMMAND',
     'MIGRATION_CLUSTER_VIP',
     'MIGRATION_KUBERNETES_API_VIP_PORT',
@@ -3798,6 +3801,7 @@ for helmfile_sync_retry_token in [
     'another operation',
     'OPERATOR_KUBECONFIG_FORCE_REPAIR=true',
     'Refreshing operator kubeconfig before Helmfile retry',
+    'strimzi-kafka-operator:strimzi-system',
     '"${helmfile_bin}" -f "${helmfile_config}" sync',
 ]:
     if helmfile_sync_retry_token not in helmfile_sync_retry_text:
@@ -3815,6 +3819,8 @@ for local_path_installer_token in [
     'LOCAL_PATH_PREPARE_HOST_PATHS',
     'container_file_t',
     'Recovered MIGRATION_RKE2_NODES',
+    'Recovered MIGRATION_SSH_USER',
+    'Recovered MIGRATION_SSH_KEY',
     'rollout restart deployment/local-path-provisioner',
 ]:
     if local_path_installer_token not in local_path_installer_text:

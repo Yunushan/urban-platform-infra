@@ -187,12 +187,14 @@ releases:
     installed: {{ env "INSTALL_NATS" | default "false" }}
     createNamespace: true
 
+{{- if $installStrimzi }}
   - name: strimzi-kafka-operator
     namespace: strimzi-system
     chart: strimzi/strimzi-kafka-operator
     version: 1.0.0
-    installed: {{ env "INSTALL_STRIMZI" | default "false" }}
+    installed: true
     createNamespace: true
+{{- end }}
 
   - name: vault
     namespace: secrets
