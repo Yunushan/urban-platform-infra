@@ -11,6 +11,8 @@ chart_version="${STRIMZI_OPERATOR_CHART_VERSION:-1.0.0}"
 timeout_value="${STRIMZI_OPERATOR_TIMEOUT:-10m}"
 retries="${STRIMZI_OPERATOR_RETRIES:-3}"
 retry_delay="${STRIMZI_OPERATOR_RETRY_DELAY:-20}"
+watch_namespaces="${STRIMZI_WATCH_NAMESPACES:-${NAMESPACE:-urban-platform}}"
+watch_any_namespace="${STRIMZI_WATCH_ANY_NAMESPACE:-false}"
 kubeconfig_path="${OPERATOR_KUBECONFIG:-${KUBECONFIG:-${HOME}/.kube/config}}"
 
 if [ "${enabled}" != "true" ]; then
@@ -23,6 +25,22 @@ if ! command -v helm >/dev/null 2>&1; then
   exit 1
 fi
 
+helm_watch_args=()
+case "${watch_any_namespace}" in
+  true)
+    helm_watch_args+=(--set watchAnyNamespace=true)
+    ;;
+  false)
+    if [ -n "${watch_namespaces}" ]; then
+      helm_watch_args+=(--set "watchNamespaces={${watch_namespaces}}")
+    fi
+    ;;
+  *)
+    echo "STRIMZI_WATCH_ANY_NAMESPACE must be true or false." >&2
+    exit 2
+    ;;
+esac
+
 attempt=1
 while true; do
   echo "Installing Strimzi operator ${chart_version} with Helm (attempt ${attempt}/${retries})."
@@ -32,6 +50,7 @@ while true; do
       --namespace "${namespace}" \
       --create-namespace \
       --version "${chart_version}" \
+      "${helm_watch_args[@]}" \
       --wait \
       --timeout "${timeout_value}"; then
     KUBECONFIG="${kubeconfig_path}" kubectl -n "${namespace}" rollout status deployment/strimzi-cluster-operator --timeout="${timeout_value}"

@@ -56,6 +56,11 @@ Install the operator first:
 make install-operators DEPLOY_ENABLE_STRIMZI=true
 ```
 
+The installer configures the Strimzi operator to watch the platform namespace
+by default. Override `STRIMZI_WATCH_NAMESPACES` for a comma-separated namespace
+list, or set `STRIMZI_WATCH_ANY_NAMESPACE=true` only when you intentionally want
+one operator to reconcile Kafka clusters across all namespaces.
+
 Then deploy Kafka as Strimzi-managed custom resources:
 
 ```bash
