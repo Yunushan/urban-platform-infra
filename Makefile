@@ -731,10 +731,10 @@ configure-edge-ports: ansible-collections ## Configure HAProxy VIP forwarding fo
 	fi; \
 	ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) $(ANSIBLE_PLAYBOOK) -i "$$edge_inventory" ansible/playbooks/edge-ports.yml -e cluster_engine=$(ENGINE) -e deployment_environment=$(ENV) -e edge_allowed_cidrs_text="$(DEPLOY_ALLOWED_CIDRS)" -e edge_observability_ports_enabled="$(DEPLOY_EDGE_OBSERVABILITY_PORTS)" $(ANSIBLE_ARGS)
 
-install-helm: ## Install Helm on the operator machine when it is missing.
+install-helm: ## Install or align Helm on the operator machine.
 	bash $(HELM_INSTALL_SCRIPT)
 
-install-helmfile: install-helm ## Install Helmfile on the operator machine when it is missing.
+install-helmfile: install-helm ## Install or align Helmfile on the operator machine.
 	bash $(HELMFILE_INSTALL_SCRIPT)
 
 install-local-path-storage: operator-kubeconfig ## Install Rancher local-path dynamic storage for lab/small clusters.

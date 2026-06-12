@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if command -v helmfile >/dev/null 2>&1; then
-  helmfile --version
-  exit 0
-fi
-
 if ! command -v curl >/dev/null 2>&1; then
   echo "curl is required to install Helmfile." >&2
   exit 1
@@ -16,9 +11,21 @@ if ! command -v tar >/dev/null 2>&1; then
   exit 1
 fi
 
-version="${HELMFILE_VERSION:-v1.2.1}"
+version="${HELMFILE_VERSION:-v1.5.3}"
 os_name="$(uname -s | tr '[:upper:]' '[:lower:]')"
 machine_arch="$(uname -m)"
+installed_version=""
+
+if command -v helmfile >/dev/null 2>&1; then
+  installed_version="$(helmfile --version 2>/dev/null | awk '{print $NF}')"
+  case "${installed_version}" in
+    "${version}" | "${version#v}")
+      helmfile --version
+      exit 0
+      ;;
+  esac
+  echo "Installed Helmfile version ${installed_version:-unknown} does not match requested ${version}; installing requested version."
+fi
 
 case "${machine_arch}" in
   x86_64 | amd64)

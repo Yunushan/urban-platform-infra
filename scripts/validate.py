@@ -3763,7 +3763,9 @@ for values_schema_capability_token in [
 helm_installer_text = (ROOT / 'scripts/tools/install-helm.sh').read_text(encoding='utf-8')
 for helm_installer_token in [
     'command -v helm',
-    'https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3',
+    'HELM_VERSION',
+    'v4.2.1',
+    'https://get.helm.sh/',
     'helm version --short',
 ]:
     if helm_installer_token not in helm_installer_text:
@@ -3773,6 +3775,7 @@ helmfile_installer_text = (ROOT / 'scripts/tools/install-helmfile.sh').read_text
 for helmfile_installer_token in [
     'command -v helmfile',
     'HELMFILE_VERSION',
+    'v1.5.3',
     'github.com/helmfile/helmfile/releases/download',
     'helmfile --version',
 ]:

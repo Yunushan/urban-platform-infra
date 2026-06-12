@@ -44,7 +44,8 @@ Required for validation and lint:
 Required for cluster deployment or project import execution:
 
 - Ansible CLI tools
-- Helm and Helmfile
+- Helm `v4.2.1` by default through `scripts/tools/install-helm.sh`
+- Helmfile `v1.5.3` by default through `scripts/tools/install-helmfile.sh`
 - kubectl with a reachable kubeconfig
 - Docker or Podman for image build, tag, save, push, or preload workflows
 - OpenSSH client and `scp` for RKE2 image preload and kubeconfig repair
