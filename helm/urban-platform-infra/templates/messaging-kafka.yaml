@@ -300,7 +300,10 @@ spec:
         app.kubernetes.io/part-of: urban-platform-infra
     spec:
       {{- include "cip.podSpecDefaults" . | nindent 6 }}
-      {{- if .Values.global.podSecurityContext.enabled }}
+      {{- with .Values.messaging.kafka.ui.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- else if .Values.global.podSecurityContext.enabled }}
       securityContext:
         {{- if $kafkaCompatSecurity }}
         {{- include "cip.compatPodSecurityContext" . | nindent 8 }}
@@ -313,7 +316,9 @@ spec:
           image: {{ include "cip.image" (list . .Values.messaging.kafka.ui.image) | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy | quote }}
           securityContext:
-            {{- if $kafkaCompatSecurity }}
+            {{- with .Values.messaging.kafka.ui.securityContext }}
+            {{- toYaml . | nindent 12 }}
+            {{- else if $kafkaCompatSecurity }}
             {{- include "cip.compatSecurityContext" . | nindent 12 }}
             {{- else }}
             {{- include "cip.securityContext" . | nindent 12 }}

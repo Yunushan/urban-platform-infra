@@ -66,7 +66,10 @@ spec:
         app.kubernetes.io/part-of: urban-platform-infra
     spec:
       {{- include "cip.podSpecDefaults" . | nindent 6 }}
-      {{- if .Values.global.podSecurityContext.enabled }}
+      {{- with .Values.messaging.redis.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- else if .Values.global.podSecurityContext.enabled }}
       securityContext:
         {{- if $redisCompatSecurity }}
         {{- include "cip.compatPodSecurityContext" . | nindent 8 }}
@@ -79,7 +82,9 @@ spec:
           image: {{ include "cip.image" (list . .Values.messaging.redis.image) | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy | quote }}
           securityContext:
-            {{- if $redisCompatSecurity }}
+            {{- with .Values.messaging.redis.securityContext }}
+            {{- toYaml . | nindent 12 }}
+            {{- else if $redisCompatSecurity }}
             {{- include "cip.compatSecurityContext" . | nindent 12 }}
             {{- else }}
             {{- include "cip.securityContext" . | nindent 12 }}
@@ -109,7 +114,9 @@ spec:
           image: {{ include "cip.image" (list . .Values.messaging.redis.image) | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy | quote }}
           securityContext:
-            {{- if $redisCompatSecurity }}
+            {{- with .Values.messaging.redis.securityContext }}
+            {{- toYaml . | nindent 12 }}
+            {{- else if $redisCompatSecurity }}
             {{- include "cip.compatSecurityContext" . | nindent 12 }}
             {{- else }}
             {{- include "cip.securityContext" . | nindent 12 }}

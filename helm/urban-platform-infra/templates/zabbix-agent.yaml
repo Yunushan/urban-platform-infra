@@ -20,10 +20,23 @@ spec:
         app.kubernetes.io/part-of: urban-platform-infra
     spec:
       {{- include "cip.podSpecDefaults" . | nindent 6 }}
+      {{- with .Values.zabbixAgent.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- else if .Values.global.podSecurityContext.enabled }}
+      securityContext:
+        {{- include "cip.podSecurityContext" . | nindent 8 }}
+      {{- end }}
       containers:
         - name: zabbix-agent2
           image: {{ include "cip.image" (list . .Values.zabbixAgent.image) | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy | quote }}
+          securityContext:
+            {{- with .Values.zabbixAgent.securityContext }}
+            {{- toYaml . | nindent 12 }}
+            {{- else }}
+            {{- include "cip.securityContext" . | nindent 12 }}
+            {{- end }}
           ports:
             {{- range .Values.zabbixAgent.ports }}
             - name: {{ .name | quote }}
