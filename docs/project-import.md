@@ -460,6 +460,20 @@ If the timeout expires, the terminal prints the first imported workload waiting
 reasons and CNPG/PVC blockers, while the full public-safe detail remains in
 `reports/import-migration/post-migration-runtime.md`.
 
+Imported service workloads get TCP readiness and liveness probes by default.
+When legacy services are crash-looping before you can capture logs, rerun only
+the manifests with readiness probes but without liveness restarts:
+
+```bash
+make import-migrate PROJECT_PATH=/path/to/compose-project \
+  MIGRATION_STAGE=manifests \
+  MIGRATION_EXECUTE=true \
+  MIGRATION_IMPORT_PROBE_MODE=readiness-only
+```
+
+`auto` remains the default. `tcp` forces readiness and liveness probes, while
+`disabled` omits imported workload probes for temporary forensic debugging.
+
 PostgreSQL-family database dump/restore is performed by the automation when
 execution is enabled. The restore step uses the generated private DB target map.
 For CloudNativePG targets from the selected Helm values, the map points at the

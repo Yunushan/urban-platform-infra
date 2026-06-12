@@ -838,6 +838,17 @@ def should_generate_tcp_probes(record: import_project.ServiceRecord, service: di
     return True
 
 
+def imported_workload_probe_mode(args: argparse.Namespace, record: import_project.ServiceRecord, service: dict[str, Any]) -> str:
+    mode = args.import_probe_mode
+    if mode == "auto":
+        return "tcp" if should_generate_tcp_probes(record, service) else "disabled-background-service"
+    if mode == "tcp":
+        return "tcp"
+    if mode == "readiness-only":
+        return "readiness-only"
+    return "disabled-user"
+
+
 def image_for_kubernetes_manifest(
     args: argparse.Namespace,
     record: import_project.ServiceRecord,
@@ -1720,8 +1731,9 @@ def kubernetes_workload_manifests(
 
     for record, service, image, ports in workload_inputs:
         name = kubernetes_workload_name(record)
-        generate_tcp_probes = should_generate_tcp_probes(record, service)
-        probe_mode = "tcp" if generate_tcp_probes else "disabled-background-service"
+        probe_mode = imported_workload_probe_mode(args, record, service)
+        generate_readiness_probe = probe_mode in {"tcp", "readiness-only"}
+        generate_liveness_probe = probe_mode == "tcp"
         service_target_ports = nginx_service_target_ports(args, record, ports)
         container_ports = nginx_container_ports(args, record, ports)
         labels = {
@@ -1754,9 +1766,11 @@ def kubernetes_workload_manifests(
         container_security_context = imported_workload_container_security_context(args, record)
         if container_security_context:
             container["securityContext"] = container_security_context
-        if generate_tcp_probes:
+        if generate_readiness_probe:
             probe_port = nginx_internal_port(args, record, ports[0])
             container["readinessProbe"] = {"tcpSocket": {"port": probe_port}, "initialDelaySeconds": 15, "periodSeconds": 10}
+        if generate_liveness_probe:
+            probe_port = nginx_internal_port(args, record, ports[0])
             container["livenessProbe"] = {"tcpSocket": {"port": probe_port}, "initialDelaySeconds": 45, "periodSeconds": 20}
         if env:
             container["env"] = env
@@ -6243,6 +6257,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--runtime-validation-interval", type=int, default=int(os.environ["MIGRATION_RUNTIME_VALIDATION_INTERVAL"]) if os.environ.get("MIGRATION_RUNTIME_VALIDATION_INTERVAL") else 10)
     parser.add_argument("--kafka-bootstrap-servers", default=os.environ.get("MIGRATION_KAFKA_BOOTSTRAP_SERVERS", "kafka:9092"))
     parser.add_argument("--import-security-context", choices=["restricted", "compat"], default=os.environ.get("MIGRATION_IMPORT_SECURITY_CONTEXT", ""))
+    parser.add_argument(
+        "--import-probe-mode",
+        choices=["auto", "tcp", "readiness-only", "disabled"],
+        default=os.environ.get("MIGRATION_IMPORT_PROBE_MODE", "auto"),
+        help=(
+            "Imported workload probe policy. auto adds TCP readiness/liveness only to service-like workloads; "
+            "readiness-only keeps readiness checks but avoids liveness restarts during dependency/debug windows."
+        ),
+    )
     parser.add_argument("--lab-workload-cpu-request", default=os.environ.get("MIGRATION_LAB_WORKLOAD_CPU_REQUEST", "25m"))
     parser.add_argument("--lab-workload-memory-request", default=os.environ.get("MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST", "64Mi"))
     parser.add_argument("--lab-workload-cpu-limit", default=os.environ.get("MIGRATION_LAB_WORKLOAD_CPU_LIMIT", "250m"))
