@@ -56,10 +56,19 @@ Install the operator first:
 make install-operators DEPLOY_ENABLE_STRIMZI=true
 ```
 
+For lab or import clusters, prefer the one-command wrapper:
+
+```bash
+make deploy-strimzi-kafka
+```
+
 The installer configures the Strimzi operator to watch the platform namespace
 by default. Override `STRIMZI_WATCH_NAMESPACES` for a comma-separated namespace
 list, or set `STRIMZI_WATCH_ANY_NAMESPACE=true` only when you intentionally want
 one operator to reconcile Kafka clusters across all namespaces.
+In preload lab workflows, the installer also stages `quay.io/strimzi/operator`
+and `quay.io/strimzi/kafka` onto discovered RKE2 nodes before Helm creates
+Strimzi pods.
 
 Then deploy Kafka as Strimzi-managed custom resources:
 

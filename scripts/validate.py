@@ -282,6 +282,7 @@ REQUIRED = [
     'scripts/migrate_project.py',
     'scripts/tools/install-helm.sh', 'scripts/tools/install-helmfile.sh',
     'scripts/tools/install-strimzi.sh',
+    'scripts/tools/preload-rke2-images.sh',
     'scripts/tools/helmfile-sync-retry.sh',
     'scripts/tools/install-local-path-storage.sh', 'scripts/tools/recover-helm-release.sh',
     'scripts/tools/ensure-kubeconfig.sh', 'scripts/tools/standalone-docker-config.sh',
@@ -1717,6 +1718,10 @@ for makefile_helm_token in [
     'STRIMZI_OPERATOR_CHART_VERSION',
     'STRIMZI_WATCH_NAMESPACES',
     'STRIMZI_WATCH_ANY_NAMESPACE',
+    'STRIMZI_PRELOAD_IMAGES',
+    'RKE2_IMAGE_PRELOAD_SCRIPT',
+    'deploy-strimzi-kafka:',
+    'messaging.kafka.versionProfile=apache-4.2-strimzi',
     'DEPLOY_ENABLE_VAULT',
     'DEPLOY_ENABLE_KYVERNO',
     'DEPLOY_ENABLE_TEMPORAL',
@@ -3803,11 +3808,28 @@ for strimzi_installer_token in [
     'watchAnyNamespace',
     'STRIMZI_WATCH_NAMESPACES',
     'STRIMZI_WATCH_ANY_NAMESPACE',
+    'STRIMZI_PRELOAD_IMAGES',
+    'RKE2_IMAGE_PRELOAD_SCRIPT',
+    'quay.io/strimzi/kafka',
     'rollout status deployment/strimzi-cluster-operator',
     'STRIMZI_OPERATOR_RETRIES',
 ]:
     if strimzi_installer_token not in strimzi_installer_text:
         errors.append(f'Strimzi installer script missing token: {strimzi_installer_token}')
+
+rke2_preload_text = (ROOT / 'scripts/tools/preload-rke2-images.sh').read_text(encoding='utf-8')
+for rke2_preload_token in [
+    'RKE2_PRELOAD_IMAGES',
+    'MIGRATION_RKE2_NODES',
+    'MIGRATION_SSH_USER',
+    'MIGRATION_SSH_KEY',
+    'Recovered MIGRATION_SSH_USER',
+    '--address',
+    'images import',
+    'RKE2 image preload completed',
+]:
+    if rke2_preload_token not in rke2_preload_text:
+        errors.append(f'RKE2 preload script missing token: {rke2_preload_token}')
 
 helmfile_sync_retry_text = (ROOT / 'scripts/tools/helmfile-sync-retry.sh').read_text(encoding='utf-8')
 for helmfile_sync_retry_token in [
@@ -4101,6 +4123,7 @@ for approved_repository in [
     'apache/kafka',
     'confluentinc/cp-zookeeper',
     'quay.io/strimzi/operator',
+    'quay.io/strimzi/kafka',
     'provectuslabs/kafka-ui',
     'timescale/timescaledb',
     'zabbix/zabbix-agent2',
@@ -4128,6 +4151,7 @@ for current_runtime_image in [
     'apache/kafka:4.2.0',
     'apache/kafka:4.3.0',
     'quay.io/strimzi/operator:1.0.0',
+    'quay.io/strimzi/kafka:1.0.0-kafka-4.2.0',
     'confluentinc/cp-zookeeper:7.9.6',
     'redis:8.6.2',
     'postgres:18.3',

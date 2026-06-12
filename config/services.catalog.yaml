@@ -326,6 +326,13 @@ images:
   type: operator
   ports: []
   replicas: 1
+- name: strimzi-kafka-broker-42
+  image: quay.io/strimzi/kafka:1.0.0-kafka-4.2.0
+  category: messaging
+  type: stateful
+  ports:
+  - 9092
+  replicas: 1
 - name: zookeeper
   image: confluentinc/cp-zookeeper:7.9.6
   category: messaging
