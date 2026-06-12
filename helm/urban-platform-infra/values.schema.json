@@ -995,7 +995,7 @@
                 "confluent-8.2-kraft",
                 "apache-4.2-kraft",
                 "apache-4.3-kraft",
-                "apache-4.3-strimzi"
+                "apache-4.2-strimzi"
               ]
             },
             "kraft": {
@@ -1028,8 +1028,7 @@
                 "kafkaVersion": {
                   "type": "string",
                   "enum": [
-                    "4.2.0",
-                    "4.3.0"
+                    "4.2.0"
                   ]
                 },
                 "metadataVersion": {

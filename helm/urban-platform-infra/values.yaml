@@ -807,10 +807,10 @@ messaging:
         mode: kraft
         kafkaImage: apache/kafka:4.3.0
         enterpriseLicenseRequired: false
-      apache-4.3-strimzi:
+      apache-4.2-strimzi:
         provider: strimzi
         mode: operator
-        kafkaVersion: 4.3.0
+        kafkaVersion: 4.2.0
         operatorChart: strimzi-kafka-operator
         enterpriseLicenseRequired: false
     compatibilitySecurityContext: true
@@ -859,7 +859,7 @@ messaging:
     strimzi:
       installOperator: false
       apiVersion: kafka.strimzi.io/v1
-      kafkaVersion: 4.3.0
+      kafkaVersion: 4.2.0
       metadataVersion: ''
       nodePoolName: dual-role
       bootstrapService: kafka-kafka-bootstrap

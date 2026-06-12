@@ -12,7 +12,7 @@ Kafka 4.x use KRaft and should be rolled out as a planned platform change.
 | `confluent-8.2-kraft` | Confluent Community broker | `confluentinc/cp-kafka:8.2.0` | None |
 | `apache-4.2-kraft` | Apache Kafka | `apache/kafka:4.2.0` | None |
 | `apache-4.3-kraft` | Apache Kafka | `apache/kafka:4.3.0` | None |
-| `apache-4.3-strimzi` | Apache Kafka | `Kafka` + `KafkaNodePool` CRs | Strimzi |
+| `apache-4.2-strimzi` | Apache Kafka | `Kafka` + `KafkaNodePool` CRs | Strimzi |
 
 The Confluent 8.2 broker image is configured as a community broker option.
 Confluent enterprise features such as commercial Control Center/RBAC/audit
@@ -66,16 +66,19 @@ Then deploy Kafka as Strimzi-managed custom resources:
 ```bash
 helm upgrade --install urban-platform-infra helm/urban-platform-infra \
   --namespace urban-platform \
-  --set messaging.kafka.versionProfile=apache-4.3-strimzi \
+  --set messaging.kafka.versionProfile=apache-4.2-strimzi \
   --set messaging.kafka.provider=strimzi \
   --set messaging.kafka.mode=operator \
   --set messaging.kafka.strimzi.apiVersion=kafka.strimzi.io/v1 \
-  --set messaging.kafka.strimzi.kafkaVersion=4.3.0 \
+  --set messaging.kafka.strimzi.kafkaVersion=4.2.0 \
   --set messaging.kafka.zookeeper.enabled=false
 ```
 
 The chart creates a `kafka` service alias to the Strimzi bootstrap service so
 imported workloads can keep using `kafka:9092`.
+Strimzi operator `1.0.0` supports Kafka `4.2.0` but not `4.3.0`; use the
+direct `apache-4.3-kraft` profile when you need Kafka `4.3.0` before Strimzi
+adds support for it.
 
 ## Production Notes
 
