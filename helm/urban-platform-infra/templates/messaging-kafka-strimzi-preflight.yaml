@@ -1,7 +1,7 @@
 {{- $kafkaProvider := .Values.messaging.kafka.provider | default "confluent" -}}
 {{- if and .Values.messaging.kafka.enabled (eq $kafkaProvider "strimzi") -}}
 {{- $strimzi := .Values.messaging.kafka.strimzi | default dict -}}
-{{- $apiVersion := $strimzi.apiVersion | default "kafka.strimzi.io/v1beta2" -}}
+{{- $apiVersion := $strimzi.apiVersion | default "kafka.strimzi.io/v1" -}}
 {{- $kafkaApi := printf "%s/Kafka" $apiVersion -}}
 {{- $nodePoolApi := printf "%s/KafkaNodePool" $apiVersion -}}
 {{- if not (.Capabilities.APIVersions.Has $kafkaApi) -}}

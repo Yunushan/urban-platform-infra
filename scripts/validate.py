@@ -4273,7 +4273,7 @@ for strimzi_kafka_preflight_token in [
     '.Capabilities.APIVersions.Has',
     'Strimzi Kafka CRD API',
     'Strimzi KafkaNodePool CRD API',
-    'kafka.strimzi.io/v1beta2',
+    'kafka.strimzi.io/v1',
 ]:
     if strimzi_kafka_preflight_token not in strimzi_kafka_preflight_text:
         errors.append(f'Strimzi Kafka preflight template missing token: {strimzi_kafka_preflight_token}')

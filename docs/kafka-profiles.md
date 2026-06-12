@@ -64,7 +64,7 @@ helm upgrade --install urban-platform-infra helm/urban-platform-infra \
   --set messaging.kafka.versionProfile=apache-4.3-strimzi \
   --set messaging.kafka.provider=strimzi \
   --set messaging.kafka.mode=operator \
-  --set messaging.kafka.strimzi.apiVersion=kafka.strimzi.io/v1beta2 \
+  --set messaging.kafka.strimzi.apiVersion=kafka.strimzi.io/v1 \
   --set messaging.kafka.strimzi.kafkaVersion=4.3.0 \
   --set messaging.kafka.zookeeper.enabled=false
 ```

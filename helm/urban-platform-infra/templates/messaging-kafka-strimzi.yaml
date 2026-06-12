@@ -9,7 +9,7 @@
 {{- $strimziPlainListener := $strimziListeners.plain | default dict }}
 {{- $strimziTlsListener := $strimziListeners.tls | default dict }}
 {{- $strimziEntityOperator := $strimzi.entityOperator | default dict }}
-{{- $strimziApiVersion := $strimzi.apiVersion | default "kafka.strimzi.io/v1beta2" }}
+{{- $strimziApiVersion := $strimzi.apiVersion | default "kafka.strimzi.io/v1" }}
 ---
 apiVersion: {{ $strimziApiVersion }}
 kind: KafkaNodePool

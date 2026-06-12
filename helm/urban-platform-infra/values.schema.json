@@ -1021,6 +1021,7 @@
                 "apiVersion": {
                   "type": "string",
                   "enum": [
+                    "kafka.strimzi.io/v1",
                     "kafka.strimzi.io/v1beta2"
                   ]
                 },
