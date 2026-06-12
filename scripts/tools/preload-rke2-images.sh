@@ -19,10 +19,6 @@ required="${RKE2_PRELOAD_REQUIRED:-false}"
 reuse_archives="${RKE2_PRELOAD_REUSE_ARCHIVES:-true}"
 cleanup_archives="${RKE2_PRELOAD_CLEANUP_ARCHIVES:-false}"
 
-shell_quote() {
-  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
-}
-
 ssh_options_for_node() {
   printf '%s\n' "-o"
   printf '%s\n' "BatchMode=yes"
@@ -164,12 +160,11 @@ remote_image_present() {
   local image="$2"
   local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
   local ssh_options=()
-  local image_q
 
   mapfile -t ssh_options < <(ssh_options_for_node)
-  image_q="$(shell_quote "${image}")"
   ssh "${ssh_options[@]}" "${ssh_user}@${node}" \
-    "sudo -n sh -lc 'ctr=/var/lib/rancher/rke2/bin/ctr; socket=/run/k3s/containerd/containerd.sock; [ -S \"\$socket\" ] && [ -x \"\$ctr\" ] && \"\$ctr\" --address \"\$socket\" -n k8s.io images ls -q | grep -Fx -- ${image_q} >/dev/null'"
+    sudo -n sh -c 'image=$1; ctr=/var/lib/rancher/rke2/bin/ctr; socket=/run/k3s/containerd/containerd.sock; [ -S "$socket" ] && [ -x "$ctr" ] && "$ctr" --address "$socket" -n k8s.io images ls -q | grep -Fx -- "$image" >/dev/null' \
+    sh "${image}"
 }
 
 stage_archive_on_node() {
@@ -179,20 +174,18 @@ stage_archive_on_node() {
   local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
   local ssh_options=()
   local remote_archive="${rke2_image_dir}/${archive_name}"
-  local remote_dir_q
-  local remote_archive_q
 
   mapfile -t ssh_options < <(ssh_options_for_node)
-  remote_dir_q="$(shell_quote "${rke2_image_dir}")"
-  remote_archive_q="$(shell_quote "${remote_archive}")"
 
   echo "Streaming ${archive_name} to ${ssh_user}@${node}:${remote_archive}."
   if [ "${ssh_user}" = "root" ]; then
     ssh "${ssh_options[@]}" "${ssh_user}@${node}" \
-      "sh -lc 'mkdir -p ${remote_dir_q}; cat > ${remote_archive_q}; chmod 0644 ${remote_archive_q}; test -s ${remote_archive_q}'" < "${archive}"
+      sh -c 'remote_dir=$1; remote_archive=$2; mkdir -p "$remote_dir"; cat > "$remote_archive"; chmod 0644 "$remote_archive"; test -s "$remote_archive"' \
+      sh "${rke2_image_dir}" "${remote_archive}" < "${archive}"
   else
     ssh "${ssh_options[@]}" "${ssh_user}@${node}" \
-      "sudo -n sh -lc 'mkdir -p ${remote_dir_q}; cat > ${remote_archive_q}; chmod 0644 ${remote_archive_q}; test -s ${remote_archive_q}'" < "${archive}"
+      sudo -n sh -c 'remote_dir=$1; remote_archive=$2; mkdir -p "$remote_dir"; cat > "$remote_archive"; chmod 0644 "$remote_archive"; test -s "$remote_archive"' \
+      sh "${rke2_image_dir}" "${remote_archive}" < "${archive}"
   fi
 }
 
@@ -274,7 +267,7 @@ preload_image() {
 }
 
 recover_migration_context
-mapfile -t images < <(printf '%s\n' "${images_text}" | tr ', ' '\n\n' | awk 'NF && !seen[$0]++')
+mapfile -t images < <(printf '%s\n' "${images_text}" | tr ', ' '\n' | awk 'NF && !seen[$0]++')
 mapfile -t nodes < <(discover_nodes | awk 'NF && !seen[$0]++')
 
 if [ "${#nodes[@]}" -eq 0 ]; then
