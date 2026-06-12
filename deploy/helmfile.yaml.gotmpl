@@ -10,7 +10,6 @@
 {{- $installKeycloak := eq (env "INSTALL_KEYCLOAK" | default "false") "true" -}}
 {{- $installEmqx := eq (env "INSTALL_EMQX" | default "false") "true" -}}
 {{- $installNats := eq (env "INSTALL_NATS" | default "false") "true" -}}
-{{- $installStrimzi := eq (env "INSTALL_STRIMZI" | default "false") "true" -}}
 {{- $installVault := eq (env "INSTALL_VAULT" | default "false") "true" -}}
 {{- $installKyverno := eq (env "INSTALL_KYVERNO" | default "false") "true" -}}
 {{- $installTemporal := eq (env "INSTALL_TEMPORAL" | default "false") "true" -}}
@@ -73,10 +72,6 @@ repositories:
 {{- if $installNats }}
   - name: nats
     url: https://nats-io.github.io/k8s/helm/charts/
-{{- end }}
-{{- if $installStrimzi }}
-  - name: strimzi
-    url: https://strimzi.io/charts/
 {{- end }}
 {{- if $installVault }}
   - name: hashicorp
@@ -186,15 +181,6 @@ releases:
     chart: nats/nats
     installed: {{ env "INSTALL_NATS" | default "false" }}
     createNamespace: true
-
-{{- if $installStrimzi }}
-  - name: strimzi-kafka-operator
-    namespace: strimzi-system
-    chart: strimzi/strimzi-kafka-operator
-    version: 1.0.0
-    installed: true
-    createNamespace: true
-{{- end }}
 
   - name: vault
     namespace: secrets

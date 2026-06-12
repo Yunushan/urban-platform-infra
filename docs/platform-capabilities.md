@@ -90,7 +90,7 @@ make install-operators DEPLOY_ENABLE_LINKERD=true
 make install-operators DEPLOY_ENABLE_ISTIO=true
 ```
 
-Strimzi is available as an opt-in Helmfile operator path for Apache Kafka 4.x
+Strimzi is available as an opt-in operator install path for Apache Kafka 4.x
 KRaft clusters. Kafka Schema Registry, Kafka Connect, Debezium, and Mosquitto
 are modeled in the capability catalog because teams often choose an enterprise
 distribution, operator, managed service, or custom chart for those pieces. Add

@@ -280,6 +280,7 @@ REQUIRED = [
     'scripts/import_project.py',
     'scripts/migrate_project.py',
     'scripts/tools/install-helm.sh', 'scripts/tools/install-helmfile.sh',
+    'scripts/tools/install-strimzi.sh',
     'scripts/tools/helmfile-sync-retry.sh',
     'scripts/tools/install-local-path-storage.sh', 'scripts/tools/recover-helm-release.sh',
     'scripts/tools/ensure-kubeconfig.sh', 'scripts/tools/standalone-docker-config.sh',
@@ -1709,6 +1710,8 @@ for makefile_helm_token in [
     'DEPLOY_ENABLE_EMQX',
     'DEPLOY_ENABLE_NATS',
     'DEPLOY_ENABLE_STRIMZI',
+    'STRIMZI_INSTALL_SCRIPT',
+    'STRIMZI_OPERATOR_CHART_VERSION',
     'DEPLOY_ENABLE_VAULT',
     'DEPLOY_ENABLE_KYVERNO',
     'DEPLOY_ENABLE_TEMPORAL',
@@ -1786,7 +1789,12 @@ for makefile_helm_token in [
     'INSTALL_KEYCLOAK="$(DEPLOY_ENABLE_KEYCLOAK)"',
     'INSTALL_EMQX="$(DEPLOY_ENABLE_EMQX)"',
     'INSTALL_NATS="$(DEPLOY_ENABLE_NATS)"',
-    'INSTALL_STRIMZI="$(DEPLOY_ENABLE_STRIMZI)"',
+    'DEPLOY_ENABLE_STRIMZI="$(DEPLOY_ENABLE_STRIMZI)"',
+    'bash $(STRIMZI_INSTALL_SCRIPT)',
+    'INSTALL_STRIMZI="false"',
+    'DEPLOY_ENABLE_STRIMZI=$(DEPLOY_ENABLE_STRIMZI)',
+    'crd/kafkas.kafka.strimzi.io',
+    'crd/kafkanodepools.kafka.strimzi.io',
     'INSTALL_VAULT="$(DEPLOY_ENABLE_VAULT)"',
     'INSTALL_KYVERNO="$(DEPLOY_ENABLE_KYVERNO)"',
     'INSTALL_TEMPORAL="$(DEPLOY_ENABLE_TEMPORAL)"',
@@ -1837,7 +1845,6 @@ for helmfile_capability_token in [
     '{{- if $installBitnami }}',
     '{{- if $installEmqx }}',
     '{{- if $installNats }}',
-    '{{- if $installStrimzi }}',
     '{{- if $installVault }}',
     '{{- if $installKyverno }}',
     '{{- if $installArgoWorkflows }}',
@@ -1846,7 +1853,6 @@ for helmfile_capability_token in [
     '{{- if $installIstio }}',
     'https://repos.emqx.io/charts',
     'https://nats-io.github.io/k8s/helm/charts/',
-    'https://strimzi.io/charts/',
     'https://helm.releases.hashicorp.com',
     'https://kyverno.github.io/kyverno/',
     'https://argoproj.github.io/argo-helm',
@@ -1868,9 +1874,6 @@ for helmfile_capability_token in [
     'name: nats',
     'chart: nats/nats',
     'INSTALL_NATS',
-    'name: strimzi-kafka-operator',
-    'chart: strimzi/strimzi-kafka-operator',
-    'INSTALL_STRIMZI',
     'name: vault',
     'chart: hashicorp/vault',
     'INSTALL_VAULT',
@@ -3781,6 +3784,20 @@ for helmfile_installer_token in [
 ]:
     if helmfile_installer_token not in helmfile_installer_text:
         errors.append(f'Helmfile installer script missing token: {helmfile_installer_token}')
+
+strimzi_installer_text = (ROOT / 'scripts/tools/install-strimzi.sh').read_text(encoding='utf-8')
+for strimzi_installer_token in [
+    'DEPLOY_ENABLE_STRIMZI',
+    'STRIMZI_OPERATOR_CHART_VERSION',
+    '1.0.0',
+    'https://strimzi.io/charts/',
+    'strimzi/strimzi-kafka-operator',
+    'helm upgrade --install',
+    'rollout status deployment/strimzi-cluster-operator',
+    'STRIMZI_OPERATOR_RETRIES',
+]:
+    if strimzi_installer_token not in strimzi_installer_text:
+        errors.append(f'Strimzi installer script missing token: {strimzi_installer_token}')
 
 helmfile_sync_retry_text = (ROOT / 'scripts/tools/helmfile-sync-retry.sh').read_text(encoding='utf-8')
 for helmfile_sync_retry_token in [
