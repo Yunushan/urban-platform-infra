@@ -19,6 +19,13 @@ required="${RKE2_PRELOAD_REQUIRED:-false}"
 reuse_archives="${RKE2_PRELOAD_REUSE_ARCHIVES:-true}"
 cleanup_archives="${RKE2_PRELOAD_CLEANUP_ARCHIVES:-false}"
 
+remote_command() {
+  local arg
+  for arg in "$@"; do
+    printf '%q ' "${arg}"
+  done
+}
+
 ssh_options_for_node() {
   printf '%s\n' "-o"
   printf '%s\n' "BatchMode=yes"
@@ -160,11 +167,15 @@ remote_image_present() {
   local image="$2"
   local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
   local ssh_options=()
+  local command
 
   mapfile -t ssh_options < <(ssh_options_for_node)
-  ssh "${ssh_options[@]}" "${ssh_user}@${node}" \
+  command="$(
+    remote_command \
     sudo -n sh -c 'image=$1; ctr=/var/lib/rancher/rke2/bin/ctr; socket=/run/k3s/containerd/containerd.sock; [ -S "$socket" ] && [ -x "$ctr" ] && "$ctr" --address "$socket" -n k8s.io images ls -q | grep -Fx -- "$image" >/dev/null' \
     sh "${image}"
+  )"
+  ssh "${ssh_options[@]}" "${ssh_user}@${node}" "${command}"
 }
 
 stage_archive_on_node() {
@@ -174,19 +185,25 @@ stage_archive_on_node() {
   local ssh_user="${MIGRATION_SSH_USER:-${ANSIBLE_USER:-root}}"
   local ssh_options=()
   local remote_archive="${rke2_image_dir}/${archive_name}"
+  local command
 
   mapfile -t ssh_options < <(ssh_options_for_node)
 
   echo "Streaming ${archive_name} to ${ssh_user}@${node}:${remote_archive}."
   if [ "${ssh_user}" = "root" ]; then
-    ssh "${ssh_options[@]}" "${ssh_user}@${node}" \
+    command="$(
+      remote_command \
       sh -c 'remote_dir=$1; remote_archive=$2; mkdir -p "$remote_dir"; cat > "$remote_archive"; chmod 0644 "$remote_archive"; test -s "$remote_archive"' \
-      sh "${rke2_image_dir}" "${remote_archive}" < "${archive}"
+      sh "${rke2_image_dir}" "${remote_archive}"
+    )"
   else
-    ssh "${ssh_options[@]}" "${ssh_user}@${node}" \
+    command="$(
+      remote_command \
       sudo -n sh -c 'remote_dir=$1; remote_archive=$2; mkdir -p "$remote_dir"; cat > "$remote_archive"; chmod 0644 "$remote_archive"; test -s "$remote_archive"' \
-      sh "${rke2_image_dir}" "${remote_archive}" < "${archive}"
+      sh "${rke2_image_dir}" "${remote_archive}"
+    )"
   fi
+  ssh "${ssh_options[@]}" "${ssh_user}@${node}" "${command}" < "${archive}"
 }
 
 import_archive_on_node() {
