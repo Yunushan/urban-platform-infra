@@ -4265,6 +4265,7 @@ for strimzi_kafka_template_token in [
     'strimzi.io/node-pools: enabled',
     'strimzi.io/kraft: enabled',
     '$strimziApiVersion',
+    '$strimziResources',
     '$strimzi.kafkaVersion',
     'kafka-kafka-bootstrap',
     'ExternalName',

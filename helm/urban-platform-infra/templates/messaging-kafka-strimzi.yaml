@@ -10,6 +10,7 @@
 {{- $strimziTlsListener := $strimziListeners.tls | default dict }}
 {{- $strimziEntityOperator := $strimzi.entityOperator | default dict }}
 {{- $strimziApiVersion := $strimzi.apiVersion | default "kafka.strimzi.io/v1" }}
+{{- $strimziResources := $strimzi.resources | default .Values.messaging.kafka.resources }}
 ---
 apiVersion: {{ $strimziApiVersion }}
 kind: KafkaNodePool
@@ -34,7 +35,7 @@ spec:
         class: {{ $kafkaStorageClass | quote }}
 {{- end }}
         deleteClaim: {{ $strimzi.deleteClaim | default false }}
-  {{- with .Values.messaging.kafka.resources }}
+  {{- with $strimziResources }}
   resources:
     {{- toYaml . | nindent 4 }}
   {{- end }}

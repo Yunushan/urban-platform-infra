@@ -64,8 +64,11 @@ one operator to reconcile Kafka clusters across all namespaces.
 Then deploy Kafka as Strimzi-managed custom resources:
 
 ```bash
+kubectl -n urban-platform delete resourcequota urban-platform-infra-quota --ignore-not-found
+
 helm upgrade --install urban-platform-infra helm/urban-platform-infra \
   --namespace urban-platform \
+  --set namespace.resourceQuota.enabled=false \
   --set messaging.kafka.versionProfile=apache-4.2-strimzi \
   --set messaging.kafka.provider=strimzi \
   --set messaging.kafka.mode=operator \
@@ -79,6 +82,9 @@ imported workloads can keep using `kafka:9092`.
 Strimzi operator `1.0.0` supports Kafka `4.2.0` but not `4.3.0`; use the
 direct `apache-4.3-kraft` profile when you need Kafka `4.3.0` before Strimzi
 adds support for it.
+For imported lab clusters, keep the namespace ResourceQuota disabled or raised
+before enabling Strimzi; otherwise the operator cannot create the broker pod
+when existing imported workloads already exceed the quota.
 
 ## Production Notes
 

@@ -864,6 +864,13 @@ messaging:
       nodePoolName: dual-role
       bootstrapService: kafka-kafka-bootstrap
       deleteClaim: false
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 768Mi
       listeners:
         plain:
           enabled: true
