@@ -303,13 +303,15 @@ spec:
       {{- with .Values.messaging.kafka.ui.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
-      {{- else if .Values.global.podSecurityContext.enabled }}
+      {{- else }}
+      {{- if .Values.global.podSecurityContext.enabled }}
       securityContext:
         {{- if $kafkaCompatSecurity }}
         {{- include "cip.compatPodSecurityContext" . | nindent 8 }}
         {{- else }}
         {{- include "cip.podSecurityContext" . | nindent 8 }}
         {{- end }}
+      {{- end }}
       {{- end }}
       containers:
         - name: kafka-ui
@@ -318,10 +320,12 @@ spec:
           securityContext:
             {{- with .Values.messaging.kafka.ui.securityContext }}
             {{- toYaml . | nindent 12 }}
-            {{- else if $kafkaCompatSecurity }}
+            {{- else }}
+            {{- if $kafkaCompatSecurity }}
             {{- include "cip.compatSecurityContext" . | nindent 12 }}
             {{- else }}
             {{- include "cip.securityContext" . | nindent 12 }}
+            {{- end }}
             {{- end }}
           env:
             - name: KAFKA_CLUSTERS_0_NAME
