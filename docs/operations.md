@@ -234,6 +234,11 @@ while the API server is still brownout-prone.
 If a previous Helm attempt leaves an operator release in a `pending-*` state, the
 wrapper waits for it to finish, rolls it back to the last deployed revision when
 needed, and removes a stale pending Helm secret only as a final recovery step.
+With `SKIP_HELMFILE_SYNC=auto` (the default), the wrapper skips Helmfile when
+the default operator CRDs are already established and no Helmfile-only optional
+stack is enabled. This keeps Strimzi-only reruns fast and avoids unrelated
+optional repository parsing/network failures. Set `SKIP_HELMFILE_SYNC=false`
+when you intentionally want to force a full Helmfile reconciliation.
 
 The operator step uses `helmfile sync`, so the Helm diff plugin is not required
 on the operator machine.

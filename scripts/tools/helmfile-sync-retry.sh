@@ -10,6 +10,7 @@ kubectl_bin="${KUBECTL:-kubectl}"
 retries="${HELMFILE_SYNC_RETRIES:-4}"
 retry_delay="${HELMFILE_SYNC_RETRY_DELAY:-20}"
 sync_attempt_timeout="${HELMFILE_SYNC_ATTEMPT_TIMEOUT:-240}"
+skip_helmfile_sync="${SKIP_HELMFILE_SYNC:-auto}"
 pending_wait_timeout="${HELMFILE_PENDING_WAIT_TIMEOUT:-180}"
 pending_wait_delay="${HELMFILE_PENDING_WAIT_DELAY:-10}"
 pending_rollback_timeout="${HELMFILE_PENDING_ROLLBACK_TIMEOUT:-10m}"
@@ -31,6 +32,107 @@ if ! command -v "${helm_bin}" >/dev/null 2>&1; then
   echo "helm is required to recover operator release locks." >&2
   exit 1
 fi
+
+env_flag_enabled() {
+  local variable_name="$1"
+  local value
+
+  value="${!variable_name:-false}"
+  [ "${value}" = "true" ]
+}
+
+helmfile_optional_stack_enabled() {
+  local variable_name
+
+  for variable_name in \
+    INSTALL_EXTERNAL_SECRETS \
+    INSTALL_PROMETHEUS \
+    INSTALL_OPENTELEMETRY \
+    INSTALL_LOKI \
+    INSTALL_OPENSEARCH \
+    INSTALL_CLICKHOUSE \
+    INSTALL_VELERO \
+    INSTALL_MINIO \
+    INSTALL_RABBITMQ \
+    INSTALL_KEYCLOAK \
+    INSTALL_EMQX \
+    INSTALL_NATS \
+    INSTALL_VAULT \
+    INSTALL_KYVERNO \
+    INSTALL_TEMPORAL \
+    INSTALL_ARGO_WORKFLOWS \
+    INSTALL_LINKERD \
+    INSTALL_ISTIO; do
+    if env_flag_enabled "${variable_name}"; then
+      echo "Helmfile is required because ${variable_name}=true."
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+crd_exists() {
+  local crd_name="$1"
+
+  KUBECONFIG="${kubeconfig_path}" "${kubectl_bin}" get "crd/${crd_name}" >/dev/null 2>&1
+}
+
+default_operator_crds_ready() {
+  if [ "${INSTALL_CERT_MANAGER:-true}" = "true" ]; then
+    crd_exists "certificates.cert-manager.io" || return 1
+    crd_exists "issuers.cert-manager.io" || return 1
+    crd_exists "clusterissuers.cert-manager.io" || return 1
+  fi
+
+  if [ "${INSTALL_CNPG:-true}" = "true" ]; then
+    crd_exists "clusters.postgresql.cnpg.io" || return 1
+    crd_exists "imagecatalogs.postgresql.cnpg.io" || return 1
+  fi
+
+  if [ "${INSTALL_ECK:-true}" = "true" ]; then
+    crd_exists "elasticsearches.elasticsearch.k8s.elastic.co" || return 1
+    crd_exists "kibanas.kibana.k8s.elastic.co" || return 1
+  fi
+
+  return 0
+}
+
+maybe_skip_helmfile_sync() {
+  case "${skip_helmfile_sync}" in
+    true)
+      echo "Skipping Helmfile sync because SKIP_HELMFILE_SYNC=true."
+      exit 0
+      ;;
+    false)
+      return 0
+      ;;
+    auto)
+      ;;
+    *)
+      echo "SKIP_HELMFILE_SYNC must be one of: auto, true, false." >&2
+      exit 2
+      ;;
+  esac
+
+  if ! command -v "${kubectl_bin}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if helmfile_optional_stack_enabled; then
+    return 0
+  fi
+
+  if default_operator_crds_ready; then
+    echo "Default operator CRDs already exist and no Helmfile-only optional stacks are enabled; skipping Helmfile sync."
+    echo "Set SKIP_HELMFILE_SYNC=false to force Helmfile reconciliation."
+    exit 0
+  fi
+
+  return 0
+}
+
+maybe_skip_helmfile_sync
 
 diagnose_helmfile_output() {
   local output_file="$1"
@@ -249,8 +351,9 @@ while true; do
   if wait_for_stable_api && recover_pending_releases; then
     if run_helmfile_sync; then
       exit 0
+    else
+      status=$?
     fi
-    status=$?
   else
     status=$?
   fi
