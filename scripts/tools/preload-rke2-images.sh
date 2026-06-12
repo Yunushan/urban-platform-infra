@@ -170,11 +170,15 @@ remote_image_present() {
   local command
 
   mapfile -t ssh_options < <(ssh_options_for_node)
+  # Remote shell expands these variables on the RKE2 node.
+  # shellcheck disable=SC2016
   command="$(
     remote_command \
     sudo -n sh -c 'image=$1; ctr=/var/lib/rancher/rke2/bin/ctr; socket=/run/k3s/containerd/containerd.sock; [ -S "$socket" ] && [ -x "$ctr" ] && "$ctr" --address "$socket" -n k8s.io images ls -q | grep -Fx -- "$image" >/dev/null' \
     sh "${image}"
   )"
+  # Command is intentionally assembled for execution on the RKE2 node.
+  # shellcheck disable=SC2029
   ssh "${ssh_options[@]}" "${ssh_user}@${node}" "${command}"
 }
 
@@ -191,18 +195,24 @@ stage_archive_on_node() {
 
   echo "Streaming ${archive_name} to ${ssh_user}@${node}:${remote_archive}."
   if [ "${ssh_user}" = "root" ]; then
+    # Remote shell expands these variables on the RKE2 node.
+    # shellcheck disable=SC2016
     command="$(
       remote_command \
       sh -c 'remote_dir=$1; remote_archive=$2; mkdir -p "$remote_dir"; cat > "$remote_archive"; chmod 0644 "$remote_archive"; test -s "$remote_archive"' \
       sh "${rke2_image_dir}" "${remote_archive}"
     )"
   else
+    # Remote shell expands these variables on the RKE2 node.
+    # shellcheck disable=SC2016
     command="$(
       remote_command \
       sudo -n sh -c 'remote_dir=$1; remote_archive=$2; mkdir -p "$remote_dir"; cat > "$remote_archive"; chmod 0644 "$remote_archive"; test -s "$remote_archive"' \
       sh "${rke2_image_dir}" "${remote_archive}"
     )"
   fi
+  # Command is intentionally assembled for execution on the RKE2 node.
+  # shellcheck disable=SC2029
   ssh "${ssh_options[@]}" "${ssh_user}@${node}" "${command}" < "${archive}"
 }
 
