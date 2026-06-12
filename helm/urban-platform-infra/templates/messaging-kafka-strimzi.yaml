@@ -9,8 +9,9 @@
 {{- $strimziPlainListener := $strimziListeners.plain | default dict }}
 {{- $strimziTlsListener := $strimziListeners.tls | default dict }}
 {{- $strimziEntityOperator := $strimzi.entityOperator | default dict }}
+{{- $strimziApiVersion := $strimzi.apiVersion | default "kafka.strimzi.io/v1beta2" }}
 ---
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: {{ $strimziApiVersion }}
 kind: KafkaNodePool
 metadata:
   name: {{ $strimzi.nodePoolName | default "dual-role" | quote }}
@@ -38,7 +39,7 @@ spec:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 ---
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: {{ $strimziApiVersion }}
 kind: Kafka
 metadata:
   name: kafka

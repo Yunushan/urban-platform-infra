@@ -1018,6 +1018,12 @@
                 "installOperator": {
                   "type": "boolean"
                 },
+                "apiVersion": {
+                  "type": "string",
+                  "enum": [
+                    "kafka.strimzi.io/v1beta2"
+                  ]
+                },
                 "kafkaVersion": {
                   "type": "string",
                   "enum": [

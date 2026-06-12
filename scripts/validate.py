@@ -221,6 +221,7 @@ REQUIRED = [
     'ansible/roles/rke2/templates/traefik-helmchart.yaml.j2',
     'helm/urban-platform-infra/Chart.yaml', 'helm/urban-platform-infra/values.yaml',
     'helm/urban-platform-infra/templates/databases-cnpg-imagecatalogs.yaml',
+    'helm/urban-platform-infra/templates/messaging-kafka-strimzi-preflight.yaml',
     'config/services.catalog.yaml', 'config/cluster-profiles.yaml',
     'config/deployment-topologies.yaml', 'config/secrets.contract.yaml',
     'config/secret-provider-adapters.yaml',
@@ -1831,7 +1832,7 @@ for makefile_helm_token in [
 helmfile_text = (ROOT / 'deploy/helmfile.yaml.gotmpl').read_text(encoding='utf-8')
 for helmfile_backup_token in [
     '$installVelero',
-    '{{- if $installVelero }}',
+    '{{ if $installVelero }}',
     'https://vmware-tanzu.github.io/helm-charts',
     'name: velero',
     'chart: vmware-tanzu/velero',
@@ -1844,15 +1845,15 @@ for helmfile_backup_token in [
 
 for helmfile_capability_token in [
     '$installBitnami := or $installMinio $installRabbitmq $installKeycloak $installClickhouse',
-    '{{- if $installBitnami }}',
-    '{{- if $installEmqx }}',
-    '{{- if $installNats }}',
-    '{{- if $installVault }}',
-    '{{- if $installKyverno }}',
-    '{{- if $installArgoWorkflows }}',
-    '{{- if $installTemporal }}',
-    '{{- if $installLinkerd }}',
-    '{{- if $installIstio }}',
+    '{{ if $installBitnami }}',
+    '{{ if $installEmqx }}',
+    '{{ if $installNats }}',
+    '{{ if $installVault }}',
+    '{{ if $installKyverno }}',
+    '{{ if $installArgoWorkflows }}',
+    '{{ if $installTemporal }}',
+    '{{ if $installLinkerd }}',
+    '{{ if $installIstio }}',
     'https://repos.emqx.io/charts',
     'https://nats-io.github.io/k8s/helm/charts/',
     'https://helm.releases.hashicorp.com',
@@ -1903,13 +1904,13 @@ for helmfile_capability_token in [
         errors.append(f'Helmfile missing optional platform capability token: {helmfile_capability_token}')
 
 for helmfile_observability_repo_token in [
-    '{{- if $installCertManager }}',
-    '{{- if $installCnpg }}',
-    '{{- if $installEck }}',
-    '{{- if $installPrometheus }}',
-    '{{- if $installOpentelemetry }}',
-    '{{- if $installLoki }}',
-    '{{- if $installOpensearch }}',
+    '{{ if $installCertManager }}',
+    '{{ if $installCnpg }}',
+    '{{ if $installEck }}',
+    '{{ if $installPrometheus }}',
+    '{{ if $installOpentelemetry }}',
+    '{{ if $installLoki }}',
+    '{{ if $installOpensearch }}',
     'https://grafana.github.io/helm-charts',
 ]:
     if helmfile_observability_repo_token not in helmfile_text:
@@ -4256,6 +4257,7 @@ for strimzi_kafka_template_token in [
     'KafkaNodePool',
     'strimzi.io/node-pools: enabled',
     'strimzi.io/kraft: enabled',
+    '$strimziApiVersion',
     '$strimzi.kafkaVersion',
     'kafka-kafka-bootstrap',
     'ExternalName',
@@ -4264,6 +4266,17 @@ for strimzi_kafka_template_token in [
 ]:
     if strimzi_kafka_template_token not in strimzi_kafka_template_text:
         errors.append(f'Strimzi Kafka template missing operator token: {strimzi_kafka_template_token}')
+strimzi_kafka_preflight_text = (
+    ROOT / 'helm/urban-platform-infra/templates/messaging-kafka-strimzi-preflight.yaml'
+).read_text(encoding='utf-8')
+for strimzi_kafka_preflight_token in [
+    '.Capabilities.APIVersions.Has',
+    'Strimzi Kafka CRD API',
+    'Strimzi KafkaNodePool CRD API',
+    'kafka.strimzi.io/v1beta2',
+]:
+    if strimzi_kafka_preflight_token not in strimzi_kafka_preflight_text:
+        errors.append(f'Strimzi Kafka preflight template missing token: {strimzi_kafka_preflight_token}')
 redis_template_text = (ROOT / 'helm/urban-platform-infra/templates/redis.yaml').read_text(encoding='utf-8')
 for redis_template_token in [
     '$redisReplicas',

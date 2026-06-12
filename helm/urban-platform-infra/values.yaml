@@ -858,6 +858,7 @@ messaging:
         className: ''
     strimzi:
       installOperator: false
+      apiVersion: kafka.strimzi.io/v1beta2
       kafkaVersion: 4.3.0
       metadataVersion: ''
       nodePoolName: dual-role

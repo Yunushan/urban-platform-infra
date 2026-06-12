@@ -1,0 +1,13 @@
+{{- $kafkaProvider := .Values.messaging.kafka.provider | default "confluent" -}}
+{{- if and .Values.messaging.kafka.enabled (eq $kafkaProvider "strimzi") -}}
+{{- $strimzi := .Values.messaging.kafka.strimzi | default dict -}}
+{{- $apiVersion := $strimzi.apiVersion | default "kafka.strimzi.io/v1beta2" -}}
+{{- $kafkaApi := printf "%s/Kafka" $apiVersion -}}
+{{- $nodePoolApi := printf "%s/KafkaNodePool" $apiVersion -}}
+{{- if not (.Capabilities.APIVersions.Has $kafkaApi) -}}
+{{- fail (printf "Strimzi Kafka CRD API %s is not available to Helm. Install/wait for Strimzi first, then refresh Kubernetes discovery cache and rerun the chart upgrade." $kafkaApi) -}}
+{{- end -}}
+{{- if not (.Capabilities.APIVersions.Has $nodePoolApi) -}}
+{{- fail (printf "Strimzi KafkaNodePool CRD API %s is not available to Helm. Install/wait for Strimzi first, then refresh Kubernetes discovery cache and rerun the chart upgrade." $nodePoolApi) -}}
+{{- end -}}
+{{- end -}}
