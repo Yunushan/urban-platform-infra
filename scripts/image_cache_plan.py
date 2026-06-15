@@ -156,6 +156,8 @@ def report_findings(
     cleanup_operator_images: bool,
     prune_operator_cache: bool,
     rke2_import_images: bool,
+    cleanup_node_import_images: bool,
+    cleanup_node_content_prune: bool,
     max_operator_archive_gi: Any,
 ) -> list[str]:
     findings: list[str] = []
@@ -167,6 +169,10 @@ def report_findings(
         findings.append("WARN: RKE2 containerd import is disabled; pods may need an RKE2 restart or manual import before using preloaded images.")
     if image_mode == "preload" and not cleanup_operator_images:
         findings.append("WARN: Operator image/archive cleanup is disabled; monitor operator disk usage.")
+    if image_mode == "preload" and node_count > 0 and not cleanup_node_import_images:
+        findings.append("WARN: Node imported-image cleanup is disabled; repeated preload reruns can fill RKE2 node disks.")
+    if image_mode == "preload" and node_count > 0 and not cleanup_node_content_prune:
+        findings.append("WARN: Node containerd content pruning is disabled; unreferenced image content may remain after stale refs are removed.")
     if not prune_operator_cache:
         findings.append("WARN: Operator build cache pruning is disabled; this can fill small lab disks quickly.")
     if image_mode == "skip":
@@ -187,6 +193,8 @@ def generate_report(args: argparse.Namespace, config: dict[str, Any]) -> str:
     cleanup_operator_images = bool_from_text(args.cleanup_operator_images, bool(profile.get("cleanupOperatorImages", True)))
     prune_operator_cache = bool_from_text(args.prune_operator_cache, bool(profile.get("pruneOperatorCache", True)))
     rke2_import_images = bool_from_text(args.rke2_import_images, bool(profile.get("rke2ImportImages", True)))
+    cleanup_node_import_images = bool_from_text(args.cleanup_node_import_images, bool(profile.get("cleanupNodeImportImages", True)))
+    cleanup_node_content_prune = bool_from_text(args.cleanup_node_content_prune, bool(profile.get("cleanupNodeContentPrune", True)))
     node_count = count_nodes(args.rke2_nodes)
     registry = public_registry(args.registry, args.redact_sensitive)
     image_output_dir = public_path(args.image_output_dir, args.redact_sensitive)
@@ -200,6 +208,8 @@ def generate_report(args: argparse.Namespace, config: dict[str, Any]) -> str:
         cleanup_operator_images=cleanup_operator_images,
         prune_operator_cache=prune_operator_cache,
         rke2_import_images=rke2_import_images,
+        cleanup_node_import_images=cleanup_node_import_images,
+        cleanup_node_content_prune=cleanup_node_content_prune,
         max_operator_archive_gi=max_operator_archive_gi,
     )
     result = "FAIL" if any(item.startswith("ERROR:") for item in findings) else ("WARN" if any(item.startswith("WARN:") for item in findings) else "PASS")
@@ -227,6 +237,9 @@ def generate_report(args: argparse.Namespace, config: dict[str, Any]) -> str:
         f"- RKE2 containerd import: `{str(rke2_import_images).lower()}`",
         f"- Cleanup operator images: `{str(cleanup_operator_images).lower()}`",
         f"- Prune operator cache: `{str(prune_operator_cache).lower()}`",
+        f"- Cleanup node import images: `{str(cleanup_node_import_images).lower()}`",
+        f"- Cleanup node containerd content: `{str(cleanup_node_content_prune).lower()}`",
+        f"- Node archive retention: `{args.node_archive_retention_hours}h`",
         f"- Operator archive budget: `{max_operator_archive_gi}Gi`",
         f"- Operator cache budget: `{max_operator_cache_gi}Gi`",
         f"- Result: `{result}`",
@@ -271,6 +284,9 @@ def generate_report(args: argparse.Namespace, config: dict[str, Any]) -> str:
             f"- `MIGRATION_CLEANUP_OPERATOR_IMAGES={str(cleanup_operator_images).lower()}` controls generated import tags and local preload archive cleanup.",
             f"- `MIGRATION_PRUNE_OPERATOR_CACHE={str(prune_operator_cache).lower()}` controls dangling Docker/Podman image and builder cache pruning.",
             f"- `MIGRATION_RKE2_IMPORT_IMAGES={str(rke2_import_images).lower()}` controls running RKE2 containerd import for preload archives.",
+            f"- `MIGRATION_CLEANUP_NODE_IMPORT_IMAGES={str(cleanup_node_import_images).lower()}` controls stale `urban-platform-import/...` ref cleanup on RKE2 nodes.",
+            f"- `MIGRATION_CLEANUP_NODE_CONTENT_PRUNE={str(cleanup_node_content_prune).lower()}` controls node-side containerd content pruning after stale refs are removed.",
+            f"- `MIGRATION_NODE_ARCHIVE_RETENTION_HOURS={args.node_archive_retention_hours}` controls how long staged node tar archives are retained before cleanup.",
             "- Keep cleanup enabled for constrained labs. Disable it only when you are debugging image builds or preserving offline evidence.",
             "",
             "## RKE2 Preload Contract",
@@ -326,6 +342,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cleanup-operator-images", default="")
     parser.add_argument("--prune-operator-cache", default="")
     parser.add_argument("--rke2-import-images", default="")
+    parser.add_argument("--cleanup-node-import-images", default="")
+    parser.add_argument("--cleanup-node-content-prune", default="")
+    parser.add_argument("--node-archive-retention-hours", default="1")
     parser.add_argument("--redact-sensitive", action="store_true")
     args = parser.parse_args(argv)
 

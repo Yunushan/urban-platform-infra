@@ -42,6 +42,7 @@ KUBERNETES_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 CONFIGMAP_FILE_MAX_BYTES = 900 * 1024
 CONFIGMAP_TOTAL_MAX_BYTES = 950 * 1024
 OFFICIAL_LIBRARY_PULL_IMAGES = {"nginx"}
+PRELOAD_IMPORT_IMAGE_PREFIX = "urban-platform-import/"
 MEMORY_QUANTITY_RE = re.compile(r"^([0-9]+)(Ki|Mi|Gi|Ti)?$")
 CPU_QUANTITY_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(m)?$")
 PRIVATE_OR_LOCAL_HOST_RE = (
@@ -1834,6 +1835,7 @@ def kubernetes_workload_manifests(
             },
             "spec": {
                 "replicas": 1,
+                "revisionHistoryLimit": 1,
                 "selector": {"matchLabels": labels},
                 "template": {
                     "metadata": {"labels": labels, "annotations": pod_template_annotations},
@@ -2413,6 +2415,117 @@ def import_preloaded_archives_to_containerd(
         "fi"
     )
     run_remote_sudo_shell(args, ssh_options, target, script)
+
+
+def is_preload_import_image(image: str) -> bool:
+    return (
+        image.startswith(PRELOAD_IMPORT_IMAGE_PREFIX)
+        or image.startswith(f"docker.io/{PRELOAD_IMPORT_IMAGE_PREFIX}")
+        or image.startswith(f"localhost/{PRELOAD_IMPORT_IMAGE_PREFIX}")
+    )
+
+
+def desired_preload_import_image_refs(
+    args: argparse.Namespace,
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+) -> set[str]:
+    refs: set[str] = set()
+    for record, service in stage_scope_pairs(args, "manifests", service_pairs):
+        image = image_for_kubernetes_manifest(args, record, service)
+        if image and is_preload_import_image(image):
+            refs.update(containerd_import_image_refs(image))
+    return refs
+
+
+def node_import_cleanup_is_safe(
+    args: argparse.Namespace,
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+) -> bool:
+    if service_filter_terms(args):
+        print("Skipping node import image cleanup because MIGRATION_SERVICE_FILTER limits the selected services.")
+        return False
+    plan = import_batch_plan(args, service_pairs)
+    if plan["selectedBatch"] is not None:
+        print("Skipping node import image cleanup because MIGRATION_IMPORT_BATCH does not select the full import set.")
+        return False
+    return True
+
+
+def cleanup_stale_node_import_images(
+    args: argparse.Namespace,
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+) -> None:
+    if not args.execute or args.image_mode != "preload" or not args.rke2_nodes:
+        return
+    if not args.cleanup_node_import_images:
+        return
+    if not args.rke2_import_images:
+        print("Skipping node import image cleanup because RKE2 containerd import is disabled.")
+        return
+    if args.registry:
+        print("Skipping node import image cleanup because registry mode references are in use.")
+        return
+    if not node_import_cleanup_is_safe(args, service_pairs):
+        return
+
+    keep_refs = desired_preload_import_image_refs(args, service_pairs)
+    if not keep_refs:
+        print("No desired preload import image refs were found; skipping node import image cleanup.")
+        return
+
+    targets, ssh_options = preload_node_targets(args)
+    if not targets:
+        return
+
+    keep_ref_args = " ".join(shlex.quote(ref) for ref in sorted(keep_refs))
+    remote_image_dir = shlex.quote(args.rke2_image_dir.rstrip("/"))
+    retention_minutes = max(int(args.node_archive_retention_hours or 0) * 60, 0)
+    content_prune = "true" if args.cleanup_node_content_prune else "false"
+    print(
+        "Cleaning stale RKE2 preload refs on nodes "
+        f"(preserving {len(keep_refs)} current import ref aliases; archive retention {retention_minutes}m)."
+    )
+    script = (
+        "set -e; "
+        "ctr=/var/lib/rancher/rke2/bin/ctr; "
+        "socket=/run/k3s/containerd/containerd.sock; "
+        f"image_dir={remote_image_dir}; "
+        f"retention_minutes={retention_minutes}; "
+        f"content_prune={content_prune}; "
+        "if [ ! -S \"$socket\" ] || [ ! -x \"$ctr\" ]; then "
+        "echo \"RKE2 containerd is not running; skipped stale import image cleanup.\"; exit 0; "
+        "fi; "
+        "before=\"$(df -hP / | awk 'NR==2 {print $5 \" used, \" $4 \" free\"}')\"; "
+        "keep_file=\"$(mktemp)\"; stale_file=\"$(mktemp)\"; removed_file=\"$(mktemp)\"; preserved_file=\"$(mktemp)\"; "
+        "archive_file=\"$(mktemp)\"; "
+        "trap 'rm -f \"$keep_file\" \"$stale_file\" \"$removed_file\" \"$preserved_file\" \"$archive_file\"' EXIT; "
+        f"for ref in {keep_ref_args}; do printf '%s\\n' \"$ref\" >> \"$keep_file\"; done; "
+        "\"$ctr\" --address \"$socket\" -n k8s.io images ls -q "
+        "| awk '/(^|\\/|localhost\\/)urban-platform-import\\// {print}' | sort -u > \"$stale_file\" || true; "
+        "while IFS= read -r ref; do "
+        "[ -n \"$ref\" ] || continue; "
+        "if grep -Fx -- \"$ref\" \"$keep_file\" >/dev/null; then "
+        "printf '%s\\n' \"$ref\" >> \"$preserved_file\"; "
+        "elif \"$ctr\" --address \"$socket\" -n k8s.io images rm \"$ref\" >/dev/null 2>&1; then "
+        "printf '%s\\n' \"$ref\" >> \"$removed_file\"; "
+        "fi; "
+        "done < \"$stale_file\"; "
+        "if [ -d \"$image_dir\" ]; then "
+        "find \"$image_dir\" -maxdepth 1 -type f -name '*.tar' -mmin +\"$retention_minutes\" -print > \"$archive_file\" || true; "
+        "while IFS= read -r archive; do [ -n \"$archive\" ] && rm -f \"$archive\"; done < \"$archive_file\"; "
+        "fi; "
+        "if [ \"$content_prune\" = \"true\" ]; then "
+        "\"$ctr\" --address \"$socket\" -n k8s.io content prune >/dev/null 2>&1 || true; "
+        "fi; "
+        "removed=\"$(wc -l < \"$removed_file\" | tr -d ' ')\"; "
+        "preserved=\"$(wc -l < \"$preserved_file\" | tr -d ' ')\"; "
+        "archives=\"$(wc -l < \"$archive_file\" | tr -d ' ')\"; "
+        "after=\"$(df -hP / | awk 'NR==2 {print $5 \" used, \" $4 \" free\"}')\"; "
+        "echo \"Node import cleanup on $(hostname): removed ${removed} stale imported image ref(s), "
+        "preserved ${preserved}, deleted ${archives} staged tar archive(s); / before: ${before}; after: ${after}.\""
+    )
+    for target in targets:
+        run_remote_sudo_shell(args, ssh_options, target, script)
 
 
 def database_instances(values: dict[str, Any], namespace: str) -> list[dict[str, Any]]:
@@ -3981,6 +4094,9 @@ def generate_bundle(
         f'MIGRATION_RKE2_IMPORT_IMAGES="${{MIGRATION_RKE2_IMPORT_IMAGES:-{str(args.rke2_import_images).lower()}}}"\n'
         f'MIGRATION_CLEANUP_OPERATOR_IMAGES="${{MIGRATION_CLEANUP_OPERATOR_IMAGES:-{str(args.cleanup_operator_images).lower()}}}"\n'
         f'MIGRATION_PRUNE_OPERATOR_CACHE="${{MIGRATION_PRUNE_OPERATOR_CACHE:-{str(args.prune_operator_cache).lower()}}}"\n'
+        f'MIGRATION_CLEANUP_NODE_IMPORT_IMAGES="${{MIGRATION_CLEANUP_NODE_IMPORT_IMAGES:-{str(args.cleanup_node_import_images).lower()}}}"\n'
+        f'MIGRATION_CLEANUP_NODE_CONTENT_PRUNE="${{MIGRATION_CLEANUP_NODE_CONTENT_PRUNE:-{str(args.cleanup_node_content_prune).lower()}}}"\n'
+        f'MIGRATION_NODE_ARCHIVE_RETENTION_HOURS="${{MIGRATION_NODE_ARCHIVE_RETENTION_HOURS:-{args.node_archive_retention_hours}}}"\n'
         f'MIGRATION_SKIP_DOCKER_SOCKET_SERVICES="${{MIGRATION_SKIP_DOCKER_SOCKET_SERVICES:-{str(args.skip_docker_socket_services).lower()}}}"\n'
         f'MIGRATION_SKIP_UNAVAILABLE_DATABASES="${{MIGRATION_SKIP_UNAVAILABLE_DATABASES:-{str(args.skip_unavailable_databases).lower()}}}"\n'
         f'MIGRATION_REGISTRY="${{MIGRATION_REGISTRY:-{args.registry}}}"\n'
@@ -4002,6 +4118,10 @@ def generate_bundle(
         'if [ "$MIGRATION_CLEANUP_OPERATOR_IMAGES" = "false" ]; then CLEANUP_OPERATOR_IMAGES_FLAG="--no-cleanup-operator-images"; fi\n'
         'PRUNE_OPERATOR_CACHE_FLAG="--prune-operator-cache"\n'
         'if [ "$MIGRATION_PRUNE_OPERATOR_CACHE" = "false" ]; then PRUNE_OPERATOR_CACHE_FLAG="--no-prune-operator-cache"; fi\n'
+        'CLEANUP_NODE_IMPORT_IMAGES_FLAG="--cleanup-node-import-images"\n'
+        'if [ "$MIGRATION_CLEANUP_NODE_IMPORT_IMAGES" = "false" ]; then CLEANUP_NODE_IMPORT_IMAGES_FLAG="--no-cleanup-node-import-images"; fi\n'
+        'CLEANUP_NODE_CONTENT_PRUNE_FLAG="--cleanup-node-content-prune"\n'
+        'if [ "$MIGRATION_CLEANUP_NODE_CONTENT_PRUNE" = "false" ]; then CLEANUP_NODE_CONTENT_PRUNE_FLAG="--no-cleanup-node-content-prune"; fi\n'
         'DOCKER_SOCKET_FLAG="--skip-docker-socket-services"\n'
         'if [ "$MIGRATION_SKIP_DOCKER_SOCKET_SERVICES" = "false" ]; then DOCKER_SOCKET_FLAG="--include-docker-socket-services"; fi\n'
         'DATABASE_FAILURE_FLAG="--skip-unavailable-databases"\n'
@@ -4047,7 +4167,9 @@ def generate_bundle(
         '--become-password-file "$MIGRATION_BECOME_PASSWORD_FILE" '
         '--container-tool "$MIGRATION_CONTAINER_TOOL" '
         '--postgres-client-image "$MIGRATION_POSTGRES_CLIENT_IMAGE" '
-        '$RKE2_IMPORT_FLAG $CLEANUP_OPERATOR_IMAGES_FLAG $PRUNE_OPERATOR_CACHE_FLAG $DOCKER_SOCKET_FLAG $DATABASE_FAILURE_FLAG '
+        '$RKE2_IMPORT_FLAG $CLEANUP_OPERATOR_IMAGES_FLAG $PRUNE_OPERATOR_CACHE_FLAG '
+        '$CLEANUP_NODE_IMPORT_IMAGES_FLAG $CLEANUP_NODE_CONTENT_PRUNE_FLAG $DOCKER_SOCKET_FLAG $DATABASE_FAILURE_FLAG '
+        '--node-archive-retention-hours "$MIGRATION_NODE_ARCHIVE_RETENTION_HOURS" '
         '--registry "$MIGRATION_REGISTRY" --image-tag "$MIGRATION_IMAGE_TAG" '
         '--dump-dir "$MIGRATION_DUMP_DIR" --db-targets "$MIGRATION_DB_TARGETS" '
         '--secret-provider "$MIGRATION_SECRET_PROVIDER" --secret-remote-prefix "$MIGRATION_SECRET_REMOTE_PREFIX" '
@@ -4503,6 +4625,14 @@ def stage_images(
         for item in failed:
             print(f"- {item}")
         raise SystemExit(f"Image migration completed with {len(failed)} failed candidate(s).")
+    cleanup_stale_node_import_images(args, service_pairs)
+
+
+def stage_cleanup(
+    args: argparse.Namespace,
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+) -> None:
+    cleanup_stale_node_import_images(args, service_pairs)
 
 
 def stage_databases(args: argparse.Namespace, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]]) -> None:
@@ -6302,6 +6432,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--no-cleanup-operator-images", dest="cleanup_operator_images", action="store_false")
     parser.add_argument("--prune-operator-cache", dest="prune_operator_cache", action="store_true", default=True)
     parser.add_argument("--no-prune-operator-cache", dest="prune_operator_cache", action="store_false")
+    parser.add_argument("--cleanup-node-import-images", dest="cleanup_node_import_images", action="store_true", default=True)
+    parser.add_argument("--no-cleanup-node-import-images", dest="cleanup_node_import_images", action="store_false")
+    parser.add_argument("--cleanup-node-content-prune", dest="cleanup_node_content_prune", action="store_true", default=True)
+    parser.add_argument("--no-cleanup-node-content-prune", dest="cleanup_node_content_prune", action="store_false")
+    parser.add_argument("--node-archive-retention-hours", type=int, default=1)
     parser.add_argument("--skip-docker-socket-services", dest="skip_docker_socket_services", action="store_true", default=True)
     parser.add_argument("--include-docker-socket-services", dest="skip_docker_socket_services", action="store_false")
     parser.add_argument("--skip-unavailable-databases", dest="skip_unavailable_databases", action="store_true", default=None)
@@ -6316,7 +6451,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--secret-store-name", default="vault")
     parser.add_argument("--secret-store-kind", choices=["SecretStore", "ClusterSecretStore"], default="ClusterSecretStore")
     parser.add_argument("--secret-refresh-interval", default="1h")
-    parser.add_argument("--stage", choices=["prepare", "bundle", "preflight", "secrets", "images", "databases", "manifests", "validate", "all"], default="bundle")
+    parser.add_argument(
+        "--stage",
+        choices=["prepare", "bundle", "preflight", "secrets", "images", "cleanup", "databases", "manifests", "validate", "all"],
+        default="bundle",
+    )
     parser.add_argument("--auto-prepare", action="store_true")
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--allow-secret-material", action="store_true")
@@ -6371,7 +6510,7 @@ def main(argv: list[str]) -> int:
         stage_preflight(args, values, service_pairs)
     if args.stage in {"secrets", "databases", "manifests", "all"}:
         require_kubernetes_api(args)
-    if args.stage in {"images", "manifests", "all"} and args.image_mode == "preload":
+    if args.stage in {"images", "cleanup", "manifests", "all"} and args.image_mode == "preload":
         tune_rke2_nodes_for_import(args)
     images_stage_ran = False
     if args.stage in {"secrets", "all"}:
@@ -6383,6 +6522,8 @@ def main(argv: list[str]) -> int:
             stage_images(args, project_path, service_pairs, values)
             mark_migration_stage_completed(args, "images", service_pairs)
             images_stage_ran = True
+    if args.stage == "cleanup":
+        stage_cleanup(args, service_pairs)
     if args.stage in {"databases", "all"}:
         if not migration_stage_completed(args, "databases", service_pairs):
             stage_databases(args, service_pairs)

@@ -330,15 +330,41 @@ Image migration has three modes:
   `MIGRATION_CLEANUP_OPERATOR_IMAGES=false` is set. Set
   `MIGRATION_PRUNE_OPERATOR_CACHE=false` only when you intentionally want to keep
   dangling Podman/Docker build cache on the operator for debugging or repeated
-  retry speed. Only the current archive is copied to nodes; stale local archives
-  from earlier failed runs are removed before the run and are not sent again.
+  retry speed. Full-batch preload runs also prune stale node-side
+  `urban-platform-import/...` containerd image refs, delete staged tar archives
+  older than `MIGRATION_NODE_ARCHIVE_RETENTION_HOURS` (default `1`), and ask
+  containerd to prune unreferenced content. Disable this with
+  `MIGRATION_CLEANUP_NODE_IMPORT_IMAGES=false` or
+  `MIGRATION_CLEANUP_NODE_CONTENT_PRUNE=false` only when preserving old imported
+  image refs for rollback analysis. Only the current archive is copied to nodes;
+  stale local archives from earlier failed runs are removed before the run and
+  are not sent again.
   Node-side preload transfer streams one archive at a time through sudo into the
   RKE2 image directory; each archive is imported and removed before the next
   archive is copied. On retries, candidates already present on every RKE2 node
   skip build, archive save, and upload; nodes that already have a partially
   migrated image skip that archive upload. If the operator container cache has a
   corrupted build layer and archive save fails, build-only candidates are rebuilt
-  once with `--no-cache` before failing the import.
+  once with `--no-cache` before failing the import. Node cleanup is skipped for
+  `MIGRATION_IMPORT_BATCH=auto`, numeric batches, or `MIGRATION_SERVICE_FILTER`,
+  because those scopes cannot safely identify every imported image that must be
+  retained.
+
+To reclaim disk after repeated lab preload reruns without rebuilding images or
+reapplying manifests, run the cleanup stage with the same project, node, and
+image settings:
+
+```bash
+make import-migrate \
+  PROJECT_PATH=/path/to/imported-project \
+  MIGRATION_STAGE=cleanup \
+  MIGRATION_EXECUTE=true \
+  MIGRATION_IMAGE_MODE=preload \
+  MIGRATION_IMPORT_BATCH=all \
+  MIGRATION_RKE2_NODES=node-01,node-02,node-03 \
+  MIGRATION_SSH_USER=ansible \
+  MIGRATION_SSH_KEY=/path/to/private/key
+```
 - Imported nginx edge/static services are rebuilt or retagged from the selected
   platform nginx image, for example `nginxinc/nginx-unprivileged:1.30.2`, instead
   of keeping older Compose nginx pins such as `nginx:1.18`. Their imported image

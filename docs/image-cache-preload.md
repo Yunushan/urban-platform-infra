@@ -44,11 +44,16 @@ The import path defaults are intentionally aggressive for small labs:
 - `MIGRATION_CLEANUP_OPERATOR_IMAGES=true`
 - `MIGRATION_PRUNE_OPERATOR_CACHE=true`
 - `MIGRATION_RKE2_IMPORT_IMAGES=true`
+- `MIGRATION_CLEANUP_NODE_IMPORT_IMAGES=true`
+- `MIGRATION_CLEANUP_NODE_CONTENT_PRUNE=true`
+- `MIGRATION_NODE_ARCHIVE_RETENTION_HOURS=1`
 
 Those defaults remove generated import tags, short-lived local preload archives,
-and dangling Docker/Podman image or builder cache after successful candidates.
-Disable cleanup only while debugging a failed build or preserving an offline
-evidence bundle.
+stale node-side imported image refs, old staged RKE2 tar archives, and dangling
+Docker/Podman image or builder cache after successful candidates. Node import
+cleanup only runs for full-batch imports; partial batches and service filters
+skip it to avoid deleting images outside the selected scope. Disable cleanup
+only while debugging a failed build or preserving an offline evidence bundle.
 
 ## RKE2 Preload Behavior
 
@@ -56,7 +61,10 @@ Preload mode should include every node that can schedule imported workloads in
 `MIGRATION_RKE2_NODES`. During execution, each archive is uploaded to the RKE2
 image directory, imported into running containerd when possible, and removed
 from the node after import. If containerd is not running, the archive remains in
-the RKE2 image directory for startup import.
+the RKE2 image directory for startup import. Later full-batch preload runs
+remove old staged tar files after the retention window and prune stale
+`urban-platform-import/...` refs from RKE2 containerd while preserving the
+currently generated import image aliases.
 
 If pods later show `ImagePullBackOff`, first regenerate the image cache plan,
 then verify that the node list includes the node where the pod is scheduled.

@@ -6,6 +6,8 @@ profiles:
     cleanupOperatorImages: true
     pruneOperatorCache: true
     rke2ImportImages: true
+    cleanupNodeImportImages: true
+    cleanupNodeContentPrune: true
     streamArchives: true
     staleArchiveAction: delete-before-run
     nodeArchiveRetention: remove-after-containerd-import
@@ -17,12 +19,16 @@ profiles:
     - keep MIGRATION_PRUNE_OPERATOR_CACHE=true on small operator disks
     - set MIGRATION_RKE2_NODES so preload archives stream to nodes instead of remaining on the operator
     - keep MIGRATION_RKE2_IMPORT_IMAGES=true so running RKE2 nodes import archives without a service restart
+    - keep MIGRATION_CLEANUP_NODE_IMPORT_IMAGES=true for repeated preload reruns on small RKE2 node disks
+    - keep MIGRATION_CLEANUP_NODE_CONTENT_PRUNE=true so stale containerd content can be reclaimed
   production-registry:
     description: Production-friendly path using an authenticated private registry.
     imageMode: registry
     cleanupOperatorImages: true
     pruneOperatorCache: true
     rke2ImportImages: false
+    cleanupNodeImportImages: false
+    cleanupNodeContentPrune: false
     streamArchives: false
     staleArchiveAction: not-applicable
     nodeArchiveRetention: not-applicable
@@ -39,6 +45,8 @@ profiles:
     cleanupOperatorImages: false
     pruneOperatorCache: false
     rke2ImportImages: true
+    cleanupNodeImportImages: false
+    cleanupNodeContentPrune: false
     streamArchives: true
     staleArchiveAction: rotate-explicitly
     nodeArchiveRetention: remove-after-containerd-import
@@ -57,3 +65,5 @@ checks:
 - operator image tags are removed after each successful candidate
 - operator archive directory is cleaned unless retention is intentional
 - dangling build cache is pruned unless retry speed is more important than disk pressure
+- stale RKE2 node import image refs are pruned during full-batch preload reruns
+- unreferenced RKE2 containerd content is pruned after stale refs are removed
