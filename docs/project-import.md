@@ -341,6 +341,14 @@ Image migration has three modes:
   image refs for rollback analysis. Only the current archive is copied to nodes;
   stale local archives from earlier failed runs are removed before the run and
   are not sent again.
+  `MIGRATION_CLEANUP_NODE_IMAGE_SCOPE=desired` is the HA-safe default: every node
+  preserves every currently desired imported image alias so workloads can be
+  rescheduled without a registry. In disk-constrained labs, set
+  `MIGRATION_CLEANUP_NODE_IMAGE_SCOPE=scheduled` during the cleanup stage to keep
+  only imported image aliases used by pods currently scheduled on each node.
+  Scheduled scope can reclaim much more RKE2/containerd disk, but a later pod
+  move to another node may require rerunning `MIGRATION_STAGE=images` unless a
+  private registry is available.
   Node-side preload transfer streams one archive at a time through sudo into the
   RKE2 image directory; each archive is imported and removed before the next
   archive is copied. On retries, candidates already present on every RKE2 node
@@ -364,6 +372,7 @@ make import-migrate \
   MIGRATION_EXECUTE=true \
   MIGRATION_IMAGE_MODE=preload \
   MIGRATION_IMPORT_BATCH=all \
+  MIGRATION_CLEANUP_NODE_IMAGE_SCOPE=scheduled \
   MIGRATION_RKE2_NODES=node-01,node-02,node-03 \
   MIGRATION_SSH_USER=ansible \
   MIGRATION_SSH_KEY=/path/to/private/key

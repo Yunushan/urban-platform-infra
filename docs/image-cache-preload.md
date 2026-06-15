@@ -47,6 +47,7 @@ The import path defaults are intentionally aggressive for small labs:
 - `MIGRATION_CLEANUP_NODE_IMPORT_IMAGES=true`
 - `MIGRATION_CLEANUP_NODE_CRI_IMAGES=true`
 - `MIGRATION_CLEANUP_NODE_CONTENT_PRUNE=true`
+- `MIGRATION_CLEANUP_NODE_IMAGE_SCOPE=desired`
 - `MIGRATION_NODE_ARCHIVE_RETENTION_HOURS=1`
 
 Those defaults remove generated import tags, short-lived local preload archives,
@@ -57,6 +58,15 @@ skip it to avoid deleting images outside the selected scope. Stale imported refs
 are removed through the RKE2 CRI image service first, then raw containerd refs as
 a fallback. Disable cleanup only while debugging a failed build or preserving an
 offline evidence bundle.
+
+`MIGRATION_CLEANUP_NODE_IMAGE_SCOPE=desired` preserves every currently desired
+import image alias on every RKE2 node. This is the safe default for HA and
+registry-less preload clusters, but it means each node can hold the full imported
+image set. `MIGRATION_CLEANUP_NODE_IMAGE_SCOPE=scheduled` is an optional lab disk
+saver: it preserves only imported image aliases used by pods currently scheduled
+on that node and removes the rest. Use scheduled scope only when disk pressure is
+more important than immediate no-registry rescheduling; rerun the image stage
+before moving workloads to a node that no longer has their images.
 
 ## RKE2 Preload Behavior
 
