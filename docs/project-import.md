@@ -526,12 +526,26 @@ databaseTargets:
     host: target-service-rw.namespace.svc
     port: 5432
     database: target_db
+    sourceEndpoints:
+      - host: <legacy-db-host-or-ip>
+        port: 5432
+    sourceDatabases:
+      - <legacy_database_name>
     secretRef:
       name: target-service-app
       namespace: namespace
       usernameKey: username
       passwordKey: password
 ```
+
+`sourceEndpoints` and `sourceDatabases` are private migration hints. They let
+the importer rewrite old application connection strings, mounted config files,
+and baked image config from legacy PostgreSQL endpoints to the selected
+CloudNativePG service. Keep real legacy hosts and database names only in the
+private target map; do not commit them. PostgreSQL-family Compose services that
+declare `POSTGRES_DB` seed `sourceDatabases` automatically when the map is first
+created, and later runs merge newly discovered non-secret source hints into an
+existing private map without overwriting target credentials or secret refs.
 
 To avoid manual `docker login`, export registry credentials before running the
 image stage. If they are absent, the automation uses Docker's existing

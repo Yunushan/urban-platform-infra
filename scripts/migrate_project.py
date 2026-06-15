@@ -97,7 +97,7 @@ IMAGE_CONFIG_TEXT_SUFFIXES = {
 POSTGRES_HOST_KEY_RE = re.compile(r"^(?:PGHOST|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*HOST.*)$", re.IGNORECASE)
 POSTGRES_PORT_KEY_RE = re.compile(r"^(?:PGPORT|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*PORT.*)$", re.IGNORECASE)
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 21
+MANIFEST_GENERATOR_VERSION = 22
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -1124,14 +1124,150 @@ def database_target_endpoint(target: Any) -> dict[str, str] | None:
     port = str(target.get("port") or "5432").strip()
     if not host or "<" in host or not port or "<" in port:
         return None
-    return {"host": host, "port": port}
+    endpoint = {"host": host, "port": port}
+    database = str(target.get("database") or "").strip()
+    if database and "<" not in database:
+        endpoint["database"] = database
+    return endpoint
+
+
+def parse_source_endpoint(value: Any, default_port: str = "5432") -> tuple[str, str] | None:
+    text = str(value or "").strip().strip("\"'")
+    if not text or "<" in text:
+        return None
+    text = re.sub(r"^[A-Za-z][A-Za-z0-9+.-]*://", "", text)
+    if "@" in text:
+        text = text.rsplit("@", 1)[1]
+    text = text.split("/", 1)[0].split("?", 1)[0].strip()
+    if ":" in text:
+        host, port = text.rsplit(":", 1)
+    else:
+        host, port = text, default_port
+    host = host.strip().strip("[]")
+    port_match = re.match(r"^([0-9]{2,5})\b", port.strip())
+    if not host or not port_match:
+        return None
+    return host, port_match.group(1)
+
+
+def source_endpoint_key(host: str, port: str) -> str:
+    return f"{host.strip().strip('[]')}:{port.strip()}"
+
+
+def source_database_key(database: str) -> str:
+    return f"database:{database.strip()}"
+
+
+def database_key_source(source_key: str) -> str | None:
+    if not source_key.startswith("database:"):
+        return None
+    database = source_key.split(":", 1)[1].strip()
+    return database or None
+
+
+def database_target_source_endpoints(target: Any, fallback_port: str | None = None) -> list[str]:
+    if not isinstance(target, dict):
+        return []
+    default_port = str(fallback_port or target.get("sourcePort") or target.get("port") or "5432")
+    raw_values: list[Any] = []
+    for key in ("sourceEndpoint", "sourceEndpoints", "sourceAddress", "sourceAddresses"):
+        value = target.get(key)
+        if value is None:
+            continue
+        raw_values.extend(value if isinstance(value, list) else [value])
+    for key in ("sourceHost", "sourceHosts"):
+        value = target.get(key)
+        if value is None:
+            continue
+        hosts = value if isinstance(value, list) else [value]
+        raw_values.extend({"host": host, "port": default_port} for host in hosts)
+
+    aliases: list[str] = []
+    for raw in raw_values:
+        if isinstance(raw, dict):
+            host = raw.get("host") or raw.get("sourceHost") or raw.get("address")
+            port = raw.get("port") or raw.get("sourcePort") or default_port
+            parsed = parse_source_endpoint(source_endpoint_key(str(host or ""), str(port or "")), default_port)
+        else:
+            parsed = parse_source_endpoint(raw, default_port)
+        if not parsed:
+            continue
+        alias = source_endpoint_key(*parsed)
+        if alias not in aliases:
+            aliases.append(alias)
+    return aliases
+
+
+def normalized_database_alias(value: Any) -> str | None:
+    text = str(value or "").strip().strip("\"'")
+    if not text or "<" in text:
+        return None
+    return text
+
+
+def database_target_source_databases(target: Any) -> list[str]:
+    if not isinstance(target, dict):
+        return []
+    raw_values: list[Any] = []
+    for key in (
+        "sourceDatabase",
+        "sourceDatabases",
+        "sourceDb",
+        "sourceDbs",
+        "sourceDatabaseName",
+        "sourceDatabaseNames",
+        "databaseAlias",
+        "databaseAliases",
+    ):
+        value = target.get(key)
+        if value is None:
+            continue
+        raw_values.extend(value if isinstance(value, list) else [value])
+    aliases: list[str] = []
+    for raw in raw_values:
+        alias = normalized_database_alias(raw)
+        if alias and alias not in aliases:
+            aliases.append(alias)
+    target_database = normalized_database_alias(target.get("database"))
+    if target_database and target_database not in aliases:
+        aliases.append(target_database)
+    return aliases
+
+
+def endpoint_with_source_metadata(target: Any, endpoint: dict[str, str]) -> dict[str, Any]:
+    enriched: dict[str, Any] = dict(endpoint)
+    source_databases = database_target_source_databases(target)
+    if source_databases:
+        enriched["sourceDatabases"] = source_databases
+    return enriched
+
+
+def add_database_rewrite(
+    rewrites: dict[str, dict[str, Any]],
+    ambiguous: set[str],
+    source_key: str,
+    endpoint: dict[str, Any],
+) -> None:
+    source_key = str(source_key or "").strip()
+    if not source_key or source_key in ambiguous:
+        return
+    existing = rewrites.get(source_key)
+    if existing and (existing.get("host"), existing.get("port"), existing.get("database")) != (
+        endpoint.get("host"),
+        endpoint.get("port"),
+        endpoint.get("database"),
+    ):
+        rewrites.pop(source_key, None)
+        ambiguous.add(source_key)
+        return
+    rewrites[source_key] = endpoint
 
 
 def database_endpoint_rewrites(
     args: argparse.Namespace,
     service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
     values: dict[str, Any],
-) -> dict[str, dict[str, str]]:
+) -> dict[str, dict[str, Any]]:
     targets: dict[str, Any] = {}
     target_path = database_targets_path(args)
     if target_path.exists():
@@ -1139,23 +1275,29 @@ def database_endpoint_rewrites(
     if not targets:
         targets = generated_database_targets(service_pairs, values, args.namespace).get("databaseTargets", {})
 
-    rewrites: dict[str, dict[str, str]] = {}
+    rewrites: dict[str, dict[str, Any]] = {}
+    ambiguous: set[str] = set()
     for record, _service in service_pairs:
         if record.kind not in POSTGRES_FAMILY_KINDS:
             continue
         source_port = published_port(record)
-        if not source_port:
-            continue
-        endpoint = database_target_endpoint(targets.get(record.name))
+        target = targets.get(record.name)
+        endpoint = database_target_endpoint(target)
         if endpoint:
-            rewrites[str(source_port)] = endpoint
+            enriched = endpoint_with_source_metadata(target, endpoint)
+            if source_port:
+                add_database_rewrite(rewrites, ambiguous, str(source_port), enriched)
+            for alias in database_target_source_endpoints(target, source_port or "5432"):
+                add_database_rewrite(rewrites, ambiguous, alias, enriched)
+            for database in enriched.get("sourceDatabases", []):
+                add_database_rewrite(rewrites, ambiguous, source_database_key(str(database)), enriched)
     return rewrites
 
 
 def service_postgres_target_endpoint(
     service: dict[str, Any],
-    rewrites: dict[str, dict[str, str]],
-) -> dict[str, str] | None:
+    rewrites: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
     if not rewrites:
         return None
     values = [
@@ -1164,18 +1306,109 @@ def service_postgres_target_endpoint(
         if value is not None
     ]
     joined = "\n".join(values)
-    matches = {
-        source_port: endpoint
-        for source_port, endpoint in rewrites.items()
-        if re.search(rf"(?<![0-9]){re.escape(source_port)}(?![0-9])", joined)
+    matches: list[dict[str, Any]] = []
+    for source_key, endpoint in rewrites.items():
+        if postgres_rewrite_matches_text(source_key, endpoint, joined):
+            matches.append(endpoint)
+    unique = {
+        json.dumps(
+            {
+                "host": endpoint.get("host"),
+                "port": endpoint.get("port"),
+                "database": endpoint.get("database"),
+            },
+            sort_keys=True,
+        ): endpoint
+        for endpoint in matches
     }
-    if len(matches) == 1:
-        return next(iter(matches.values()))
+    if len(unique) == 1:
+        return next(iter(unique.values()))
     return None
 
 
-def replace_postgres_host_port_pair(value: str, source_port: str, endpoint: dict[str, str]) -> str:
-    host_pattern = PRIVATE_OR_LOCAL_HOST_RE
+def postgres_database_name_matches(value: str, database: str) -> bool:
+    database_pattern = re.escape(database)
+    return bool(
+        re.search(
+            rf"(?i)\b(?:Database|Initial Catalog)\s*=\s*{database_pattern}(?=\s*(?:;|$))",
+            value,
+        )
+        or re.search(
+            rf"(?i)[\"']?(?:Database|Initial Catalog|Db|DB)[\"']?\s*:\s*[\"']?{database_pattern}[\"']?",
+            value,
+        )
+    )
+
+
+def postgres_rewrite_matches_text(source_key: str, endpoint: dict[str, Any], value: str) -> bool:
+    if database := database_key_source(source_key):
+        return postgres_database_name_matches(value, database)
+    parsed = parse_source_endpoint(source_key)
+    if parsed and ":" in source_key:
+        host, port = parsed
+        host_pattern = re.escape(host)
+        if re.search(rf"(?<![A-Za-z0-9_.-])(?:tcp://)?{host_pattern}:{re.escape(port)}\b", value):
+            return True
+        if re.search(rf"(?i)\bPort\s*=\s*{re.escape(port)}\b", value) and re.search(
+            rf"(?i)\b(?:Host|Server|Data Source|Address|Addr|Network Address)\s*=\s*(?:tcp://)?{host_pattern}\b",
+            value,
+        ):
+            return True
+    elif re.search(rf"(?<![0-9]){re.escape(source_key)}(?![0-9])", value):
+        return True
+    return any(
+        postgres_database_name_matches(value, database)
+        for database in endpoint.get("sourceDatabases", [])
+    )
+
+
+def replace_postgres_database_name(value: str, endpoint: dict[str, Any]) -> str:
+    target_database = str(endpoint.get("database") or "").strip()
+    if not target_database:
+        return value
+    replacement = target_database
+    for source_database in endpoint.get("sourceDatabases", []):
+        source_database = str(source_database).strip()
+        if not source_database or source_database == target_database:
+            continue
+        source_pattern = re.escape(source_database)
+        value = re.sub(
+            rf"(?i)(?P<key>\b(?:Database|Initial Catalog)\s*=\s*){source_pattern}(?P<tail>\s*(?:;|$))",
+            rf"\g<key>{replacement}\g<tail>",
+            value,
+        )
+        value = re.sub(
+            rf"(?i)(?P<key>[\"']?(?:Database|Initial Catalog|Db|DB)[\"']?\s*:\s*[\"']?){source_pattern}(?P<tail>[\"']?)",
+            rf"\g<key>{replacement}\g<tail>",
+            value,
+        )
+    return value
+
+
+def replace_postgres_host_port_pair(value: str, source_key: str, endpoint: dict[str, Any]) -> str:
+    if database := database_key_source(source_key):
+        if not postgres_database_name_matches(value, database):
+            return value
+        value = re.sub(
+            rf"(?<![A-Za-z0-9_.-])(?:tcp://)?{PRIVATE_OR_LOCAL_HOST_RE}:5432\b",
+            f"{endpoint['host']}:{endpoint['port']}",
+            value,
+        )
+        value = re.sub(
+            rf"(?i)(?P<key>\b(?:Host|Server|Data Source|Address|Addr|Network Address)\s*=\s*)(?:tcp://)?{PRIVATE_OR_LOCAL_HOST_RE}(?P<tail>\s*(?:;|$))",
+            rf"\g<key>{endpoint['host']}\g<tail>",
+            value,
+        )
+        value = re.sub(
+            rf"(?i)(?P<key>\bPort\s*=\s*)5432(?P<tail>\s*(?:;|$))",
+            rf"\g<key>{endpoint['port']}\g<tail>",
+            value,
+        )
+        return replace_postgres_database_name(value, endpoint)
+    parsed = parse_source_endpoint(source_key)
+    exact_host = ":" in source_key and parsed is not None
+    source_host, source_port = parsed if exact_host and parsed else ("", source_key)
+    host_pattern = re.escape(source_host) if exact_host else PRIVATE_OR_LOCAL_HOST_RE
     replacement = f"{endpoint['host']}:{endpoint['port']}"
     value = re.sub(rf"(?<![A-Za-z0-9_.-])(?:tcp://)?{host_pattern}:{re.escape(source_port)}\b", replacement, value)
     value = re.sub(
@@ -1186,26 +1419,50 @@ def replace_postgres_host_port_pair(value: str, source_port: str, endpoint: dict
         value,
     )
     value = re.sub(
+        rf"(?i)(?P<key>[\"']?(?:Host|Server|Data Source|Address|Addr|Network Address)[\"']?\s*:\s*[\"']?)(?:tcp://)?{host_pattern}(?P<tail>[\"']?)",
+        lambda match: f"{match.group('key')}{endpoint['host']}{match.group('tail')}"
+        if re.search(rf"(?i)[\"']?[Pp]ort[\"']?\s*:\s*[\"']?{re.escape(source_port)}[\"']?", value)
+        else match.group(0),
+        value,
+    )
+    value = re.sub(
         rf"(?i)(?P<key>\bPort\s*=\s*){re.escape(source_port)}(?P<tail>\s*(?:;|$))",
         rf"\g<key>{endpoint['port']}\g<tail>",
         value,
     )
+    value = re.sub(
+        rf"(?i)(?P<key>[\"']?[Pp]ort[\"']?\s*:\s*[\"']?){re.escape(source_port)}(?P<tail>[\"']?)",
+        rf"\g<key>{endpoint['port']}\g<tail>",
+        value,
+    )
+    value = replace_postgres_database_name(value, endpoint)
     return value
 
 
 def normalize_postgres_endpoint_text(
     value: str,
-    rewrites: dict[str, dict[str, str]],
-    service_endpoint: dict[str, str] | None = None,
+    rewrites: dict[str, dict[str, Any]],
+    service_endpoint: dict[str, Any] | None = None,
 ) -> str:
-    for source_port, endpoint in rewrites.items():
-        value = replace_postgres_host_port_pair(value, source_port, endpoint)
+    for source_key, endpoint in rewrites.items():
+        value = replace_postgres_host_port_pair(value, source_key, endpoint)
     if service_endpoint:
+        value = re.sub(
+            rf"(?<![A-Za-z0-9_.-])(?:tcp://)?{PRIVATE_OR_LOCAL_HOST_RE}:5432\b",
+            f"{service_endpoint['host']}:{service_endpoint['port']}",
+            value,
+        )
         value = re.sub(
             rf"(?i)(?P<key>\b(?:Host|Server|Data Source|Address|Addr|Network Address)\s*=\s*)(?:tcp://)?{PRIVATE_OR_LOCAL_HOST_RE}(?P<tail>\s*(?:;|$))",
             rf"\g<key>{service_endpoint['host']}\g<tail>",
             value,
         )
+        value = re.sub(
+            rf"(?i)(?P<key>\bPort\s*=\s*)5432(?P<tail>\s*(?:;|$))",
+            rf"\g<key>{service_endpoint['port']}\g<tail>",
+            value,
+        )
+        value = replace_postgres_database_name(value, service_endpoint)
     return value
 
 
@@ -1245,8 +1502,8 @@ def normalize_imported_env_value(
     key: str,
     value: str,
     *,
-    db_rewrites: dict[str, dict[str, str]] | None = None,
-    service_db_endpoint: dict[str, str] | None = None,
+    db_rewrites: dict[str, dict[str, Any]] | None = None,
+    service_db_endpoint: dict[str, Any] | None = None,
 ) -> str:
     if KAFKA_CONTEXT_RE.search(key) or KAFKA_CONTEXT_RE.search(value):
         value = normalize_kafka_endpoint_text(args, value)
@@ -1254,7 +1511,11 @@ def normalize_imported_env_value(
         value = normalize_postgres_endpoint_text(value, db_rewrites, service_db_endpoint)
     if service_db_endpoint and POSTGRES_HOST_KEY_RE.fullmatch(key) and re.fullmatch(PRIVATE_OR_LOCAL_HOST_RE, value.strip(), re.IGNORECASE):
         value = service_db_endpoint["host"]
-    if service_db_endpoint and db_rewrites and POSTGRES_PORT_KEY_RE.fullmatch(key) and value.strip() in db_rewrites:
+    if (
+        service_db_endpoint
+        and POSTGRES_PORT_KEY_RE.fullmatch(key)
+        and (value.strip() == "5432" or (db_rewrites and value.strip() in db_rewrites))
+    ):
         value = service_db_endpoint["port"]
     return value
 
@@ -1263,7 +1524,7 @@ def normalize_imported_secret_entries(
     args: argparse.Namespace,
     service: dict[str, Any],
     entries: dict[str, str],
-    db_rewrites: dict[str, dict[str, str]],
+    db_rewrites: dict[str, dict[str, Any]],
 ) -> dict[str, str]:
     service_db_endpoint = service_postgres_target_endpoint(service, db_rewrites)
     return {
@@ -1282,7 +1543,7 @@ def env_rewrite_fingerprint(
     args: argparse.Namespace,
     record: import_project.ServiceRecord,
     service: dict[str, Any],
-    db_rewrites: dict[str, dict[str, str]],
+    db_rewrites: dict[str, dict[str, Any]],
 ) -> str:
     service_endpoint = service_postgres_target_endpoint(service, db_rewrites) or {}
     public_material = {
@@ -1456,8 +1717,8 @@ def normalize_imported_config_text(
     target: str,
     value: str,
     *,
-    db_rewrites: dict[str, dict[str, str]] | None = None,
-    service_db_endpoint: dict[str, str] | None = None,
+    db_rewrites: dict[str, dict[str, Any]] | None = None,
+    service_db_endpoint: dict[str, Any] | None = None,
 ) -> str:
     if apisix_config_text(record, target):
         value = re.sub(r"(?<![A-Za-z0-9.-])127[.]0[.]0[.]1:2379\b", "etcd:2379", value)
@@ -1486,8 +1747,8 @@ def configmap_mount_manifests(
     service: dict[str, Any],
     labels: dict[str, str],
     *,
-    db_rewrites: dict[str, dict[str, str]] | None = None,
-    service_db_endpoint: dict[str, str] | None = None,
+    db_rewrites: dict[str, dict[str, Any]] | None = None,
+    service_db_endpoint: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     manifests: list[dict[str, Any]] = []
     volumes: list[dict[str, Any]] = []
@@ -1992,10 +2253,30 @@ def sed_replacement(value: str) -> str:
     return value.replace("\\", "\\\\").replace("&", r"\&").replace("#", r"\#")
 
 
+def image_config_database_sed_scripts(endpoint: dict[str, Any]) -> list[str]:
+    target_database = str(endpoint.get("database") or "").strip()
+    if not target_database:
+        return []
+    target_database_replacement = sed_replacement(target_database)
+    scripts: list[str] = []
+    for source_database in endpoint.get("sourceDatabases", []):
+        source_database = str(source_database or "").strip()
+        if not source_database or source_database == target_database:
+            continue
+        source_database_pattern = re.escape(source_database)
+        scripts.append(
+            rf"s#((Database|Initial Catalog)[[:space:]]*=[[:space:]]*){source_database_pattern}([[:space:]]*(;|$))#\1{target_database_replacement}\3#g"
+        )
+        scripts.append(
+            rf"s#([\"']?(Database|Initial Catalog|Db|DB)[\"']?[[:space:]]*:[[:space:]]*[\"']?){source_database_pattern}([\"']?)#\1{target_database_replacement}\3#g"
+        )
+    return scripts
+
+
 def image_config_rewrite_required(
     record: import_project.ServiceRecord,
     service: dict[str, Any],
-    db_rewrites: dict[str, dict[str, str]],
+    db_rewrites: dict[str, dict[str, Any]],
 ) -> bool:
     return record.kind == "application" and bool(db_rewrites)
 
@@ -2003,37 +2284,80 @@ def image_config_rewrite_required(
 def preloaded_image_reuse_allowed(
     record: import_project.ServiceRecord,
     service: dict[str, Any],
-    db_rewrites: dict[str, dict[str, str]],
+    db_rewrites: dict[str, dict[str, Any]],
 ) -> bool:
     return True
 
 
 def image_config_rewrite_sed_scripts(
-    db_rewrites: dict[str, dict[str, str]],
-    service_endpoint: dict[str, str] | None,
+    db_rewrites: dict[str, dict[str, Any]],
+    service_endpoint: dict[str, Any] | None,
 ) -> list[str]:
     scripts: list[str] = []
-    for source_port, endpoint in sorted(db_rewrites.items()):
+    for source_key, endpoint in sorted(db_rewrites.items()):
         target_pair = sed_replacement(f"{endpoint['host']}:{endpoint['port']}")
+        target_host = sed_replacement(endpoint["host"])
         target_port = sed_replacement(endpoint["port"])
-        source_port_pattern = re.escape(source_port)
-        scripts.append(
-            rf"s#(tcp://)?({PRIVATE_OR_LOCAL_HOST_SED_RE}):{source_port_pattern}#{target_pair}#g"
-        )
+        if database := database_key_source(source_key):
+            database_pattern = re.escape(database)
+            scripts.append(
+                rf"/(Database|Initial Catalog)[[:space:]]*=[[:space:]]*{database_pattern}/ s#(tcp://)?({PRIVATE_OR_LOCAL_HOST_SED_RE}):5432#{target_pair}#g"
+            )
+            scripts.append(
+                rf"/[\"']?(Database|Initial Catalog|Db|DB)[\"']?[[:space:]]*:[[:space:]]*[\"']?{database_pattern}/ s#(tcp://)?({PRIVATE_OR_LOCAL_HOST_SED_RE}):5432#{target_pair}#g"
+            )
+            scripts.append(
+                rf"/(Database|Initial Catalog)[[:space:]]*=[[:space:]]*{database_pattern}/ s#((Host|Server|Data Source|Address|Addr|Network Address)[[:space:]]*=[[:space:]]*)(tcp://)?({PRIVATE_OR_LOCAL_HOST_SED_RE})#\1{target_host}#g"
+            )
+            scripts.append(
+                rf"/[\"']?(Database|Initial Catalog|Db|DB)[\"']?[[:space:]]*:[[:space:]]*[\"']?{database_pattern}/ s#([\"']?(Host|Server|Data Source|Address|Addr|Network Address)[\"']?[[:space:]]*:[[:space:]]*[\"']?)(tcp://)?({PRIVATE_OR_LOCAL_HOST_SED_RE})#\1{target_host}#g"
+            )
+            scripts.append(
+                rf"/(Database|Initial Catalog)[[:space:]]*=[[:space:]]*{database_pattern}/ s#([Pp]ort[[:space:]]*=[[:space:]]*)5432([^0-9]|$)#\1{target_port}\2#g"
+            )
+            scripts.append(
+                rf"/[\"']?(Database|Initial Catalog|Db|DB)[\"']?[[:space:]]*:[[:space:]]*[\"']?{database_pattern}/ s#([\"']?[Pp]ort[\"']?[[:space:]]*:[[:space:]]*[\"']?)5432([\"']?)#\1{target_port}\2#g"
+            )
+            scripts.extend(image_config_database_sed_scripts(endpoint))
+            continue
+        parsed = parse_source_endpoint(source_key)
+        if parsed and ":" in source_key:
+            source_host, source_port = parsed
+            source_host_pattern = re.escape(source_host)
+            source_port_pattern = re.escape(source_port)
+            scripts.append(rf"s#(tcp://)?{source_host_pattern}:{source_port_pattern}#{target_pair}#g")
+            scripts.append(
+                rf"s#((Host|Server|Data Source|Address|Addr|Network Address)[[:space:]]*=[[:space:]]*)(tcp://)?{source_host_pattern}#\1{target_host}#g"
+            )
+            scripts.append(
+                rf"s#([\"']?(Host|Server|Data Source|Address|Addr|Network Address)[\"']?[[:space:]]*:[[:space:]]*[\"']?)(tcp://)?{source_host_pattern}#\1{target_host}#g"
+            )
+        else:
+            source_port_pattern = re.escape(source_key)
+            scripts.append(
+                rf"s#(tcp://)?({PRIVATE_OR_LOCAL_HOST_SED_RE}):{source_port_pattern}#{target_pair}#g"
+            )
         scripts.append(
             rf"s#([Pp]ort[[:space:]]*=[[:space:]]*){source_port_pattern}([^0-9]|$)#\1{target_port}\2#g"
         )
         scripts.append(
             rf"s#([\"']?[Pp]ort[\"']?[[:space:]]*:[[:space:]]*[\"']?){source_port_pattern}([\"']?)#\1{target_port}\2#g"
         )
+        scripts.extend(image_config_database_sed_scripts(endpoint))
     if service_endpoint:
         target_host = sed_replacement(service_endpoint["host"])
+        target_pair = sed_replacement(f"{service_endpoint['host']}:{service_endpoint['port']}")
+        target_port = sed_replacement(service_endpoint["port"])
+        scripts.append(rf"s#(tcp://)?({PRIVATE_OR_LOCAL_HOST_SED_RE}):5432#{target_pair}#g")
         scripts.append(
             rf"s#((Host|Server|Data Source|Address|Addr|Network Address)[[:space:]]*=[[:space:]]*)(tcp://)?({PRIVATE_OR_LOCAL_HOST_SED_RE})#\1{target_host}#g"
         )
         scripts.append(
             rf"s#([\"']?(Host|Server|Data Source|Address|Addr|Network Address)[\"']?[[:space:]]*:[[:space:]]*[\"']?)(tcp://)?({PRIVATE_OR_LOCAL_HOST_SED_RE})#\1{target_host}#g"
         )
+        scripts.append(rf"s#([Pp]ort[[:space:]]*=[[:space:]]*)5432([^0-9]|$)#\1{target_port}\2#g")
+        scripts.append(rf"s#([\"']?[Pp]ort[\"']?[[:space:]]*:[[:space:]]*[\"']?)5432([\"']?)#\1{target_port}\2#g")
+        scripts.extend(image_config_database_sed_scripts(service_endpoint))
     return scripts
 
 
@@ -2127,7 +2451,7 @@ def rewrite_image_runtime_config(
     record: import_project.ServiceRecord,
     service: dict[str, Any],
     target_image: str,
-    db_rewrites: dict[str, dict[str, str]],
+    db_rewrites: dict[str, dict[str, Any]],
 ) -> str | None:
     if not image_config_rewrite_required(record, service, db_rewrites):
         return None
@@ -2749,15 +3073,20 @@ def generated_database_targets(
     available = database_instances(values, namespace)
     mapping: dict[str, Any] = {}
     database_records = [
-        record
-        for record, _service in service_pairs
+        (record, service)
+        for record, service in service_pairs
         if record.kind in DATABASE_KINDS
     ]
-    for index, record in enumerate(database_records):
+    for index, (record, service) in enumerate(database_records):
         if record.kind in OPTIONAL_DATABASE_KINDS:
             mapping[record.name] = optional_database_target(record)
             continue
         target = target_for_record(record, available, index)
+        source_databases: list[str] = []
+        if record.kind in POSTGRES_FAMILY_KINDS:
+            source_database = postgres_env(service).get("database")
+            if source_database:
+                source_databases.append(source_database)
         entry = {
             "sourceAlias": k8s_name(record.name),
             "engine": record.kind,
@@ -2765,6 +3094,8 @@ def generated_database_targets(
             "host": target["host"],
             "port": target["port"],
             "database": target["database"],
+            "sourceEndpoints": [],
+            "sourceDatabases": source_databases,
         }
         if target.get("secretRef"):
             entry["secretRef"] = target["secretRef"]
@@ -2776,16 +3107,62 @@ def generated_database_targets(
     return {"databaseTargets": mapping}
 
 
+def merge_database_target_hints(path: Path, generated: dict[str, Any]) -> bool:
+    if yaml is None or not path.exists():
+        return False
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        return False
+    targets = data.get("databaseTargets", data)
+    if not isinstance(targets, dict):
+        return False
+    generated_targets = generated.get("databaseTargets", {})
+    if not isinstance(generated_targets, dict):
+        return False
+    changed = False
+    for name, generated_target in generated_targets.items():
+        target = targets.get(name)
+        if not isinstance(target, dict) or not isinstance(generated_target, dict):
+            continue
+        for key in ("sourceEndpoints", "sourceDatabases"):
+            generated_values = generated_target.get(key)
+            if generated_values is None:
+                continue
+            if not isinstance(generated_values, list):
+                generated_values = [generated_values]
+            existing_values = target.get(key)
+            if existing_values is None:
+                target[key] = generated_values
+                changed = True
+                continue
+            if not isinstance(existing_values, list):
+                existing_values = [existing_values]
+                target[key] = existing_values
+                changed = True
+            for value in generated_values:
+                if value not in existing_values:
+                    existing_values.append(value)
+                    changed = True
+    if changed:
+        write_file(path, yaml.safe_dump(data, sort_keys=False))
+        secure_file(path)
+    return changed
+
+
 def write_database_target_map(path: Path, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]], values: dict[str, Any], namespace: str) -> None:
+    generated = generated_database_targets(service_pairs, values, namespace)
     should_replace_placeholder = False
     if path.exists():
         existing = path.read_text(encoding="utf-8")
         should_replace_placeholder = "service-name-or-alias" in existing
     if path.exists() and not should_replace_placeholder:
+        if merge_database_target_hints(path, generated):
+            print(f"Database target map already exists; merged non-secret source rewrite hints: {path}")
+            return
         secure_file(path)
         print(f"Database target map already exists: {path}")
         return
-    write_file(path, yaml.safe_dump(generated_database_targets(service_pairs, values, namespace), sort_keys=False))
+    write_file(path, yaml.safe_dump(generated, sort_keys=False))
     secure_file(path)
     print(f"Database target map initialized: {path}")
 
@@ -3461,9 +3838,11 @@ def migration_stage_scope(args: argparse.Namespace, stage: str, service_pairs: l
         "tlsExtraHosts": sorted(split_csv(args.tls_extra_hosts)) if stage == "manifests" else [],
         "tlsIssuerName": args.tls_le_issuer_name if stage == "manifests" else "",
         "tlsIssuerKind": args.tls_le_issuer_kind if stage == "manifests" else "",
-        "manifestGeneratorVersion": MANIFEST_GENERATOR_VERSION if stage == "manifests" else "",
-        "databaseTargets": str(database_target_path) if stage == "databases" else "",
-        "databaseTargetsFingerprint": file_fingerprint(database_target_path) if stage == "databases" else "",
+        "manifestGeneratorVersion": MANIFEST_GENERATOR_VERSION if stage in {"images", "manifests"} else "",
+        "databaseTargets": str(database_target_path) if stage in {"databases", "images", "manifests"} else "",
+        "databaseTargetsFingerprint": file_fingerprint(database_target_path)
+        if stage in {"databases", "images", "manifests"}
+        else "",
         "skipUnavailableDatabases": args.skip_unavailable_databases if stage == "databases" else "",
         "secretProvider": args.secret_provider if stage == "secrets" else "",
         "secretRemotePrefix": args.secret_remote_prefix if stage == "secrets" else "",
@@ -4361,6 +4740,10 @@ def generate_bundle(
                 "host": "target-service-rw.namespace.svc",
                 "port": 5432,
                 "database": "target_db",
+                "sourceEndpoints": [
+                    {"host": "<legacy-db-host-or-ip>", "port": 5432},
+                ],
+                "sourceDatabases": ["<legacy_database_name>"],
                 "secretRef": {
                     "name": "target-service-app",
                     "namespace": "namespace",

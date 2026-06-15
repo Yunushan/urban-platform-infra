@@ -47,6 +47,26 @@ only for PostgreSQL-family sources that have a usable target mapping. Entries
 can point at a target service and secret reference or a direct DSN in the
 private file.
 
+For legacy applications that keep old PostgreSQL connection strings in
+environment variables, mounted config, or baked image files, target entries may
+also define private rewrite hints:
+
+```yaml
+sourceEndpoints:
+  - host: <legacy-db-host-or-ip>
+    port: 5432
+sourceDatabases:
+  - <legacy_database_name>
+```
+
+Those hints are used by the import image and manifest stages to rewrite the old
+source endpoint to the mapped target service. Keep the real values in the
+private target map only. For PostgreSQL-family Compose services that declare
+`POSTGRES_DB`, `import-auto` seeds `sourceDatabases` automatically; operators
+can add `sourceEndpoints` only when applications still reference an external
+legacy host. Later runs merge newly discovered non-secret source hints into an
+existing private map without overwriting target credentials or secret refs.
+
 Optional engines such as MySQL, MariaDB, Microsoft SQL Server, MongoDB, and
 SQLite are detected and scaffolded in the target map. Their runners remain
 disabled until an operator-backed, managed, or external target profile is
