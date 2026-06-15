@@ -359,6 +359,11 @@ Image migration has three modes:
   `MIGRATION_IMPORT_BATCH=auto`, numeric batches, or `MIGRATION_SERVICE_FILTER`,
   because those scopes cannot safely identify every imported image that must be
   retained.
+  Before the image stage is marked complete and again before manifests are
+  applied, preload mode verifies the exact selected workload image refs on every
+  RKE2 node in `MIGRATION_RKE2_NODES`. If a node is missing an image, the import
+  stops before rollout and prints the node/image list instead of leaving the
+  cluster in `ImagePullBackOff`.
 
 To reclaim disk after repeated lab preload reruns without rebuilding images or
 reapplying manifests, run the cleanup stage with the same project, node, and

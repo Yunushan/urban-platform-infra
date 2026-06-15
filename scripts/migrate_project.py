@@ -97,7 +97,7 @@ IMAGE_CONFIG_TEXT_SUFFIXES = {
 POSTGRES_HOST_KEY_RE = re.compile(r"^(?:PGHOST|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*HOST.*)$", re.IGNORECASE)
 POSTGRES_PORT_KEY_RE = re.compile(r"^(?:PGPORT|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*PORT.*)$", re.IGNORECASE)
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 22
+MANIFEST_GENERATOR_VERSION = 23
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -648,8 +648,16 @@ def run_remote_sudo_upload(args: argparse.Namespace, ssh_options: list[str], tar
 def run_cleanup_command(command: list[str]) -> None:
     display = " ".join(command)
     print(f"+ {display}")
-    result = subprocess.run(command)
+    result = subprocess.run(command, text=True, capture_output=True)
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
     if result.returncode != 0:
+        details = command_details(result).lower()
+        if "image is in use" in details or "is being used by" in details:
+            print("Cleanup kept a local image because it is still referenced by a local container; continuing.")
+            return
         print(f"Cleanup command failed with exit code {result.returncode}; continuing.")
 
 
@@ -2759,6 +2767,81 @@ def desired_preload_import_image_refs(
         if image and is_preload_import_image(image):
             refs.update(containerd_import_image_refs(image))
     return refs
+
+
+def required_preload_import_images(
+    args: argparse.Namespace,
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+) -> list[tuple[import_project.ServiceRecord, str, list[str]]]:
+    required: list[tuple[import_project.ServiceRecord, str, list[str]]] = []
+    seen: set[str] = set()
+    for record, service in stage_scope_pairs(args, "manifests", service_pairs):
+        if not should_generate_kubernetes_workload(args, record, service):
+            continue
+        if not kubernetes_container_ports(record, service):
+            continue
+        image = image_for_kubernetes_manifest(args, record, service)
+        if not image or not is_preload_import_image(image):
+            continue
+        refs = containerd_import_image_refs(image)
+        key = "\0".join(refs)
+        if key in seen:
+            continue
+        seen.add(key)
+        required.append((record, image, refs))
+    return required
+
+
+def remote_containerd_image_refs(args: argparse.Namespace, ssh_options: list[str], target: str) -> set[str]:
+    script = (
+        "set -e; "
+        "ctr=/var/lib/rancher/rke2/bin/ctr; "
+        "socket=/run/k3s/containerd/containerd.sock; "
+        "[ -S \"$socket\" ] && [ -x \"$ctr\" ] || exit 1; "
+        "\"$ctr\" --address \"$socket\" -n k8s.io images ls -q"
+    )
+    result = run_remote_sudo_shell_capture(args, ssh_options, target, script)
+    if result.returncode != 0:
+        details = command_details(result) or "unknown error"
+        raise SystemExit(
+            "Could not verify preloaded images on "
+            f"{ssh_target_host(target)} because RKE2 containerd was not reachable: {details}"
+        )
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
+def verify_selected_preload_images_on_nodes(
+    args: argparse.Namespace,
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+) -> None:
+    if not args.execute or args.image_mode != "preload" or not args.rke2_nodes or args.registry:
+        return
+    required = required_preload_import_images(args, service_pairs)
+    if not required:
+        return
+    targets, ssh_options = preload_node_targets(args)
+    if not targets:
+        return
+
+    missing: list[str] = []
+    for target in targets:
+        available_refs = remote_containerd_image_refs(args, ssh_options, target)
+        for record, image, refs in required:
+            if any(ref in available_refs for ref in refs):
+                continue
+            missing.append(f"{ssh_target_host(target)}: {record.file}::{record.name} -> {image}")
+
+    if missing:
+        print("Missing selected preload image(s) on RKE2 node(s):")
+        for item in missing[:40]:
+            print(f"- {item}")
+        if len(missing) > 40:
+            print(f"- ... {len(missing) - 40} more")
+        raise SystemExit(
+            "RKE2 preload image verification failed before workload rollout. "
+            "Rerun MIGRATION_STAGE=images with MIGRATION_FORCE_RERUN=true, or use a registry-backed image mode."
+        )
+    print(f"Verified {len(required)} selected preload image(s) on {len(targets)} RKE2 node(s).")
 
 
 def scheduled_preload_import_image_refs_by_node(args: argparse.Namespace) -> dict[str, set[str]]:
@@ -7049,6 +7132,7 @@ def main(argv: list[str]) -> int:
     if args.stage in {"images", "all"}:
         if not migration_stage_completed(args, "images", service_pairs):
             stage_images(args, project_path, service_pairs, values)
+            verify_selected_preload_images_on_nodes(args, service_pairs)
             mark_migration_stage_completed(args, "images", service_pairs)
             images_stage_ran = True
     if args.stage == "cleanup":
@@ -7062,6 +7146,7 @@ def main(argv: list[str]) -> int:
         if args.execute and args.image_mode == "preload" and args.rke2_nodes and not images_stage_ran:
             print("Reconciling selected preload images on RKE2 nodes before applying workload manifests.")
             stage_images(args, project_path, service_pairs, values)
+        verify_selected_preload_images_on_nodes(args, service_pairs)
         if not migration_stage_completed(args, "manifests", service_pairs):
             stage_manifests(args, service_pairs, values)
             mark_migration_stage_completed(args, "manifests", service_pairs)
