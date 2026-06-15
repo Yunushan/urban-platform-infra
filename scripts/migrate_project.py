@@ -2480,6 +2480,7 @@ def cleanup_stale_node_import_images(
     keep_ref_args = " ".join(shlex.quote(ref) for ref in sorted(keep_refs))
     remote_image_dir = shlex.quote(args.rke2_image_dir.rstrip("/"))
     retention_minutes = max(int(args.node_archive_retention_hours or 0) * 60, 0)
+    cri_cleanup = "true" if args.cleanup_node_cri_images else "false"
     content_prune = "true" if args.cleanup_node_content_prune else "false"
     print(
         "Cleaning stale RKE2 preload refs on nodes "
@@ -2491,11 +2492,19 @@ def cleanup_stale_node_import_images(
         "socket=/run/k3s/containerd/containerd.sock; "
         f"image_dir={remote_image_dir}; "
         f"retention_minutes={retention_minutes}; "
+        f"cri_cleanup={cri_cleanup}; "
         f"content_prune={content_prune}; "
         "if [ ! -S \"$socket\" ] || [ ! -x \"$ctr\" ]; then "
         "echo \"RKE2 containerd is not running; skipped stale import image cleanup.\"; exit 0; "
         "fi; "
         "before=\"$(df -hP / | awk 'NR==2 {print $5 \" used, \" $4 \" free\"}')\"; "
+        "agent_before=\"$(du -sh /var/lib/rancher/rke2/agent 2>/dev/null | awk '{print $1}')\"; "
+        "snapshot_before=\"$(du -sh /var/lib/rancher/rke2/agent/containerd/io.containerd.snapshotter.v1.overlayfs 2>/dev/null | awk '{print $1}')\"; "
+        "content_before=\"$(du -sh /var/lib/rancher/rke2/agent/containerd/io.containerd.content.v1.content 2>/dev/null | awk '{print $1}')\"; "
+        "crictl=\"\"; "
+        "for candidate in /var/lib/rancher/rke2/bin/crictl /usr/local/bin/crictl /usr/bin/crictl; do "
+        "if [ -x \"$candidate\" ]; then crictl=\"$candidate\"; break; fi; "
+        "done; "
         "keep_file=\"$(mktemp)\"; stale_file=\"$(mktemp)\"; removed_file=\"$(mktemp)\"; preserved_file=\"$(mktemp)\"; "
         "archive_file=\"$(mktemp)\"; "
         "trap 'rm -f \"$keep_file\" \"$stale_file\" \"$removed_file\" \"$preserved_file\" \"$archive_file\"' EXIT; "
@@ -2506,8 +2515,15 @@ def cleanup_stale_node_import_images(
         "[ -n \"$ref\" ] || continue; "
         "if grep -Fx -- \"$ref\" \"$keep_file\" >/dev/null; then "
         "printf '%s\\n' \"$ref\" >> \"$preserved_file\"; "
-        "elif \"$ctr\" --address \"$socket\" -n k8s.io images rm \"$ref\" >/dev/null 2>&1; then "
+        "else "
+        "removed_ref=0; "
+        "if [ \"$cri_cleanup\" = \"true\" ] && [ -n \"$crictl\" ]; then "
+        "\"$crictl\" --runtime-endpoint \"unix://$socket\" rmi \"$ref\" >/dev/null 2>&1 && removed_ref=1 || true; "
+        "fi; "
+        "\"$ctr\" --address \"$socket\" -n k8s.io images rm \"$ref\" >/dev/null 2>&1 && removed_ref=1 || true; "
+        "if [ \"$removed_ref\" = \"1\" ]; then "
         "printf '%s\\n' \"$ref\" >> \"$removed_file\"; "
+        "fi; "
         "fi; "
         "done < \"$stale_file\"; "
         "if [ -d \"$image_dir\" ]; then "
@@ -2521,8 +2537,14 @@ def cleanup_stale_node_import_images(
         "preserved=\"$(wc -l < \"$preserved_file\" | tr -d ' ')\"; "
         "archives=\"$(wc -l < \"$archive_file\" | tr -d ' ')\"; "
         "after=\"$(df -hP / | awk 'NR==2 {print $5 \" used, \" $4 \" free\"}')\"; "
+        "agent_after=\"$(du -sh /var/lib/rancher/rke2/agent 2>/dev/null | awk '{print $1}')\"; "
+        "snapshot_after=\"$(du -sh /var/lib/rancher/rke2/agent/containerd/io.containerd.snapshotter.v1.overlayfs 2>/dev/null | awk '{print $1}')\"; "
+        "content_after=\"$(du -sh /var/lib/rancher/rke2/agent/containerd/io.containerd.content.v1.content 2>/dev/null | awk '{print $1}')\"; "
         "echo \"Node import cleanup on $(hostname): removed ${removed} stale imported image ref(s), "
-        "preserved ${preserved}, deleted ${archives} staged tar archive(s); / before: ${before}; after: ${after}.\""
+        "preserved ${preserved}, deleted ${archives} staged tar archive(s); / before: ${before}; after: ${after}; "
+        "agent ${agent_before:-unknown}->${agent_after:-unknown}; "
+        "snapshots ${snapshot_before:-unknown}->${snapshot_after:-unknown}; "
+        "content ${content_before:-unknown}->${content_after:-unknown}.\""
     )
     for target in targets:
         run_remote_sudo_shell(args, ssh_options, target, script)
@@ -4097,6 +4119,7 @@ def generate_bundle(
         f'MIGRATION_CLEANUP_OPERATOR_IMAGES="${{MIGRATION_CLEANUP_OPERATOR_IMAGES:-{str(args.cleanup_operator_images).lower()}}}"\n'
         f'MIGRATION_PRUNE_OPERATOR_CACHE="${{MIGRATION_PRUNE_OPERATOR_CACHE:-{str(args.prune_operator_cache).lower()}}}"\n'
         f'MIGRATION_CLEANUP_NODE_IMPORT_IMAGES="${{MIGRATION_CLEANUP_NODE_IMPORT_IMAGES:-{str(args.cleanup_node_import_images).lower()}}}"\n'
+        f'MIGRATION_CLEANUP_NODE_CRI_IMAGES="${{MIGRATION_CLEANUP_NODE_CRI_IMAGES:-{str(args.cleanup_node_cri_images).lower()}}}"\n'
         f'MIGRATION_CLEANUP_NODE_CONTENT_PRUNE="${{MIGRATION_CLEANUP_NODE_CONTENT_PRUNE:-{str(args.cleanup_node_content_prune).lower()}}}"\n'
         f'MIGRATION_NODE_ARCHIVE_RETENTION_HOURS="${{MIGRATION_NODE_ARCHIVE_RETENTION_HOURS:-{args.node_archive_retention_hours}}}"\n'
         f'MIGRATION_SKIP_DOCKER_SOCKET_SERVICES="${{MIGRATION_SKIP_DOCKER_SOCKET_SERVICES:-{str(args.skip_docker_socket_services).lower()}}}"\n'
@@ -4122,6 +4145,8 @@ def generate_bundle(
         'if [ "$MIGRATION_PRUNE_OPERATOR_CACHE" = "false" ]; then PRUNE_OPERATOR_CACHE_FLAG="--no-prune-operator-cache"; fi\n'
         'CLEANUP_NODE_IMPORT_IMAGES_FLAG="--cleanup-node-import-images"\n'
         'if [ "$MIGRATION_CLEANUP_NODE_IMPORT_IMAGES" = "false" ]; then CLEANUP_NODE_IMPORT_IMAGES_FLAG="--no-cleanup-node-import-images"; fi\n'
+        'CLEANUP_NODE_CRI_IMAGES_FLAG="--cleanup-node-cri-images"\n'
+        'if [ "$MIGRATION_CLEANUP_NODE_CRI_IMAGES" = "false" ]; then CLEANUP_NODE_CRI_IMAGES_FLAG="--no-cleanup-node-cri-images"; fi\n'
         'CLEANUP_NODE_CONTENT_PRUNE_FLAG="--cleanup-node-content-prune"\n'
         'if [ "$MIGRATION_CLEANUP_NODE_CONTENT_PRUNE" = "false" ]; then CLEANUP_NODE_CONTENT_PRUNE_FLAG="--no-cleanup-node-content-prune"; fi\n'
         'DOCKER_SOCKET_FLAG="--skip-docker-socket-services"\n'
@@ -4170,7 +4195,8 @@ def generate_bundle(
         '--container-tool "$MIGRATION_CONTAINER_TOOL" '
         '--postgres-client-image "$MIGRATION_POSTGRES_CLIENT_IMAGE" '
         '$RKE2_IMPORT_FLAG $CLEANUP_OPERATOR_IMAGES_FLAG $PRUNE_OPERATOR_CACHE_FLAG '
-        '$CLEANUP_NODE_IMPORT_IMAGES_FLAG $CLEANUP_NODE_CONTENT_PRUNE_FLAG $DOCKER_SOCKET_FLAG $DATABASE_FAILURE_FLAG '
+        '$CLEANUP_NODE_IMPORT_IMAGES_FLAG $CLEANUP_NODE_CRI_IMAGES_FLAG '
+        '$CLEANUP_NODE_CONTENT_PRUNE_FLAG $DOCKER_SOCKET_FLAG $DATABASE_FAILURE_FLAG '
         '--node-archive-retention-hours "$MIGRATION_NODE_ARCHIVE_RETENTION_HOURS" '
         '--registry "$MIGRATION_REGISTRY" --image-tag "$MIGRATION_IMAGE_TAG" '
         '--dump-dir "$MIGRATION_DUMP_DIR" --db-targets "$MIGRATION_DB_TARGETS" '
@@ -6436,6 +6462,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--no-prune-operator-cache", dest="prune_operator_cache", action="store_false")
     parser.add_argument("--cleanup-node-import-images", dest="cleanup_node_import_images", action="store_true", default=True)
     parser.add_argument("--no-cleanup-node-import-images", dest="cleanup_node_import_images", action="store_false")
+    parser.add_argument("--cleanup-node-cri-images", dest="cleanup_node_cri_images", action="store_true", default=True)
+    parser.add_argument("--no-cleanup-node-cri-images", dest="cleanup_node_cri_images", action="store_false")
     parser.add_argument("--cleanup-node-content-prune", dest="cleanup_node_content_prune", action="store_true", default=True)
     parser.add_argument("--no-cleanup-node-content-prune", dest="cleanup_node_content_prune", action="store_false")
     parser.add_argument("--node-archive-retention-hours", type=int, default=1)

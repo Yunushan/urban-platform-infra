@@ -7,6 +7,7 @@ profiles:
     pruneOperatorCache: true
     rke2ImportImages: true
     cleanupNodeImportImages: true
+    cleanupNodeCriImages: true
     cleanupNodeContentPrune: true
     streamArchives: true
     staleArchiveAction: delete-before-run
@@ -20,6 +21,7 @@ profiles:
     - set MIGRATION_RKE2_NODES so preload archives stream to nodes instead of remaining on the operator
     - keep MIGRATION_RKE2_IMPORT_IMAGES=true so running RKE2 nodes import archives without a service restart
     - keep MIGRATION_CLEANUP_NODE_IMPORT_IMAGES=true for repeated preload reruns on small RKE2 node disks
+    - keep MIGRATION_CLEANUP_NODE_CRI_IMAGES=true so stale refs are removed through the RKE2 CRI image service
     - keep MIGRATION_CLEANUP_NODE_CONTENT_PRUNE=true so stale containerd content can be reclaimed
   production-registry:
     description: Production-friendly path using an authenticated private registry.
@@ -28,6 +30,7 @@ profiles:
     pruneOperatorCache: true
     rke2ImportImages: false
     cleanupNodeImportImages: false
+    cleanupNodeCriImages: false
     cleanupNodeContentPrune: false
     streamArchives: false
     staleArchiveAction: not-applicable
@@ -46,6 +49,7 @@ profiles:
     pruneOperatorCache: false
     rke2ImportImages: true
     cleanupNodeImportImages: false
+    cleanupNodeCriImages: false
     cleanupNodeContentPrune: false
     streamArchives: true
     staleArchiveAction: rotate-explicitly
@@ -66,4 +70,5 @@ checks:
 - operator archive directory is cleaned unless retention is intentional
 - dangling build cache is pruned unless retry speed is more important than disk pressure
 - stale RKE2 node import image refs are pruned during full-batch preload reruns
+- stale imported image refs are removed through RKE2 CRI before raw containerd fallback
 - unreferenced RKE2 containerd content is pruned after stale refs are removed

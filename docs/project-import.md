@@ -333,8 +333,10 @@ Image migration has three modes:
   retry speed. Full-batch preload runs also prune stale node-side
   `urban-platform-import/...` containerd image refs, delete staged tar archives
   older than `MIGRATION_NODE_ARCHIVE_RETENTION_HOURS` (default `1`), and ask
-  containerd to prune unreferenced content. Disable this with
-  `MIGRATION_CLEANUP_NODE_IMPORT_IMAGES=false` or
+  containerd to prune unreferenced content. Stale imported refs are removed
+  through the RKE2 CRI image service first, then raw containerd refs as a
+  fallback. Disable this with `MIGRATION_CLEANUP_NODE_IMPORT_IMAGES=false`,
+  `MIGRATION_CLEANUP_NODE_CRI_IMAGES=false`, or
   `MIGRATION_CLEANUP_NODE_CONTENT_PRUNE=false` only when preserving old imported
   image refs for rollback analysis. Only the current archive is copied to nodes;
   stale local archives from earlier failed runs are removed before the run and

@@ -45,6 +45,7 @@ The import path defaults are intentionally aggressive for small labs:
 - `MIGRATION_PRUNE_OPERATOR_CACHE=true`
 - `MIGRATION_RKE2_IMPORT_IMAGES=true`
 - `MIGRATION_CLEANUP_NODE_IMPORT_IMAGES=true`
+- `MIGRATION_CLEANUP_NODE_CRI_IMAGES=true`
 - `MIGRATION_CLEANUP_NODE_CONTENT_PRUNE=true`
 - `MIGRATION_NODE_ARCHIVE_RETENTION_HOURS=1`
 
@@ -52,8 +53,10 @@ Those defaults remove generated import tags, short-lived local preload archives,
 stale node-side imported image refs, old staged RKE2 tar archives, and dangling
 Docker/Podman image or builder cache after successful candidates. Node import
 cleanup only runs for full-batch imports; partial batches and service filters
-skip it to avoid deleting images outside the selected scope. Disable cleanup
-only while debugging a failed build or preserving an offline evidence bundle.
+skip it to avoid deleting images outside the selected scope. Stale imported refs
+are removed through the RKE2 CRI image service first, then raw containerd refs as
+a fallback. Disable cleanup only while debugging a failed build or preserving an
+offline evidence bundle.
 
 ## RKE2 Preload Behavior
 
