@@ -3205,6 +3205,8 @@ def resolve_auto_import_batch(args: argparse.Namespace, service_pairs: list[tupl
 
 def resolve_lab_safe_import_batch(args: argparse.Namespace, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]]) -> None:
     selected = str(args.import_batch or "").strip().lower()
+    if args.stage == "cleanup":
+        return
     if args.profile != "lab" or selected not in {"", "0", "all"}:
         return
     if selected == "all" and args.force_rerun:
@@ -6495,7 +6497,7 @@ def main(argv: list[str]) -> int:
     args.expected_webserver_image = import_project.expected_webserver_image(values, args.webserver)
     resolve_auto_import_batch(args, service_pairs)
     resolve_lab_safe_import_batch(args, service_pairs)
-    if args.auto_prepare and args.stage != "prepare":
+    if args.auto_prepare and args.stage not in {"prepare", "cleanup"}:
         stage_prepare(args, project_path, compose_files, service_pairs, findings, values)
     if args.stage == "prepare":
         stage_prepare(args, project_path, compose_files, service_pairs, findings, values)
@@ -6510,7 +6512,7 @@ def main(argv: list[str]) -> int:
         stage_preflight(args, values, service_pairs)
     if args.stage in {"secrets", "databases", "manifests", "all"}:
         require_kubernetes_api(args)
-    if args.stage in {"images", "cleanup", "manifests", "all"} and args.image_mode == "preload":
+    if args.stage in {"images", "manifests", "all"} and args.image_mode == "preload":
         tune_rke2_nodes_for_import(args)
     images_stage_ran = False
     if args.stage in {"secrets", "all"}:

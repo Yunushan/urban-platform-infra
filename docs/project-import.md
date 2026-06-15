@@ -352,7 +352,8 @@ Image migration has three modes:
 
 To reclaim disk after repeated lab preload reruns without rebuilding images or
 reapplying manifests, run the cleanup stage with the same project, node, and
-image settings:
+image settings. The cleanup stage is not subject to the lab workload batch
+limit because it only prunes stale node cache and does not create workloads:
 
 ```bash
 make import-migrate \
