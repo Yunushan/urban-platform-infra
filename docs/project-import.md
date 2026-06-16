@@ -361,9 +361,11 @@ Image migration has three modes:
   retained.
   Before the image stage is marked complete and again before manifests are
   applied, preload mode verifies the exact selected workload image refs on every
-  RKE2 node in `MIGRATION_RKE2_NODES`. If a node is missing an image, the import
-  stops before rollout and prints the node/image list instead of leaving the
-  cluster in `ImagePullBackOff`.
+  RKE2 node in `MIGRATION_RKE2_NODES`. It also repairs local, Docker Hub, and
+  `localhost` aliases for already imported images so kubelet can resolve the
+  same image name Kubernetes uses. If a node is still missing an image, the
+  import stops before rollout and prints the node/image list instead of leaving
+  the cluster in `ImagePullBackOff`.
 
 To reclaim disk after repeated lab preload reruns without rebuilding images or
 reapplying manifests, run the cleanup stage with the same project, node, and

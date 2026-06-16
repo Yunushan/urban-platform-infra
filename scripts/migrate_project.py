@@ -2810,6 +2810,35 @@ def remote_containerd_image_refs(args: argparse.Namespace, ssh_options: list[str
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
+def tag_preload_image_aliases_on_node(
+    args: argparse.Namespace,
+    ssh_options: list[str],
+    target: str,
+    refs: list[str],
+) -> bool:
+    image_ref_args = " ".join(shlex.quote(ref) for ref in refs)
+    script = (
+        "set -e; "
+        "ctr=/var/lib/rancher/rke2/bin/ctr; "
+        "socket=/run/k3s/containerd/containerd.sock; "
+        "[ -S \"$socket\" ] && [ -x \"$ctr\" ] || exit 1; "
+        "images=\"$($ctr --address \"$socket\" -n k8s.io images ls -q)\"; "
+        "source_ref=\"\"; "
+        f"for ref in {image_ref_args}; do "
+        "if printf '%s\\n' \"$images\" | grep -Fx -- \"$ref\" >/dev/null; then source_ref=\"$ref\"; break; fi; "
+        "done; "
+        "[ -n \"$source_ref\" ] || exit 1; "
+        f"for target_ref in {image_ref_args}; do "
+        "\"$ctr\" --address \"$socket\" -n k8s.io images tag \"$source_ref\" \"$target_ref\" >/dev/null 2>&1 || true; "
+        "done; "
+        "images=\"$($ctr --address \"$socket\" -n k8s.io images ls -q)\"; "
+        f"for target_ref in {image_ref_args}; do "
+        "printf '%s\\n' \"$images\" | grep -Fx -- \"$target_ref\" >/dev/null; "
+        "done"
+    )
+    return run_remote_sudo_shell_status(args, ssh_options, target, script) == 0
+
+
 def verify_selected_preload_images_on_nodes(
     args: argparse.Namespace,
     service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
@@ -2824,11 +2853,17 @@ def verify_selected_preload_images_on_nodes(
         return
 
     missing: list[str] = []
+    repaired_aliases = 0
     for target in targets:
         available_refs = remote_containerd_image_refs(args, ssh_options, target)
         for record, image, refs in required:
-            if any(ref in available_refs for ref in refs):
+            if all(ref in available_refs for ref in refs):
                 continue
+            if any(ref in available_refs for ref in refs) and tag_preload_image_aliases_on_node(args, ssh_options, target, refs):
+                repaired_aliases += 1
+                available_refs = remote_containerd_image_refs(args, ssh_options, target)
+                if all(ref in available_refs for ref in refs):
+                    continue
             missing.append(f"{ssh_target_host(target)}: {record.file}::{record.name} -> {image}")
 
     if missing:
@@ -2841,7 +2876,8 @@ def verify_selected_preload_images_on_nodes(
             "RKE2 preload image verification failed before workload rollout. "
             "Rerun MIGRATION_STAGE=images with MIGRATION_FORCE_RERUN=true, or use a registry-backed image mode."
         )
-    print(f"Verified {len(required)} selected preload image(s) on {len(targets)} RKE2 node(s).")
+    repair_note = f" repaired {repaired_aliases} alias set(s);" if repaired_aliases else ""
+    print(f"Verified {len(required)} selected preload image(s) on {len(targets)} RKE2 node(s);{repair_note} all runtime aliases are present.")
 
 
 def scheduled_preload_import_image_refs_by_node(args: argparse.Namespace) -> dict[str, set[str]]:
