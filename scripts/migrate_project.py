@@ -6613,6 +6613,102 @@ def capture_container_logs(args: argparse.Namespace, pod_name: str, container_na
     return previous_details, current_details
 
 
+def pod_status_by_name(pods: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        str((pod.get("metadata", {}) or {}).get("name")): pod
+        for pod in pods
+        if (pod.get("metadata", {}) or {}).get("name")
+    }
+
+
+def container_spec_by_name(pod: dict[str, Any], container_name: str) -> dict[str, Any]:
+    for container in (pod.get("spec", {}) or {}).get("containers", []) or []:
+        if container.get("name") == container_name:
+            return container
+    for container in (pod.get("spec", {}) or {}).get("initContainers", []) or []:
+        if container.get("name") == container_name:
+            return container
+    return {}
+
+
+def container_runtime_status_by_name(pod: dict[str, Any], container_name: str) -> dict[str, Any]:
+    for status_key in ["containerStatuses", "initContainerStatuses"]:
+        for container_status in (pod.get("status", {}) or {}).get(status_key, []) or []:
+            if container_status.get("name") == container_name:
+                return container_status
+    return {}
+
+
+def container_state_summary(container_status: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    if not container_status:
+        return ["- Container status: `<missing>`"]
+    lines.append(f"- Ready: `{container_status.get('ready', False)}`")
+    lines.append(f"- Restart count: `{container_status.get('restartCount', 0)}`")
+    lines.append(f"- Image ID: `{container_status.get('imageID') or '<unknown>'}`")
+    for state_name in ["state", "lastState"]:
+        state = container_status.get(state_name, {}) or {}
+        for kind, details in state.items():
+            if not isinstance(details, dict):
+                continue
+            reason = details.get("reason") or kind
+            exit_code = details.get("exitCode")
+            exit_suffix = f", exitCode={exit_code}" if exit_code is not None else ""
+            started = details.get("startedAt")
+            finished = details.get("finishedAt")
+            time_bits = []
+            if started:
+                time_bits.append(f"started={started}")
+            if finished:
+                time_bits.append(f"finished={finished}")
+            time_suffix = f", {', '.join(time_bits)}" if time_bits else ""
+            message = compact_runtime_message(details.get("message"), limit=360)
+            message_suffix = f", message={message}" if message else ""
+            lines.append(f"- {state_name}: `{kind}` reason=`{reason}`{exit_suffix}{time_suffix}{message_suffix}")
+    return lines
+
+
+def container_safe_spec_summary(container_spec: dict[str, Any]) -> list[str]:
+    if not container_spec:
+        return ["- Container spec: `<missing>`"]
+    env_names = [
+        str(item.get("name"))
+        for item in container_spec.get("env", []) or []
+        if isinstance(item, dict) and item.get("name")
+    ]
+    env_from = []
+    for item in container_spec.get("envFrom", []) or []:
+        if not isinstance(item, dict):
+            continue
+        if secret_ref := item.get("secretRef"):
+            env_from.append(f"secret/{secret_ref.get('name', '<unnamed>')}")
+        if config_ref := item.get("configMapRef"):
+            env_from.append(f"configmap/{config_ref.get('name', '<unnamed>')}")
+    volume_mounts = [
+        str(item.get("mountPath"))
+        for item in container_spec.get("volumeMounts", []) or []
+        if isinstance(item, dict) and item.get("mountPath")
+    ]
+    lines = [
+        f"- Image: `{container_spec.get('image') or '<unknown>'}`",
+        f"- Command: `{container_spec.get('command') or '<image default>'}`",
+        f"- Args: `{container_spec.get('args') or '<image default>'}`",
+        f"- Env names: `{', '.join(env_names) if env_names else '<none>'}`",
+        f"- EnvFrom refs: `{', '.join(env_from) if env_from else '<none>'}`",
+        f"- Volume mounts: `{', '.join(volume_mounts) if volume_mounts else '<none>'}`",
+    ]
+    if resources := container_spec.get("resources"):
+        lines.append(f"- Resources: `{resources}`")
+    return lines
+
+
+def describe_pod(args: argparse.Namespace, pod_name: str) -> str:
+    result = kubectl_capture(args, ["-n", args.namespace, "describe", "pod", pod_name])
+    if result.returncode != 0:
+        return f"kubectl describe pod failed: {command_details(result)}"
+    return command_details(result)
+
+
 def write_private_runtime_diagnostics(
     args: argparse.Namespace,
     pods: list[dict[str, Any]],
@@ -6641,13 +6737,26 @@ def write_private_runtime_diagnostics(
         lines.append(f"- `+{len(pod_waiting) - 80}` more")
 
     lines.extend(["", "## Container Logs", ""])
+    pods_by_name = pod_status_by_name(pods)
     for pod_name, container_name, reason in targets[:10]:
+        pod = pods_by_name.get(pod_name, {})
+        container_spec = container_spec_by_name(pod, container_name)
+        container_status = container_runtime_status_by_name(pod, container_name)
         previous, current = capture_container_logs(args, pod_name, container_name)
+        pod_describe = describe_pod(args, pod_name)
         lines.extend(
             [
                 f"### `{pod_name}` / `{container_name}`",
                 "",
                 f"- Waiting reason: `{reason}`",
+                "",
+                "Container status:",
+                "",
+                *container_state_summary(container_status),
+                "",
+                "Container spec summary:",
+                "",
+                *container_safe_spec_summary(container_spec),
                 "",
                 "Previous container log:",
                 "",
@@ -6659,6 +6768,12 @@ def write_private_runtime_diagnostics(
                 "",
                 "```text",
                 runtime_log_excerpt(current),
+                "```",
+                "",
+                "Pod describe excerpt:",
+                "",
+                "```text",
+                runtime_log_excerpt(pod_describe),
                 "```",
                 "",
             ]
