@@ -6573,6 +6573,46 @@ def pod_waiting_log_targets(pods: list[dict[str, Any]]) -> list[tuple[str, str, 
     return list(dict.fromkeys(targets))
 
 
+def container_diagnostic_reason(container_status: dict[str, Any], pod_phase: str) -> str:
+    state = container_status.get("state", {}) or {}
+    for state_name, details in state.items():
+        if isinstance(details, dict):
+            return str(details.get("reason") or state_name or pod_phase or "NotReady")
+    last_state = container_status.get("lastState", {}) or {}
+    for state_name, details in last_state.items():
+        if isinstance(details, dict):
+            reason = str(details.get("reason") or state_name or "PreviousState")
+            exit_code = details.get("exitCode")
+            return f"lastState={reason}" + (f", exitCode={exit_code}" if exit_code is not None else "")
+    return str(pod_phase or "NotReady")
+
+
+def pod_runtime_diagnostic_targets(pods: list[dict[str, Any]]) -> list[tuple[str, str, str]]:
+    targets = pod_waiting_log_targets(pods)
+    seen = {(pod_name, container_name) for pod_name, container_name, _reason in targets}
+    for pod in pods:
+        metadata = pod.get("metadata", {}) or {}
+        status = pod.get("status", {}) or {}
+        name = str(metadata.get("name", ""))
+        phase = str(status.get("phase", "Unknown"))
+        if not name:
+            continue
+        for status_key in ["initContainerStatuses", "containerStatuses"]:
+            for container_status in status.get(status_key, []) or []:
+                container_name = str(container_status.get("name") or "")
+                if not container_name or (name, container_name) in seen:
+                    continue
+                ready = bool(container_status.get("ready", False))
+                restart_count = int(container_status.get("restartCount") or 0)
+                state = container_status.get("state", {}) or {}
+                if ready and restart_count == 0 and phase in {"Running", "Succeeded"} and "terminated" not in state:
+                    continue
+                reason = container_diagnostic_reason(container_status, phase)
+                targets.append((name, container_name, reason))
+                seen.add((name, container_name))
+    return targets
+
+
 def runtime_log_excerpt(text: str, *, limit: int = 12000) -> str:
     compact = text.replace("```", "` ` `").strip()
     if len(compact) <= limit:
@@ -6714,7 +6754,7 @@ def write_private_runtime_diagnostics(
     pods: list[dict[str, Any]],
     pod_waiting: list[str],
 ) -> Path | None:
-    targets = pod_waiting_log_targets(pods)
+    targets = pod_runtime_diagnostic_targets(pods)
     if not targets:
         return None
     private_dir = Path(args.private_dir).expanduser()
@@ -7168,7 +7208,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
     dotnet_versions: list[str] = []
     dotnet_mismatches: list[str] = []
     pod_waiting = pod_waiting_summaries(workload_pods)
-    private_diagnostics_path = write_private_runtime_diagnostics(args, workload_pods, pod_waiting) if pod_waiting else None
+    private_diagnostics_path = None
     for item in deployments:
         name = item.get("metadata", {}).get("name", "unknown")
         ready, desired = deployment_ready_status(item)
@@ -7189,6 +7229,8 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
             dotnet_versions.append(f"{name}: {actual_runtimes} expected .NET {dotnet_target}")
             if "unavailable" in actual_runtimes or not dotnet_runtime_matches_target(actual_runtimes, str(dotnet_target)):
                 dotnet_mismatches.append(f"{name}: expected .NET {dotnet_target}, got {actual_runtimes}")
+    if pod_waiting or not_ready:
+        private_diagnostics_path = write_private_runtime_diagnostics(args, workload_pods, pod_waiting)
 
     runtime_images = sorted({image for pod in pods for image in pod_container_images(pod)})
     database_images = [
@@ -7300,9 +7342,9 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
             problems.append(f"{len(cnpg_missing_pvcs)} CNPG missing PVC issue(s)")
         if pvc_summaries:
             problems.append(f"{len(pvc_summaries)} non-bound PVC(s)")
-        if pod_waiting or cnpg_summaries or cnpg_missing_pvcs or pvc_summaries:
+        if pod_waiting or cnpg_summaries or cnpg_missing_pvcs or pvc_summaries or not_ready:
             print("First runtime validation blockers:")
-            for item in [*pod_waiting[:5], *cnpg_summaries[:5], *cnpg_missing_pvcs[:5], *pvc_summaries[:5]][:10]:
+            for item in [*pod_waiting[:5], *cnpg_summaries[:5], *cnpg_missing_pvcs[:5], *pvc_summaries[:5], *not_ready[:5]][:10]:
                 print(f"- {item}")
             if has_run_as_non_root_rejection(pod_waiting):
                 print(
