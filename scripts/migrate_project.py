@@ -6792,8 +6792,28 @@ def dotnet_deployment_runtimes(args: argparse.Namespace, name: str) -> str:
     return details or "unknown"
 
 
+def runtime_validation_workload_names(args: argparse.Namespace) -> set[str] | None:
+    names = getattr(args, "_runtime_validation_workload_names", None)
+    if names:
+        return set(names)
+    return None
+
+
+def runtime_item_workload_name(item: dict[str, Any]) -> str:
+    metadata = item.get("metadata", {}) or {}
+    labels = metadata.get("labels", {}) or {}
+    return str(labels.get("app.kubernetes.io/name") or metadata.get("name") or "")
+
+
+def filter_runtime_items(args: argparse.Namespace, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    names = runtime_validation_workload_names(args)
+    if not names:
+        return items
+    return [item for item in items if runtime_item_workload_name(item) in names]
+
+
 def imported_deployments(args: argparse.Namespace) -> list[dict[str, Any]]:
-    return kubectl_json(
+    items = kubectl_json(
         args,
         [
             "-n",
@@ -6804,10 +6824,11 @@ def imported_deployments(args: argparse.Namespace) -> list[dict[str, Any]]:
             "app.kubernetes.io/managed-by=urban-platform-import",
         ],
     ).get("items", [])
+    return filter_runtime_items(args, items)
 
 
 def imported_pods(args: argparse.Namespace) -> list[dict[str, Any]]:
-    return kubectl_json(
+    items = kubectl_json(
         args,
         [
             "-n",
@@ -6818,6 +6839,7 @@ def imported_pods(args: argparse.Namespace) -> list[dict[str, Any]]:
             "app.kubernetes.io/managed-by=urban-platform-import",
         ],
     ).get("items", [])
+    return filter_runtime_items(args, items)
 
 
 def runtime_blockers_for_wait(args: argparse.Namespace) -> tuple[list[str], list[str]]:
@@ -7176,7 +7198,18 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
         raise SystemExit(f"Post-migration runtime validation found {'; '.join(problems)}")
 
 
-def stage_validate(args: argparse.Namespace) -> None:
+def stage_validate(args: argparse.Namespace, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]]) -> None:
+    if service_filter_terms(args):
+        scoped_pairs = filter_service_pairs_for_service_filter(args, service_pairs)
+        records = imported_capacity_candidates(args, scoped_pairs)
+        workload_names = {kubernetes_workload_name(record) for record in records}
+        setattr(args, "_runtime_validation_workload_names", workload_names)
+        if workload_names:
+            print(
+                "Runtime validation scoped to imported workload(s): "
+                + ", ".join(sorted(workload_names)[:20])
+                + (f", +{len(workload_names) - 20} more" if len(workload_names) > 20 else "")
+            )
     report_path = Path(args.output).expanduser() / "post-migration-check.md"
     command = [
         sys.executable,
@@ -7434,7 +7467,7 @@ def main(argv: list[str]) -> int:
             mark_migration_stage_completed(args, "manifests", service_pairs)
         cleanup_stale_restricted_import_workloads(args)
     if args.stage in {"validate", "all"}:
-        stage_validate(args)
+        stage_validate(args, service_pairs)
     return 0
 
 

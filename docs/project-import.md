@@ -500,7 +500,8 @@ manifests for a small set of services:
 make import-migrate PROJECT_PATH=/path/to/compose-project \
   MIGRATION_STAGE=validate \
   MIGRATION_EXECUTE=true \
-  MIGRATION_RUNTIME_VALIDATION_TIMEOUT=0
+  MIGRATION_RUNTIME_VALIDATION_TIMEOUT=0 \
+  MIGRATION_SERVICE_FILTER=service-a,service-b
 
 make import-migrate PROJECT_PATH=/path/to/compose-project \
   MIGRATION_STAGE=images \
@@ -527,7 +528,10 @@ every warning to the terminal. `post-migration-runtime.md` checks the deployed
 Kubernetes state: imported Deployment readiness, Services, Ingresses, observed
 runtime images, database-family runtime images, nginx runtime version checks
 for imported nginx workloads, and .NET runtime checks for imported workloads
-annotated by `MIGRATION_DOTNET_TARGET_VERSION`.
+annotated by `MIGRATION_DOTNET_TARGET_VERSION`. When
+`MIGRATION_SERVICE_FILTER` is set, runtime validation is narrowed to the matching
+imported workload names so focused checks do not fail on unrelated legacy
+services.
 
 When execution is enabled, runtime validation waits before failing so freshly
 applied workloads have time to pull images, start containers, bind PVCs, and let
@@ -541,7 +545,10 @@ make import-auto PROJECT_PATH=/path/to/compose-project \
 
 If the timeout expires, the terminal prints the first imported workload waiting
 reasons and CNPG/PVC blockers, while the full public-safe detail remains in
-`reports/import-migration/post-migration-runtime.md`.
+`reports/import-migration/post-migration-runtime.md`. Private crash-loop log
+excerpts are written to
+`/var/lib/urban-platform/private/post-migration-runtime-diagnostics.md`; keep
+that file off Git and share only redacted excerpts.
 
 Imported service workloads get TCP readiness and liveness probes by default.
 When legacy services are crash-looping before you can capture logs, rerun only
