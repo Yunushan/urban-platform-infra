@@ -7177,6 +7177,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
 
 
 def stage_validate(args: argparse.Namespace) -> None:
+    report_path = Path(args.output).expanduser() / "post-migration-check.md"
     command = [
         sys.executable,
         str(ROOT / "scripts/import_project.py"),
@@ -7191,7 +7192,7 @@ def stage_validate(args: argparse.Namespace) -> None:
         "--database",
         args.database,
         "--report",
-        str(Path(args.output).expanduser() / "post-migration-check.md"),
+        str(report_path),
         "--quiet",
     ]
     if args.redact_sensitive:
@@ -7201,8 +7202,32 @@ def stage_validate(args: argparse.Namespace) -> None:
     if args.skip_docker_socket_services:
         command.append("--allow-docker-socket-skip")
     if args.execute:
-        run_command(command)
-        print(f"Source compatibility backlog written to {Path(args.output).expanduser() / 'post-migration-check.md'}")
+        print(f"+ {' '.join(command)}")
+        result = subprocess.run(command, text=True, capture_output=True)
+        if result.returncode != 0:
+            details = command_details(result)
+            message = [
+                "Source compatibility backlog failed before runtime validation.",
+                f"- Report: `{report_path}`",
+            ]
+            if details:
+                message.append(f"- Source checker output: {details}")
+            if args.redact_sensitive and report_path.exists():
+                error_lines = [
+                    line.strip()
+                    for line in report_path.read_text(encoding="utf-8", errors="replace").splitlines()
+                    if "ERROR" in line
+                ][:10]
+                if error_lines:
+                    message.append("- Redacted source-check errors:")
+                    message.extend(f"  - {line}" for line in error_lines)
+            if not args.allow_secret_material:
+                message.append(
+                    "- If this is a trusted private import run, rerun with `MIGRATION_ALLOW_SECRET_MATERIAL=true` "
+                    "so literal secret findings are downgraded while redacted reports remain safe."
+                )
+            raise SystemExit("\n".join(message))
+        print(f"Source compatibility backlog written to {report_path}")
         wait_for_post_migration_runtime(args)
         write_post_migration_runtime_report(args)
     else:
