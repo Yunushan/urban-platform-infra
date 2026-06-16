@@ -191,6 +191,24 @@ Kafka-related, and injects common .NET/Kafka override variables. Set it to an
 external broker list, or to an empty value, when a migration intentionally keeps
 managed Kafka outside the cluster.
 
+`MIGRATION_DOTNET_TARGET_VERSION` enables opt-in .NET runtime alignment for
+build-only imported services whose Dockerfiles use
+`mcr.microsoft.com/dotnet/{aspnet,runtime,runtime-deps,sdk}:...` base images.
+When set, `MIGRATION_DOTNET_VERSION_MODE` defaults to `rewrite`; the image
+stage builds from a temporary Dockerfile with runtime base images rewritten to
+`MIGRATION_DOTNET_IMAGE_REGISTRY/*:<target-version>`, verifies the resulting
+image with `dotnet --list-runtimes`, and adds rollout annotations so Kubernetes
+does not reuse an older imported pod template. Runtime patch pins such as
+`10.0.9` are supported for `aspnet`, `runtime`, and `runtime-deps` images. SDK
+images use SDK tag semantics, so the importer defaults SDK rewrites to the
+target major/minor tag such as `10.0`; set
+`MIGRATION_DOTNET_SDK_TARGET_VERSION` only when you intentionally want an exact
+SDK image tag. Use `report-only` when you only want runtime validation
+annotations, or `disabled` to keep source Dockerfiles unchanged. For
+framework-dependent legacy apps, the rewrite mode also injects
+`DOTNET_ROLL_FORWARD=LatestMajor` by default; the durable upgrade path is still
+to rebuild the application itself for the target TFM, for example `net10.0`.
+
 Imported nginx edge/static services are rebuilt or retagged from the selected
 platform nginx image. In preload mode, nginx platform imports use a stable
 nginx-base suffix and force-refresh the node-side RKE2/containerd image ref, so
@@ -473,6 +491,25 @@ make import-migrate PROJECT_PATH=/path/to/compose-project \
   MIGRATION_RKE2_NODES=node-01,node-02,node-03
 ```
 
+For faster troubleshooting, run only the stage that must change and scope it
+with `MIGRATION_SERVICE_FILTER`. This avoids a full `import-auto` pass when you
+only need to verify runtime state, refresh a few rebuilt images, or reapply
+manifests for a small set of services:
+
+```bash
+make import-migrate PROJECT_PATH=/path/to/compose-project \
+  MIGRATION_STAGE=validate \
+  MIGRATION_EXECUTE=true \
+  MIGRATION_RUNTIME_VALIDATION_TIMEOUT=0
+
+make import-migrate PROJECT_PATH=/path/to/compose-project \
+  MIGRATION_STAGE=images \
+  MIGRATION_EXECUTE=true \
+  MIGRATION_IMAGE_MODE=preload \
+  MIGRATION_SERVICE_FILTER=service-a,service-b \
+  MIGRATION_RKE2_NODES=node-01,node-02,node-03
+```
+
 Available stages are `prepare`, `bundle`, `preflight`, `secrets`, `images`,
 `databases`, `manifests`, `validate`, and `all`. Stage-by-stage execution is mainly for
 troubleshooting a failed section. For example:
@@ -488,8 +525,9 @@ The `validate` stage writes two reports. `post-migration-check.md` keeps the
 source Compose compatibility backlog for follow-up remediation without printing
 every warning to the terminal. `post-migration-runtime.md` checks the deployed
 Kubernetes state: imported Deployment readiness, Services, Ingresses, observed
-runtime images, database-family runtime images, and nginx runtime version checks
-for imported nginx workloads.
+runtime images, database-family runtime images, nginx runtime version checks
+for imported nginx workloads, and .NET runtime checks for imported workloads
+annotated by `MIGRATION_DOTNET_TARGET_VERSION`.
 
 When execution is enabled, runtime validation waits before failing so freshly
 applied workloads have time to pull images, start containers, bind PVCs, and let

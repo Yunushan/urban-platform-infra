@@ -95,6 +95,26 @@ For imported lab clusters, keep the namespace ResourceQuota disabled or raised
 before enabling Strimzi; otherwise the operator cannot create the broker pod
 when existing imported workloads already exceed the quota.
 
+## Fast Health Checks
+
+Use the Strimzi checks when `messaging.kafka.provider=strimzi`:
+
+```bash
+kubectl -n urban-platform get kafka,kafkanodepool
+kubectl -n urban-platform wait kafka/kafka --for=condition=Ready --timeout=60s
+kubectl -n urban-platform get pods -l strimzi.io/cluster=kafka
+kubectl -n urban-platform get endpoints kafka kafka-kafka-bootstrap
+```
+
+Use the direct StatefulSet checks when `messaging.kafka.provider` is `apache`
+or `confluent`:
+
+```bash
+kubectl -n urban-platform rollout status statefulset/kafka --timeout=120s
+kubectl -n urban-platform get pods,endpoints | grep -Ei 'kafka|zookeeper'
+kubectl -n urban-platform exec statefulset/kafka -- kafka-broker-api-versions.sh --bootstrap-server kafka:9092 | head -40
+```
+
 ## Production Notes
 
 - Mirror selected Kafka images into a private registry and pin digests before

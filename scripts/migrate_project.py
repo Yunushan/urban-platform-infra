@@ -97,7 +97,13 @@ IMAGE_CONFIG_TEXT_SUFFIXES = {
 POSTGRES_HOST_KEY_RE = re.compile(r"^(?:PGHOST|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*HOST.*)$", re.IGNORECASE)
 POSTGRES_PORT_KEY_RE = re.compile(r"^(?:PGPORT|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*PORT.*)$", re.IGNORECASE)
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 23
+MANIFEST_GENERATOR_VERSION = 24
+DOTNET_FROM_IMAGE_RE = re.compile(
+    r"^(?P<prefix>\s*FROM\s+(?:--platform=\S+\s+)?)"
+    r"(?P<image>mcr[.]microsoft[.]com/dotnet/(?P<flavor>aspnet|runtime|runtime-deps|sdk):(?P<tag>[^\s]+))"
+    r"(?P<suffix>\s.*)?$",
+    re.IGNORECASE,
+)
 POSTGRES_FAMILY_KINDS = import_project.POSTGRES_FAMILY_KINDS
 OPTIONAL_DATABASE_KINDS = import_project.OPTIONAL_DATABASE_KINDS
 DATABASE_KINDS = import_project.DATABASE_KINDS
@@ -936,6 +942,41 @@ def verify_nginx_import_image(args: argparse.Namespace, record: import_project.S
     print(f"Verified nginx platform image {image}: {details}")
 
 
+def dotnet_runtime_matches_target(output: str, target_version: str) -> bool:
+    if not target_version:
+        return False
+    escaped = re.escape(target_version)
+    runtime_pattern = re.compile(rf"\bMicrosoft[.](?:NETCore|AspNetCore)[.]App\s+{escaped}(?:[.\s]|$)")
+    return bool(runtime_pattern.search(output))
+
+
+def verify_dotnet_import_image(
+    args: argparse.Namespace,
+    record: import_project.ServiceRecord,
+    service: dict[str, Any],
+    image: str,
+    replacements: list[str],
+) -> None:
+    if not replacements or not dotnet_rewrite_enabled(args):
+        return
+    expected_version = dotnet_target_version(args)
+    command = container_command(args, "run", "--rm", "--entrypoint", "dotnet", image, "--list-runtimes")
+    print(f"+ {' '.join(command)}")
+    result = subprocess.run(command, text=True, capture_output=True)
+    details = command_details(result)
+    if result.returncode != 0:
+        raise SystemExit(
+            f"Could not verify .NET runtime for imported image `{image}` after rewriting {record.file}::{record.name}: "
+            f"{details or 'dotnet --list-runtimes failed'}"
+        )
+    if expected_version and not dotnet_runtime_matches_target(details, expected_version):
+        raise SystemExit(
+            f"Refusing to preload .NET image `{image}` because it does not report .NET runtime `{expected_version}`. "
+            f"Observed runtimes: {details}"
+        )
+    print(f"Verified .NET runtime image {image}: {details}")
+
+
 def numeric_port(value: str | int | None) -> int | None:
     if value is None:
         return None
@@ -1112,6 +1153,106 @@ def service_looks_like_dotnet(record: import_project.ServiceRecord, service: dic
             "DOTNET_VERSION",
         }
     )
+
+
+def dotnet_target_version(args: argparse.Namespace) -> str:
+    return str(getattr(args, "dotnet_target_version", "") or "").strip()
+
+
+def dotnet_version_mode(args: argparse.Namespace) -> str:
+    return str(getattr(args, "dotnet_version_mode", "disabled") or "disabled").strip().lower()
+
+
+def dotnet_rewrite_enabled(args: argparse.Namespace) -> bool:
+    return dotnet_version_mode(args) == "rewrite"
+
+
+def dotnet_runtime_reporting_enabled(args: argparse.Namespace) -> bool:
+    return dotnet_version_mode(args) in {"rewrite", "report-only"} and bool(dotnet_target_version(args))
+
+
+def selected_dotnet_image_registry(args: argparse.Namespace) -> str:
+    return str(getattr(args, "dotnet_image_registry", "") or "mcr.microsoft.com/dotnet").strip().rstrip("/")
+
+
+def dotnet_major_minor_version(version: str) -> str:
+    match = re.match(r"^([0-9]+[.][0-9]+)(?:[.].*)?$", version.strip())
+    return match.group(1) if match else version.strip()
+
+
+def dotnet_sdk_target_version(args: argparse.Namespace) -> str:
+    value = str(getattr(args, "dotnet_sdk_target_version", "") or "").strip()
+    return value or dotnet_major_minor_version(dotnet_target_version(args))
+
+
+def selected_dotnet_base_tag(args: argparse.Namespace, flavor: str) -> str:
+    if flavor == "sdk":
+        return dotnet_sdk_target_version(args)
+    return dotnet_target_version(args)
+
+
+def selected_dotnet_base_image(args: argparse.Namespace, flavor: str) -> str:
+    return f"{selected_dotnet_image_registry(args)}/{flavor}:{selected_dotnet_base_tag(args, flavor)}"
+
+
+def rewrite_dotnet_dockerfile_content(args: argparse.Namespace, content: str) -> tuple[str, list[str]]:
+    replacements: list[str] = []
+
+    def replace_line(line: str) -> str:
+        match = DOTNET_FROM_IMAGE_RE.match(line.rstrip("\r\n"))
+        if not match:
+            return line
+        flavor = match.group("flavor").lower()
+        old_image = match.group("image")
+        new_image = selected_dotnet_base_image(args, flavor)
+        replacements.append(f"{old_image} -> {new_image}")
+        newline = "\n" if line.endswith("\n") else ""
+        if line.endswith("\r\n"):
+            newline = "\r\n"
+        return f"{match.group('prefix')}{new_image}{match.group('suffix') or ''}{newline}"
+
+    return "".join(replace_line(line) for line in content.splitlines(keepends=True)), replacements
+
+
+def dotnet_dockerfile_replacements(args: argparse.Namespace, dockerfile_path: Path) -> list[str]:
+    if not dotnet_rewrite_enabled(args):
+        return []
+    try:
+        content = dockerfile_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        content = dockerfile_path.read_text(encoding="latin-1")
+    except OSError:
+        return []
+    _rewritten, replacements = rewrite_dotnet_dockerfile_content(args, content)
+    return replacements
+
+
+def create_dotnet_aligned_dockerfile(args: argparse.Namespace, dockerfile_path: Path) -> tuple[Path | None, list[str]]:
+    try:
+        content = dockerfile_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        content = dockerfile_path.read_text(encoding="latin-1")
+    rewritten, replacements = rewrite_dotnet_dockerfile_content(args, content)
+    if not replacements:
+        return None, []
+    fd, path = tempfile.mkstemp(prefix="urban-dotnet-runtime-", suffix=".Dockerfile")
+    temporary_path = Path(path)
+    with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+        handle.write(rewritten)
+    return temporary_path, replacements
+
+
+def dotnet_rollout_fingerprint(args: argparse.Namespace, record: import_project.ServiceRecord) -> str:
+    material = {
+        "generator": MANIFEST_GENERATOR_VERSION,
+        "mode": dotnet_version_mode(args),
+        "record": [record.file, record.name],
+        "registry": selected_dotnet_image_registry(args),
+        "rollForward": getattr(args, "dotnet_roll_forward", ""),
+        "sdkTargetVersion": dotnet_sdk_target_version(args),
+        "targetVersion": dotnet_target_version(args),
+    }
+    return hashlib.sha256(json.dumps(material, sort_keys=True).encode("utf-8")).hexdigest()[:12]
 
 
 def selected_kafka_bootstrap_servers(args: argparse.Namespace) -> str:
@@ -1606,6 +1747,10 @@ def default_import_environment(args: argparse.Namespace, record: import_project.
         "DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE": "false",
         "ASPNETCORE_HOSTBUILDER__RELOADCONFIGONCHANGE": "false",
     }
+    if dotnet_rewrite_enabled(args) and service_looks_like_dotnet(record, service):
+        roll_forward = str(getattr(args, "dotnet_roll_forward", "") or "").strip()
+        if roll_forward:
+            defaults["DOTNET_ROLL_FORWARD"] = roll_forward
     defaults.update(imported_kafka_environment_defaults(args))
     return defaults
 
@@ -2093,6 +2238,12 @@ def kubernetes_workload_manifests(
                 f"{nginx_base_image}|{local_import_image(args, record)}|{MANIFEST_GENERATOR_VERSION}".encode("utf-8")
             ).hexdigest()[:12]
             pod_template_annotations["urban-platform.io/nginx-rollout-fingerprint"] = rollout_fingerprint
+        if dotnet_runtime_reporting_enabled(args) and service_looks_like_dotnet(record, service):
+            pod_template_annotations["urban-platform.io/dotnet-version-mode"] = dotnet_version_mode(args)
+            pod_template_annotations["urban-platform.io/dotnet-target-version"] = dotnet_target_version(args)
+            pod_template_annotations["urban-platform.io/dotnet-image-registry"] = selected_dotnet_image_registry(args)
+            pod_template_annotations["urban-platform.io/dotnet-roll-forward"] = str(getattr(args, "dotnet_roll_forward", "") or "")
+            pod_template_annotations["urban-platform.io/dotnet-rollout-fingerprint"] = dotnet_rollout_fingerprint(args, record)
         deployment = {
             "apiVersion": "apps/v1",
             "kind": "Deployment",
@@ -4706,6 +4857,11 @@ def generate_bundle(
         f'MIGRATION_LAB_WORKLOAD_CPU_LIMIT="${{MIGRATION_LAB_WORKLOAD_CPU_LIMIT:-{args.lab_workload_cpu_limit}}}"\n'
         f'MIGRATION_LAB_WORKLOAD_MEMORY_LIMIT="${{MIGRATION_LAB_WORKLOAD_MEMORY_LIMIT:-{args.lab_workload_memory_limit}}}"\n'
         f'MIGRATION_KAFKA_BOOTSTRAP_SERVERS="${{MIGRATION_KAFKA_BOOTSTRAP_SERVERS:-{args.kafka_bootstrap_servers}}}"\n'
+        f'MIGRATION_DOTNET_VERSION_MODE="${{MIGRATION_DOTNET_VERSION_MODE:-{args.dotnet_version_mode}}}"\n'
+        f'MIGRATION_DOTNET_TARGET_VERSION="${{MIGRATION_DOTNET_TARGET_VERSION:-{args.dotnet_target_version}}}"\n'
+        f'MIGRATION_DOTNET_SDK_TARGET_VERSION="${{MIGRATION_DOTNET_SDK_TARGET_VERSION:-{args.dotnet_sdk_target_version}}}"\n'
+        f'MIGRATION_DOTNET_IMAGE_REGISTRY="${{MIGRATION_DOTNET_IMAGE_REGISTRY:-{args.dotnet_image_registry}}}"\n'
+        f'MIGRATION_DOTNET_ROLL_FORWARD="${{MIGRATION_DOTNET_ROLL_FORWARD:-{args.dotnet_roll_forward}}}"\n'
         f'MIGRATION_PREFLIGHT_MIN_NODE_MEMORY="${{MIGRATION_PREFLIGHT_MIN_NODE_MEMORY:-{args.preflight_min_node_memory}}}"\n'
         f'MIGRATION_PREFLIGHT_MIN_NODE_DISK_FREE="${{MIGRATION_PREFLIGHT_MIN_NODE_DISK_FREE:-{args.preflight_min_node_disk_free}}}"\n'
         f'MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS="${{MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS:-{args.preflight_max_imported_workloads}}}"\n'
@@ -4792,6 +4948,11 @@ def generate_bundle(
         '--lab-workload-cpu-limit "$MIGRATION_LAB_WORKLOAD_CPU_LIMIT" '
         '--lab-workload-memory-limit "$MIGRATION_LAB_WORKLOAD_MEMORY_LIMIT" '
         '--kafka-bootstrap-servers "$MIGRATION_KAFKA_BOOTSTRAP_SERVERS" '
+        '--dotnet-version-mode "$MIGRATION_DOTNET_VERSION_MODE" '
+        '--dotnet-target-version "$MIGRATION_DOTNET_TARGET_VERSION" '
+        '--dotnet-sdk-target-version "$MIGRATION_DOTNET_SDK_TARGET_VERSION" '
+        '--dotnet-image-registry "$MIGRATION_DOTNET_IMAGE_REGISTRY" '
+        '--dotnet-roll-forward "$MIGRATION_DOTNET_ROLL_FORWARD" '
         '--preflight-min-node-memory "$MIGRATION_PREFLIGHT_MIN_NODE_MEMORY" '
         '--preflight-min-node-disk-free "$MIGRATION_PREFLIGHT_MIN_NODE_DISK_FREE" '
         '--preflight-max-imported-workloads "$MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS" '
@@ -5069,8 +5230,17 @@ def stage_images(
         retry_build: tuple[Path, str] | None = None
         static_source = nginx_static_html_bind_source(args, record, service)
         image_config_rewrite = image_config_rewrite_required(record, service, db_rewrites)
+        build_source: tuple[Path, str, str | None] | None = None
+        build_dockerfile_path: Path | None = None
+        dotnet_replacements: list[str] = []
+        if build:
+            build_source = resolve_build_source(compose_path, build)
+            build_context, build_dockerfile, _fallback_note = build_source
+            build_dockerfile_path = (build_context / build_dockerfile).resolve()
+            if build_dockerfile_path.exists() and build_dockerfile_path.is_file():
+                dotnet_replacements = dotnet_dockerfile_replacements(args, build_dockerfile_path)
         preloaded_reuse_allowed = preloaded_image_reuse_allowed(record, service, db_rewrites)
-        refresh_preload_image = nginx_requires_platform_import(args, record) or image_config_rewrite
+        refresh_preload_image = nginx_requires_platform_import(args, record) or image_config_rewrite or bool(dotnet_replacements)
         temporary_dockerfile: Path | None = None
         try:
             if (
@@ -5112,7 +5282,7 @@ def stage_images(
                     print(f"Aligning nginx service {record.name} from {record.image.display} to platform image {base_image}.")
                 run_command(container_command(args, "tag", base_image, target_image))
             elif build:
-                context, dockerfile, fallback_note = resolve_build_source(compose_path, build)
+                context, dockerfile, fallback_note = build_source or resolve_build_source(compose_path, build)
                 if fallback_note:
                     print(fallback_note)
                 if not context.exists() or not context.is_dir():
@@ -5122,8 +5292,19 @@ def stage_images(
                 if not dockerfile_path.exists() or not dockerfile_path.is_file():
                     skipped.append(f"{record.file}::{record.name} (Dockerfile does not exist: {dockerfile_path})")
                     continue
-                retry_build = (context, dockerfile)
-                run_command(container_command(args, "build", "-t", target_image, "-f", dockerfile, "."), cwd=context)
+                dockerfile_for_build = dockerfile
+                if dotnet_replacements:
+                    temporary_dockerfile, dotnet_replacements = create_dotnet_aligned_dockerfile(args, dockerfile_path)
+                    if temporary_dockerfile is not None:
+                        dockerfile_for_build = str(temporary_dockerfile)
+                        print(
+                            f"Aligning .NET base image(s) for {record.name} to "
+                            f"{selected_dotnet_image_registry(args)}/*:{dotnet_target_version(args)}."
+                        )
+                        for replacement in dotnet_replacements:
+                            print(f"- {replacement}")
+                retry_build = (context, dockerfile_for_build)
+                run_command(container_command(args, "build", "-t", target_image, "-f", dockerfile_for_build, "."), cwd=context)
             elif record.image:
                 source_ready, source_cleanup_images = ensure_source_image(args, record)
                 if not source_ready:
@@ -5201,6 +5382,7 @@ def stage_images(
                 run_command(container_command(args, "tag", record.image.display, target_image))
             rewrite_image_runtime_config(args, record, service, target_image, db_rewrites)
             verify_nginx_import_image(args, record, target_image)
+            verify_dotnet_import_image(args, record, service, target_image, dotnet_replacements)
             generated_images.append(target_image)
             if args.image_mode == "registry":
                 run_command(container_command(args, "push", target_image))
@@ -6599,6 +6781,17 @@ def nginx_deployment_version(args: argparse.Namespace, name: str) -> str:
     return details or "unknown"
 
 
+def dotnet_deployment_runtimes(args: argparse.Namespace, name: str) -> str:
+    result = kubectl_capture(
+        args,
+        ["-n", args.namespace, "exec", f"deploy/{name}", "--", "dotnet", "--list-runtimes"],
+    )
+    details = command_details(result)
+    if result.returncode != 0:
+        return f"unavailable ({details or 'kubectl exec failed'})"
+    return details or "unknown"
+
+
 def imported_deployments(args: argparse.Namespace) -> list[dict[str, Any]]:
     return kubectl_json(
         args,
@@ -6835,6 +7028,8 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
     not_ready: list[str] = []
     nginx_versions: list[str] = []
     nginx_mismatches: list[str] = []
+    dotnet_versions: list[str] = []
+    dotnet_mismatches: list[str] = []
     pod_waiting = pod_waiting_summaries(workload_pods)
     private_diagnostics_path = write_private_runtime_diagnostics(args, workload_pods, pod_waiting) if pod_waiting else None
     for item in deployments:
@@ -6852,6 +7047,11 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
                 nginx_mismatches.append(
                     f"{name}: expected {expected_version} from {nginx_base_image}, got {actual_version}"
                 )
+        if dotnet_target := annotations.get("urban-platform.io/dotnet-target-version"):
+            actual_runtimes = dotnet_deployment_runtimes(args, str(name))
+            dotnet_versions.append(f"{name}: {actual_runtimes} expected .NET {dotnet_target}")
+            if "unavailable" in actual_runtimes or not dotnet_runtime_matches_target(actual_runtimes, str(dotnet_target)):
+                dotnet_mismatches.append(f"{name}: expected .NET {dotnet_target}, got {actual_runtimes}")
 
     runtime_images = sorted({image for pod in pods for image in pod_container_images(pod)})
     database_images = [
@@ -6860,7 +7060,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
         if any(token in image.lower() for token in ["postgres", "postgis", "timescale"])
     ]
 
-    status = "PASS" if not any([not_ready, nginx_mismatches, pod_waiting, cnpg_summaries, pvc_summaries, cnpg_missing_pvcs]) else "FAIL"
+    status = "PASS" if not any([not_ready, nginx_mismatches, dotnet_mismatches, pod_waiting, cnpg_summaries, pvc_summaries, cnpg_missing_pvcs]) else "FAIL"
     lines.extend(
         [
             "## Result",
@@ -6875,6 +7075,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
             f"- CNPG expected PVCs missing: `{len(cnpg_missing_pvcs)}`",
             f"- PVCs not bound: `{len(pvc_summaries)}`",
             f"- nginx version mismatches: `{len(nginx_mismatches)}`",
+            f"- .NET runtime mismatches: `{len(dotnet_mismatches)}`",
             f"- Private diagnostics: `{private_diagnostics_path or 'not generated'}`",
             "",
             "## Deployment Readiness",
@@ -6923,6 +7124,15 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
         lines.extend(["", "## nginx Version Mismatches", ""])
         lines.extend(f"- `{item}`" for item in nginx_mismatches)
 
+    lines.extend(["", "## .NET Runtime", ""])
+    if dotnet_versions:
+        lines.extend(f"- `{item}`" for item in dotnet_versions)
+    else:
+        lines.append("- No imported .NET deployment with `urban-platform.io/dotnet-target-version` annotation was found.")
+    if dotnet_mismatches:
+        lines.extend(["", "## .NET Runtime Mismatches", ""])
+        lines.extend(f"- `{item}`" for item in dotnet_mismatches)
+
     lines.extend(["", "## Database Runtime Images", ""])
     if database_images:
         lines.extend(f"- `{image}`" for image in database_images)
@@ -6943,6 +7153,8 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
             problems.append(f"not-ready deployment(s): {', '.join(not_ready[:20])}")
         if nginx_mismatches:
             problems.append(f"{len(nginx_mismatches)} nginx version mismatch(es)")
+        if dotnet_mismatches:
+            problems.append(f"{len(dotnet_mismatches)} .NET runtime mismatch(es)")
         if pod_waiting:
             problems.append(f"{len(pod_waiting)} imported pod waiting reason(s)")
         if cnpg_summaries:
@@ -7031,6 +7243,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--runtime-validation-timeout", type=int, default=int(os.environ["MIGRATION_RUNTIME_VALIDATION_TIMEOUT"]) if os.environ.get("MIGRATION_RUNTIME_VALIDATION_TIMEOUT") else None)
     parser.add_argument("--runtime-validation-interval", type=int, default=int(os.environ["MIGRATION_RUNTIME_VALIDATION_INTERVAL"]) if os.environ.get("MIGRATION_RUNTIME_VALIDATION_INTERVAL") else 10)
     parser.add_argument("--kafka-bootstrap-servers", default=os.environ.get("MIGRATION_KAFKA_BOOTSTRAP_SERVERS", "kafka:9092"))
+    parser.add_argument("--dotnet-version-mode", choices=["disabled", "report-only", "rewrite"], default=os.environ.get("MIGRATION_DOTNET_VERSION_MODE", ""))
+    parser.add_argument("--dotnet-target-version", default=os.environ.get("MIGRATION_DOTNET_TARGET_VERSION", ""))
+    parser.add_argument("--dotnet-sdk-target-version", default=os.environ.get("MIGRATION_DOTNET_SDK_TARGET_VERSION", ""))
+    parser.add_argument("--dotnet-image-registry", default=os.environ.get("MIGRATION_DOTNET_IMAGE_REGISTRY", "mcr.microsoft.com/dotnet"))
+    parser.add_argument("--dotnet-roll-forward", default=os.environ.get("MIGRATION_DOTNET_ROLL_FORWARD", "LatestMajor"))
     parser.add_argument("--import-security-context", choices=["restricted", "compat"], default=os.environ.get("MIGRATION_IMPORT_SECURITY_CONTEXT", ""))
     parser.add_argument(
         "--import-probe-mode",
@@ -7113,6 +7330,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         args.image_mode = "preload" if lab_profile_enabled(args) else "registry"
     elif args.image_mode not in image_modes:
         parser.error(f"argument --image-mode: invalid choice: {args.image_mode!r} (choose from {', '.join(image_modes)})")
+    if not args.dotnet_version_mode:
+        args.dotnet_version_mode = "rewrite" if args.dotnet_target_version else "disabled"
+    if args.dotnet_version_mode == "rewrite" and not args.dotnet_target_version:
+        parser.error("argument --dotnet-target-version is required when --dotnet-version-mode=rewrite")
     if args.preflight_require_ingress_endpoint is None:
         args.preflight_require_ingress_endpoint = args.profile == "production"
     if not args.import_security_context:
