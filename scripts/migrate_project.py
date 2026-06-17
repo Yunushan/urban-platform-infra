@@ -96,6 +96,10 @@ IMAGE_CONFIG_TEXT_SUFFIXES = {
 }
 POSTGRES_HOST_KEY_RE = re.compile(r"^(?:PGHOST|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*HOST.*)$", re.IGNORECASE)
 POSTGRES_PORT_KEY_RE = re.compile(r"^(?:PGPORT|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*PORT.*)$", re.IGNORECASE)
+POSTGRES_PRIVATE_ENDPOINT_RE = re.compile(
+    rf"(?<![A-Za-z0-9_.-])(?:tcp://)?{PRIVATE_OR_LOCAL_HOST_RE}:5432\b",
+    re.IGNORECASE,
+)
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
 MANIFEST_GENERATOR_VERSION = 24
 DOTNET_FROM_IMAGE_RE = re.compile(
@@ -6824,6 +6828,20 @@ def write_private_runtime_diagnostics(
     return path
 
 
+def postgres_endpoint_leak_summaries(args: argparse.Namespace, pods: list[dict[str, Any]]) -> list[str]:
+    summaries: list[str] = []
+    for pod_name, container_name, reason in pod_runtime_diagnostic_targets(pods)[:20]:
+        previous, current = capture_container_logs(args, pod_name, container_name)
+        combined = "\n".join([previous, current])
+        if not POSTGRES_PRIVATE_ENDPOINT_RE.search(combined):
+            continue
+        summaries.append(
+            f"{pod_name}/{container_name}: legacy private PostgreSQL endpoint still appears in container logs "
+            f"while reason is `{reason}`"
+        )
+    return list(dict.fromkeys(summaries))
+
+
 def cnpg_cluster_summaries(args: argparse.Namespace) -> list[str]:
     try:
         clusters = kubectl_json(args, ["-n", args.namespace, "get", "clusters.postgresql.cnpg.io"]).get("items", [])
@@ -7208,6 +7226,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
     dotnet_versions: list[str] = []
     dotnet_mismatches: list[str] = []
     pod_waiting = pod_waiting_summaries(workload_pods)
+    postgres_endpoint_leaks = postgres_endpoint_leak_summaries(args, workload_pods)
     private_diagnostics_path = None
     for item in deployments:
         name = item.get("metadata", {}).get("name", "unknown")
@@ -7239,7 +7258,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
         if any(token in image.lower() for token in ["postgres", "postgis", "timescale"])
     ]
 
-    status = "PASS" if not any([not_ready, nginx_mismatches, dotnet_mismatches, pod_waiting, cnpg_summaries, pvc_summaries, cnpg_missing_pvcs]) else "FAIL"
+    status = "PASS" if not any([not_ready, nginx_mismatches, dotnet_mismatches, pod_waiting, postgres_endpoint_leaks, cnpg_summaries, pvc_summaries, cnpg_missing_pvcs]) else "FAIL"
     lines.extend(
         [
             "## Result",
@@ -7250,6 +7269,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
             f"- Ingresses in namespace: `{len(ingresses)}`",
             f"- Runtime images observed: `{len(runtime_images)}`",
             f"- Imported pods with waiting containers: `{len(pod_waiting)}`",
+            f"- Legacy PostgreSQL endpoints in crash logs: `{len(postgres_endpoint_leaks)}`",
             f"- CNPG clusters needing attention: `{len(cnpg_summaries)}`",
             f"- CNPG expected PVCs missing: `{len(cnpg_missing_pvcs)}`",
             f"- PVCs not bound: `{len(pvc_summaries)}`",
@@ -7273,6 +7293,17 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
             lines.append(f"- `+{len(pod_waiting) - 120}` more")
     else:
         lines.append("- No waiting container reasons were observed.")
+
+    lines.extend(["", "## Legacy PostgreSQL Endpoint Leaks", ""])
+    if postgres_endpoint_leaks:
+        lines.extend(f"- `{item}`" for item in postgres_endpoint_leaks[:80])
+        lines.append(
+            "- These entries mean a container is still reading an old source PostgreSQL host from baked config, "
+            "mounted config, or environment. Rerun a targeted image/config rewrite after confirming "
+            "`MIGRATION_DB_TARGETS` contains the old source endpoint."
+        )
+    else:
+        lines.append("- No legacy private PostgreSQL endpoint was observed in inspected crash logs.")
 
     lines.extend(["", "## CloudNativePG Status", ""])
     if cnpg_summaries:
@@ -7326,7 +7357,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
     report_path = output / "post-migration-runtime.md"
     write_file(report_path, "\n".join(lines) + "\n")
     print(f"Post-migration runtime validation written to {report_path}")
-    if status != "PASS" or pod_waiting or cnpg_summaries or pvc_summaries:
+    if status != "PASS" or pod_waiting or postgres_endpoint_leaks or cnpg_summaries or pvc_summaries:
         problems = []
         if not_ready:
             problems.append(f"not-ready deployment(s): {', '.join(not_ready[:20])}")
@@ -7336,15 +7367,17 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
             problems.append(f"{len(dotnet_mismatches)} .NET runtime mismatch(es)")
         if pod_waiting:
             problems.append(f"{len(pod_waiting)} imported pod waiting reason(s)")
+        if postgres_endpoint_leaks:
+            problems.append(f"{len(postgres_endpoint_leaks)} legacy PostgreSQL endpoint leak(s)")
         if cnpg_summaries:
             problems.append(f"{len(cnpg_summaries)} CNPG cluster issue(s)")
         if cnpg_missing_pvcs:
             problems.append(f"{len(cnpg_missing_pvcs)} CNPG missing PVC issue(s)")
         if pvc_summaries:
             problems.append(f"{len(pvc_summaries)} non-bound PVC(s)")
-        if pod_waiting or cnpg_summaries or cnpg_missing_pvcs or pvc_summaries or not_ready:
+        if pod_waiting or postgres_endpoint_leaks or cnpg_summaries or cnpg_missing_pvcs or pvc_summaries or not_ready:
             print("First runtime validation blockers:")
-            for item in [*pod_waiting[:5], *cnpg_summaries[:5], *cnpg_missing_pvcs[:5], *pvc_summaries[:5], *not_ready[:5]][:10]:
+            for item in [*pod_waiting[:5], *postgres_endpoint_leaks[:5], *cnpg_summaries[:5], *cnpg_missing_pvcs[:5], *pvc_summaries[:5], *not_ready[:5]][:10]:
                 print(f"- {item}")
             if has_run_as_non_root_rejection(pod_waiting):
                 print(

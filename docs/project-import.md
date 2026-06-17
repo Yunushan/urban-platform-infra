@@ -550,6 +550,13 @@ excerpts are written to
 `/var/lib/urban-platform/private/post-migration-runtime-diagnostics.md`; keep
 that file off Git and share only redacted excerpts.
 
+If validation reports a legacy PostgreSQL endpoint in crash logs, the container
+is still reading an old source database host from baked image config, mounted
+config, or environment. Confirm that the private `MIGRATION_DB_TARGETS` file
+lists that old endpoint under the affected database target, then rerun only the
+affected service image/config rewrite and manifest apply with
+`MIGRATION_SERVICE_FILTER`.
+
 Imported service workloads get TCP readiness and liveness probes by default.
 When legacy services are crash-looping before you can capture logs, rerun only
 the manifests with readiness probes but without liveness restarts:
