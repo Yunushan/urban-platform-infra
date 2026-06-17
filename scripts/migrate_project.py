@@ -101,7 +101,7 @@ POSTGRES_PRIVATE_ENDPOINT_RE = re.compile(
     re.IGNORECASE,
 )
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 24
+MANIFEST_GENERATOR_VERSION = 25
 DOTNET_FROM_IMAGE_RE = re.compile(
     r"^(?P<prefix>\s*FROM\s+(?:--platform=\S+\s+)?)"
     r"(?P<image>mcr[.]microsoft[.]com/dotnet/(?P<flavor>aspnet|runtime|runtime-deps|sdk):(?P<tag>[^\s]+))"
@@ -1387,8 +1387,144 @@ def database_target_source_databases(target: Any) -> list[str]:
     return aliases
 
 
-def endpoint_with_source_metadata(target: Any, endpoint: dict[str, str]) -> dict[str, Any]:
+GENERIC_DATABASE_ALIAS_HINTS = {
+    "app",
+    "data",
+    "database",
+    "db",
+    "pgsql",
+    "postgres",
+    "postgresql",
+    "sql",
+}
+
+
+def source_alias_hint_variants(value: Any) -> set[str]:
+    text = k8s_slug(str(value or ""))
+    if not text or text in GENERIC_DATABASE_ALIAS_HINTS:
+        return set()
+    variants = {text}
+    for suffix in (
+        "-postgresql",
+        "-postgres",
+        "-postgis",
+        "-timescaledb",
+        "-timescale",
+        "-database",
+        "-db",
+        "-data",
+    ):
+        if text.endswith(suffix):
+            variants.add(text[: -len(suffix)].strip("-"))
+    return {
+        variant
+        for variant in variants
+        if len(variant) >= 4 and variant not in GENERIC_DATABASE_ALIAS_HINTS
+    }
+
+
+def endpoint_source_alias_hints(endpoint: dict[str, Any]) -> set[str]:
+    raw_values: list[Any] = []
+    for key in ("_targetName", "sourceAlias", "sourceAliases", "sourceDatabases", "database"):
+        value = endpoint.get(key)
+        if value is None:
+            continue
+        raw_values.extend(value if isinstance(value, list) else [value])
+    aliases: set[str] = set()
+    for value in raw_values:
+        aliases.update(source_alias_hint_variants(value))
+    return aliases
+
+
+def service_dependency_names(service: dict[str, Any]) -> set[str]:
+    names: set[str] = set()
+    depends_on = service.get("depends_on")
+    if isinstance(depends_on, dict):
+        names.update(str(name) for name in depends_on)
+    elif isinstance(depends_on, list):
+        names.update(str(name) for name in depends_on)
+    elif isinstance(depends_on, str):
+        names.add(depends_on)
+    for key in ("links", "external_links"):
+        links = service.get(key)
+        if isinstance(links, list):
+            names.update(str(link).split(":", 1)[0] for link in links)
+        elif isinstance(links, str):
+            names.add(links.split(":", 1)[0])
+    return {name for name in names if name}
+
+
+def service_database_alias_hints(record: import_project.ServiceRecord | None, service: dict[str, Any]) -> tuple[set[str], set[str]]:
+    raw_candidates: list[Any] = []
+    dependency_candidates = service_dependency_names(service)
+    if record is not None:
+        raw_candidates.extend(
+            [
+                record.name,
+                k8s_name(record.name),
+                compose_service_dns_alias(record),
+                image_artifact_name(record),
+                *record_image_aliases(record),
+            ]
+        )
+    raw_candidates.extend(dependency_candidates)
+
+    aliases: set[str] = set()
+    for value in raw_candidates:
+        aliases.update(source_alias_hint_variants(value))
+
+    dependency_aliases: set[str] = set()
+    for value in dependency_candidates:
+        dependency_aliases.update(source_alias_hint_variants(value))
+    return aliases, dependency_aliases
+
+
+def endpoint_matches_service_alias(
+    endpoint: dict[str, Any],
+    service_aliases: set[str],
+    dependency_aliases: set[str],
+) -> bool:
+    endpoint_aliases = endpoint_source_alias_hints(endpoint)
+    if not endpoint_aliases:
+        return False
+    if endpoint_aliases & dependency_aliases:
+        return True
+    for endpoint_alias in endpoint_aliases:
+        for service_alias in service_aliases:
+            if endpoint_alias == service_alias:
+                return True
+            if len(endpoint_alias) >= 4 and endpoint_alias in service_alias:
+                return True
+            if len(service_alias) >= 4 and service_alias in endpoint_alias:
+                return True
+    return False
+
+
+def endpoint_identity(endpoint: dict[str, Any]) -> str:
+    return json.dumps(
+        {
+            "host": endpoint.get("host"),
+            "port": endpoint.get("port"),
+            "database": endpoint.get("database"),
+        },
+        sort_keys=True,
+    )
+
+
+def endpoint_with_source_metadata(target: Any, endpoint: dict[str, str], target_name: str = "") -> dict[str, Any]:
     enriched: dict[str, Any] = dict(endpoint)
+    if target_name:
+        enriched["_targetName"] = target_name
+    if isinstance(target, dict):
+        source_alias = normalized_database_alias(target.get("sourceAlias"))
+        if source_alias:
+            enriched["sourceAlias"] = source_alias
+        source_aliases = target.get("sourceAliases")
+        if source_aliases is not None:
+            raw_aliases = source_aliases if isinstance(source_aliases, list) else [source_aliases]
+            aliases = [alias for raw in raw_aliases if (alias := normalized_database_alias(raw))]
+            if aliases:
+                enriched["sourceAliases"] = list(dict.fromkeys(aliases))
     source_databases = database_target_source_databases(target)
     if source_databases:
         enriched["sourceDatabases"] = source_databases
@@ -1437,7 +1573,7 @@ def database_endpoint_rewrites(
         target = targets.get(record.name)
         endpoint = database_target_endpoint(target)
         if endpoint:
-            enriched = endpoint_with_source_metadata(target, endpoint)
+            enriched = endpoint_with_source_metadata(target, endpoint, record.name)
             if source_port:
                 add_database_rewrite(rewrites, ambiguous, str(source_port), enriched)
             for alias in database_target_source_endpoints(target, source_port or "5432"):
@@ -1448,6 +1584,7 @@ def database_endpoint_rewrites(
 
 
 def service_postgres_target_endpoint(
+    record: import_project.ServiceRecord | None,
     service: dict[str, Any],
     rewrites: dict[str, dict[str, Any]],
 ) -> dict[str, Any] | None:
@@ -1463,17 +1600,20 @@ def service_postgres_target_endpoint(
     for source_key, endpoint in rewrites.items():
         if postgres_rewrite_matches_text(source_key, endpoint, joined):
             matches.append(endpoint)
-    unique = {
-        json.dumps(
-            {
-                "host": endpoint.get("host"),
-                "port": endpoint.get("port"),
-                "database": endpoint.get("database"),
-            },
-            sort_keys=True,
-        ): endpoint
-        for endpoint in matches
-    }
+    unique = {endpoint_identity(endpoint): endpoint for endpoint in matches}
+    if len(unique) == 1:
+        return next(iter(unique.values()))
+    service_aliases, dependency_aliases = service_database_alias_hints(record, service)
+    matches = []
+    seen: set[str] = set()
+    for endpoint in rewrites.values():
+        identity = endpoint_identity(endpoint)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        if endpoint_matches_service_alias(endpoint, service_aliases, dependency_aliases):
+            matches.append(endpoint)
+    unique = {endpoint_identity(endpoint): endpoint for endpoint in matches}
     if len(unique) == 1:
         return next(iter(unique.values()))
     return None
@@ -1675,11 +1815,12 @@ def normalize_imported_env_value(
 
 def normalize_imported_secret_entries(
     args: argparse.Namespace,
+    record: import_project.ServiceRecord,
     service: dict[str, Any],
     entries: dict[str, str],
     db_rewrites: dict[str, dict[str, Any]],
 ) -> dict[str, str]:
-    service_db_endpoint = service_postgres_target_endpoint(service, db_rewrites)
+    service_db_endpoint = service_postgres_target_endpoint(record, service, db_rewrites)
     return {
         key: normalize_imported_env_value(
             args,
@@ -1698,7 +1839,7 @@ def env_rewrite_fingerprint(
     service: dict[str, Any],
     db_rewrites: dict[str, dict[str, Any]],
 ) -> str:
-    service_endpoint = service_postgres_target_endpoint(service, db_rewrites) or {}
+    service_endpoint = service_postgres_target_endpoint(record, service, db_rewrites) or {}
     public_material = {
         "generator": MANIFEST_GENERATOR_VERSION,
         "record": [record.file, record.name],
@@ -2160,7 +2301,7 @@ def kubernetes_workload_manifests(
             "app.kubernetes.io/part-of": "urban-platform-import",
             "app.kubernetes.io/managed-by": "urban-platform-import",
         }
-        service_db_endpoint = service_postgres_target_endpoint(service, db_rewrites)
+        service_db_endpoint = service_postgres_target_endpoint(record, service, db_rewrites)
         env = [
             {
                 "name": key,
@@ -2618,7 +2759,7 @@ def rewrite_image_runtime_config(
 ) -> str | None:
     if not image_config_rewrite_required(record, service, db_rewrites):
         return None
-    service_endpoint = service_postgres_target_endpoint(service, db_rewrites)
+    service_endpoint = service_postgres_target_endpoint(record, service, db_rewrites)
     sed_scripts = image_config_rewrite_sed_scripts(db_rewrites, service_endpoint)
     if not sed_scripts:
         return None
@@ -5139,7 +5280,7 @@ def stage_secrets(args: argparse.Namespace, service_pairs: list[tuple[import_pro
     db_rewrites = database_endpoint_rewrites(args, service_pairs, values)
     secrets = []
     for record, service in scoped_service_pairs:
-        entries = normalize_imported_secret_entries(args, service, secret_entries(service), db_rewrites)
+        entries = normalize_imported_secret_entries(args, record, service, secret_entries(service), db_rewrites)
         if entries:
             secrets.append((record, entries))
     print(f"Secret-bearing services: {len(secrets)}")
@@ -5360,7 +5501,7 @@ def stage_images(
                         )
                         source_preloaded_refs.setdefault(record.image.display, image_refs)
                         continue
-                    if preloaded_reuse_allowed and archive_path is not None and archive_path.exists():
+                    if preloaded_reuse_allowed and not refresh_preload_image and archive_path is not None and archive_path.exists():
                         print(
                             f"Source image {record.image.display} is unavailable; "
                             f"reusing existing preload archive {archive_path}."
@@ -6828,18 +6969,229 @@ def write_private_runtime_diagnostics(
     return path
 
 
-def postgres_endpoint_leak_summaries(args: argparse.Namespace, pods: list[dict[str, Any]]) -> list[str]:
-    summaries: list[str] = []
+def postgres_endpoint_from_match(match: re.Match[str]) -> dict[str, str] | None:
+    parsed = parse_source_endpoint(match.group(0), "5432")
+    if not parsed:
+        return None
+    host, port = parsed
+    return {"host": host, "port": port}
+
+
+def postgres_endpoint_leak_items(args: argparse.Namespace, pods: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    pods_by_name = pod_status_by_name(pods)
     for pod_name, container_name, reason in pod_runtime_diagnostic_targets(pods)[:20]:
         previous, current = capture_container_logs(args, pod_name, container_name)
         combined = "\n".join([previous, current])
-        if not POSTGRES_PRIVATE_ENDPOINT_RE.search(combined):
+        endpoints: list[dict[str, str]] = []
+        seen_endpoints: set[str] = set()
+        for match in POSTGRES_PRIVATE_ENDPOINT_RE.finditer(combined):
+            endpoint = postgres_endpoint_from_match(match)
+            if not endpoint:
+                continue
+            key = source_endpoint_key(endpoint["host"], endpoint["port"])
+            if key in seen_endpoints:
+                continue
+            seen_endpoints.add(key)
+            endpoints.append(endpoint)
+        if not endpoints:
             continue
+        pod = pods_by_name.get(pod_name, {})
+        items.append(
+            {
+                "pod": pod_name,
+                "container": container_name,
+                "reason": reason,
+                "workload": runtime_item_workload_name(pod),
+                "endpoints": endpoints,
+            }
+        )
+    return items
+
+
+def postgres_endpoint_leak_summaries(args: argparse.Namespace, pods: list[dict[str, Any]]) -> list[str]:
+    summaries: list[str] = []
+    for item in postgres_endpoint_leak_items(args, pods):
         summaries.append(
-            f"{pod_name}/{container_name}: legacy private PostgreSQL endpoint still appears in container logs "
-            f"while reason is `{reason}`"
+            f"{item['pod']}/{item['container']}: legacy private PostgreSQL endpoint still appears in container logs "
+            f"while reason is `{item['reason']}`"
         )
     return list(dict.fromkeys(summaries))
+
+
+def source_endpoint_entry_exists(target: dict[str, Any], endpoint: dict[str, str]) -> bool:
+    key = source_endpoint_key(endpoint["host"], endpoint["port"])
+    return key in database_target_source_endpoints(target, endpoint["port"])
+
+
+def target_names_for_postgres_leaks(
+    args: argparse.Namespace,
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+    values: dict[str, Any],
+    leak_items: list[dict[str, Any]],
+) -> set[str]:
+    db_rewrites = database_endpoint_rewrites(args, service_pairs, values)
+    pairs_by_workload = {
+        kubernetes_workload_name(record): (record, service)
+        for record, service in service_pairs
+    }
+    target_names: set[str] = set()
+    for item in leak_items:
+        workload = str(item.get("workload") or "")
+        pair = pairs_by_workload.get(workload)
+        if not pair:
+            continue
+        record, service = pair
+        endpoint = service_postgres_target_endpoint(record, service, db_rewrites)
+        target_name = str((endpoint or {}).get("_targetName") or "")
+        if target_name:
+            target_names.add(target_name)
+    return target_names
+
+
+def auto_enrich_database_targets_from_postgres_leaks(
+    args: argparse.Namespace,
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+    values: dict[str, Any],
+    leak_items: list[dict[str, Any]],
+) -> bool:
+    if yaml is None or not leak_items:
+        return False
+    target_names = target_names_for_postgres_leaks(args, service_pairs, values, leak_items)
+    if not target_names:
+        print(
+            "Detected runtime PostgreSQL source endpoint leak(s), but could not map the affected workload(s) "
+            "to a database target automatically."
+        )
+        return False
+    target_path = database_targets_path(args)
+    if not target_path.exists():
+        write_database_target_map(target_path, service_pairs, values, args.namespace)
+    data = yaml.safe_load(target_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        return False
+    targets = data.get("databaseTargets", data)
+    if not isinstance(targets, dict):
+        return False
+
+    leaked_endpoints: list[dict[str, str]] = []
+    seen_endpoints: set[str] = set()
+    for item in leak_items:
+        for endpoint in item.get("endpoints", []):
+            key = source_endpoint_key(str(endpoint.get("host") or ""), str(endpoint.get("port") or "5432"))
+            if not key or key in seen_endpoints:
+                continue
+            seen_endpoints.add(key)
+            leaked_endpoints.append({"host": str(endpoint.get("host") or ""), "port": str(endpoint.get("port") or "5432")})
+
+    changed = False
+    for target_name in sorted(target_names):
+        target = targets.get(target_name)
+        if not isinstance(target, dict) or str(target.get("engine") or "") not in POSTGRES_FAMILY_KINDS:
+            continue
+        source_endpoints = target.get("sourceEndpoints")
+        if source_endpoints is None:
+            source_endpoints = []
+            target["sourceEndpoints"] = source_endpoints
+            changed = True
+        elif not isinstance(source_endpoints, list):
+            source_endpoints = [source_endpoints]
+            target["sourceEndpoints"] = source_endpoints
+            changed = True
+        for endpoint in leaked_endpoints:
+            if source_endpoint_entry_exists(target, endpoint):
+                continue
+            source_endpoints.append({"host": endpoint["host"], "port": int(endpoint["port"]) if endpoint["port"].isdigit() else endpoint["port"]})
+            changed = True
+
+    if changed:
+        write_file(target_path, yaml.safe_dump(data, sort_keys=False))
+        secure_file(target_path)
+        print(
+            "Auto-enriched private DB target source endpoint hints from runtime crash logs "
+            f"for {len(target_names)} database target(s): {target_path}"
+        )
+    return changed
+
+
+def auto_repair_runtime_postgres_leaks(
+    args: argparse.Namespace,
+    project_path: Path,
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+    values: dict[str, Any],
+) -> bool:
+    if getattr(args, "_runtime_postgres_auto_repair_attempted", False) or not args.execute:
+        return False
+    try:
+        pods = imported_pods(args)
+    except RuntimeError as exc:
+        print(f"Could not inspect imported pods for automatic PostgreSQL endpoint repair: {compact_runtime_message(exc)}")
+        return False
+    leak_items = postgres_endpoint_leak_items(args, pods)
+    if not leak_items:
+        return False
+
+    setattr(args, "_runtime_postgres_auto_repair_attempted", True)
+    auto_enrich_database_targets_from_postgres_leaks(args, service_pairs, values, leak_items)
+
+    leaked_workloads = {str(item.get("workload") or "") for item in leak_items if item.get("workload")}
+    repair_pairs = [
+        (record, service)
+        for record, service in service_pairs
+        if kubernetes_workload_name(record) in leaked_workloads
+    ]
+    if not repair_pairs:
+        print(
+            "Detected runtime PostgreSQL source endpoint leak(s), but could not map the affected pod(s) "
+            "back to Compose services for automatic repair."
+        )
+        return False
+    if args.image_mode == "preload" and not split_csv(str(args.rke2_nodes or "")):
+        print(
+            "Detected runtime PostgreSQL source endpoint leak(s) and updated private DB hints, "
+            "but automatic image repair needs MIGRATION_RKE2_NODES when MIGRATION_IMAGE_MODE=preload."
+        )
+        return False
+
+    repair_terms = sorted({record.name for record, _service in repair_pairs})
+    print(
+        "Automatically repairing runtime PostgreSQL endpoint leak(s) for imported service(s): "
+        + ", ".join(repair_terms[:20])
+        + (f", +{len(repair_terms) - 20} more" if len(repair_terms) > 20 else "")
+    )
+
+    saved_values = {
+        "service_filter": args.service_filter,
+        "import_batch": args.import_batch,
+        "force_rerun": args.force_rerun,
+        "resume": args.resume,
+        "_service_filter_announced": getattr(args, "_service_filter_announced", None),
+    }
+    try:
+        args.service_filter = ",".join(repair_terms)
+        args.import_batch = "all"
+        args.force_rerun = True
+        args.resume = False
+        setattr(args, "_service_filter_announced", False)
+        stage_images(args, project_path, service_pairs, values)
+        verify_selected_preload_images_on_nodes(args, service_pairs)
+        reconcile_import_namespace_pod_security(args)
+        stage_manifests(args, service_pairs, values)
+        cleanup_stale_restricted_import_workloads(args)
+        print("Automatic runtime PostgreSQL endpoint repair applied; re-running runtime validation.")
+        return True
+    finally:
+        args.service_filter = saved_values["service_filter"]
+        args.import_batch = saved_values["import_batch"]
+        args.force_rerun = saved_values["force_rerun"]
+        args.resume = saved_values["resume"]
+        if saved_values["_service_filter_announced"] is None:
+            try:
+                delattr(args, "_service_filter_announced")
+            except AttributeError:
+                pass
+        else:
+            setattr(args, "_service_filter_announced", saved_values["_service_filter_announced"])
 
 
 def cnpg_cluster_summaries(args: argparse.Namespace) -> list[str]:
@@ -7388,7 +7740,12 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
         raise SystemExit(f"Post-migration runtime validation found {'; '.join(problems)}")
 
 
-def stage_validate(args: argparse.Namespace, service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]]) -> None:
+def stage_validate(
+    args: argparse.Namespace,
+    project_path: Path,
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+    values: dict[str, Any],
+) -> None:
     if service_filter_terms(args):
         scoped_pairs = filter_service_pairs_for_service_filter(args, service_pairs)
         records = imported_capacity_candidates(args, scoped_pairs)
@@ -7452,7 +7809,14 @@ def stage_validate(args: argparse.Namespace, service_pairs: list[tuple[import_pr
             raise SystemExit("\n".join(message))
         print(f"Source compatibility backlog written to {report_path}")
         wait_for_post_migration_runtime(args)
-        write_post_migration_runtime_report(args)
+        try:
+            write_post_migration_runtime_report(args)
+        except SystemExit:
+            if auto_repair_runtime_postgres_leaks(args, project_path, service_pairs, values):
+                wait_for_post_migration_runtime(args)
+                write_post_migration_runtime_report(args)
+                return
+            raise
     else:
         print("Validation command:")
         print(" ".join(command))
@@ -7657,7 +8021,7 @@ def main(argv: list[str]) -> int:
             mark_migration_stage_completed(args, "manifests", service_pairs)
         cleanup_stale_restricted_import_workloads(args)
     if args.stage in {"validate", "all"}:
-        stage_validate(args, service_pairs)
+        stage_validate(args, project_path, service_pairs, values)
     return 0
 
 

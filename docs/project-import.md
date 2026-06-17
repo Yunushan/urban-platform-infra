@@ -552,10 +552,12 @@ that file off Git and share only redacted excerpts.
 
 If validation reports a legacy PostgreSQL endpoint in crash logs, the container
 is still reading an old source database host from baked image config, mounted
-config, or environment. Confirm that the private `MIGRATION_DB_TARGETS` file
-lists that old endpoint under the affected database target, then rerun only the
-affected service image/config rewrite and manifest apply with
-`MIGRATION_SERVICE_FILTER`.
+config, or environment. In execute mode the validator now attempts one automatic
+repair pass: it learns non-secret source endpoint hints into the private
+`MIGRATION_DB_TARGETS` file, rebuilds/reloads only the affected imported
+service image(s), reapplies their manifests, and immediately re-runs runtime
+validation. Preload mode still needs the normal RKE2 node/SSH inputs in the
+command environment so the repaired image can be streamed to the nodes.
 
 Imported service workloads get TCP readiness and liveness probes by default.
 When legacy services are crash-looping before you can capture logs, rerun only
