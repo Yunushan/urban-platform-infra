@@ -105,7 +105,11 @@ POSTGRES_PASSWORD_KEY_RE = re.compile(
     re.IGNORECASE,
 )
 POSTGRES_PRIVATE_ENDPOINT_RE = re.compile(
-    rf"(?<![A-Za-z0-9_.-])(?:tcp://)?{PRIVATE_OR_LOCAL_HOST_RE}:5432\b",
+    rf"(?<![A-Za-z0-9_.-])(?:tcp://)?{PRIVATE_OR_LOCAL_HOST_RE}:[0-9]{{2,5}}\b",
+    re.IGNORECASE,
+)
+POSTGRES_AUTH_FAILURE_RE = re.compile(
+    r"28P01|password authentication failed|auth_failed",
     re.IGNORECASE,
 )
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
@@ -7361,6 +7365,8 @@ def postgres_endpoint_leak_items(args: argparse.Namespace, pods: list[dict[str, 
     for pod_name, container_name, reason in pod_runtime_diagnostic_targets(pods)[:120]:
         previous, current = capture_container_logs(args, pod_name, container_name)
         combined = postgres_leak_detection_log_text(reason, previous, current)
+        if not re.search(r"npgsql|postgres|postgis|timescale|database|migration", combined, re.IGNORECASE):
+            continue
         endpoints: list[dict[str, str]] = []
         seen_endpoints: set[str] = set()
         for match in POSTGRES_PRIVATE_ENDPOINT_RE.finditer(combined):
@@ -7382,6 +7388,28 @@ def postgres_endpoint_leak_items(args: argparse.Namespace, pods: list[dict[str, 
                 "reason": reason,
                 "workload": runtime_item_workload_name(pod),
                 "endpoints": endpoints,
+            }
+        )
+    return items
+
+
+def postgres_auth_failure_items(args: argparse.Namespace, pods: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    pods_by_name = pod_status_by_name(pods)
+    for pod_name, container_name, reason in pod_runtime_diagnostic_targets(pods)[:120]:
+        previous, current = capture_container_logs(args, pod_name, container_name)
+        combined = postgres_leak_detection_log_text(reason, previous, current)
+        if not POSTGRES_AUTH_FAILURE_RE.search(combined):
+            continue
+        if not re.search(r"npgsql|postgres|postgis|timescale|database|migration", combined, re.IGNORECASE):
+            continue
+        pod = pods_by_name.get(pod_name, {})
+        items.append(
+            {
+                "pod": pod_name,
+                "container": container_name,
+                "reason": reason,
+                "workload": runtime_item_workload_name(pod),
             }
         )
     return items
@@ -7543,25 +7571,30 @@ def auto_repair_runtime_postgres_leaks(
         print(f"Could not inspect imported pods for automatic PostgreSQL endpoint repair: {compact_runtime_message(exc)}")
         return False
     leak_items = postgres_endpoint_leak_items(args, pods)
-    if not leak_items:
+    auth_items = postgres_auth_failure_items(args, pods)
+    if not leak_items and not auth_items:
         return False
 
     setattr(args, "_runtime_postgres_auto_repair_attempted", True)
-    auto_enrich_database_targets_from_postgres_leaks(args, service_pairs, values, leak_items)
+    if leak_items:
+        auto_enrich_database_targets_from_postgres_leaks(args, service_pairs, values, leak_items)
 
     leaked_workloads = {str(item.get("workload") or "") for item in leak_items if item.get("workload")}
+    auth_failed_workloads = {str(item.get("workload") or "") for item in auth_items if item.get("workload")}
+    repair_workloads = leaked_workloads | auth_failed_workloads
     repair_pairs = [
         (record, service)
         for record, service in service_pairs
-        if kubernetes_workload_name(record) in leaked_workloads
+        if kubernetes_workload_name(record) in repair_workloads
     ]
     if not repair_pairs:
         print(
-            "Detected runtime PostgreSQL source endpoint leak(s), but could not map the affected pod(s) "
+            "Detected runtime PostgreSQL endpoint/credential failure(s), but could not map the affected pod(s) "
             "back to Compose services for automatic repair."
         )
         return False
-    if args.image_mode == "preload" and not split_csv(str(args.rke2_nodes or "")):
+    needs_image_repair = bool(leak_items)
+    if needs_image_repair and args.image_mode == "preload" and not split_csv(str(args.rke2_nodes or "")):
         print(
             "Detected runtime PostgreSQL source endpoint leak(s) and updated private DB hints, "
             "but automatic image repair needs MIGRATION_RKE2_NODES when MIGRATION_IMAGE_MODE=preload."
@@ -7570,10 +7603,14 @@ def auto_repair_runtime_postgres_leaks(
 
     repair_terms = sorted({record.name for record, _service in repair_pairs})
     print(
-        "Automatically repairing runtime PostgreSQL endpoint leak(s) for imported service(s): "
+        "Automatically repairing runtime PostgreSQL endpoint/credential failure(s) for imported service(s): "
         + ", ".join(repair_terms[:20])
         + (f", +{len(repair_terms) - 20} more" if len(repair_terms) > 20 else "")
     )
+    if auth_items:
+        print("Repair will reapply generated per-service DB Secret/env overrides for authentication failure(s).")
+    if leak_items:
+        print("Repair will rebuild/repreload image config for legacy private endpoint leak(s).")
 
     saved_values = {
         "service_filter": args.service_filter,
@@ -7588,13 +7625,14 @@ def auto_repair_runtime_postgres_leaks(
         args.force_rerun = True
         args.resume = False
         setattr(args, "_service_filter_announced", False)
-        stage_images(args, project_path, service_pairs, values)
-        verify_selected_preload_images_on_nodes(args, service_pairs)
+        if needs_image_repair:
+            stage_images(args, project_path, service_pairs, values)
+            verify_selected_preload_images_on_nodes(args, service_pairs)
         reconcile_import_namespace_pod_security(args)
         stage_manifests(args, service_pairs, values)
         restart_repaired_import_deployments(args, repair_pairs)
         cleanup_stale_restricted_import_workloads(args)
-        print("Automatic runtime PostgreSQL endpoint repair applied; re-running runtime validation.")
+        print("Automatic runtime PostgreSQL repair applied; re-running runtime validation.")
         return True
     finally:
         args.service_filter = saved_values["service_filter"]
