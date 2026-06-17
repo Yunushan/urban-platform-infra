@@ -113,7 +113,7 @@ POSTGRES_AUTH_FAILURE_RE = re.compile(
     re.IGNORECASE,
 )
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 31
+MANIFEST_GENERATOR_VERSION = 32
 DOTNET_FROM_IMAGE_RE = re.compile(
     r"^(?P<prefix>\s*FROM\s+(?:--platform=\S+\s+)?)"
     r"(?P<image>mcr[.]microsoft[.]com/dotnet/(?P<flavor>aspnet|runtime|runtime-deps|sdk):(?P<tag>[^\s]+))"
@@ -1605,6 +1605,19 @@ def endpoint_with_source_metadata(target: Any, endpoint: dict[str, str], target_
     return enriched
 
 
+def normalized_postgres_family_engine(target: Any) -> str:
+    if not isinstance(target, dict):
+        return ""
+    engine = str(target.get("engine") or "").strip().lower()
+    if engine == "postgres":
+        return "postgresql"
+    return engine
+
+
+def target_is_postgres_family(target: Any) -> bool:
+    return normalized_postgres_family_engine(target) in POSTGRES_FAMILY_KINDS
+
+
 def add_database_rewrite(
     rewrites: dict[str, dict[str, Any]],
     ambiguous: set[str],
@@ -1640,20 +1653,34 @@ def database_endpoint_rewrites(
 
     rewrites: dict[str, dict[str, Any]] = {}
     ambiguous: set[str] = set()
+    added_target_names: set[str] = set()
+
+    def add_target_rewrites(target_name: str, target: Any, source_port: str | None = None) -> None:
+        if not target_is_postgres_family(target):
+            return
+        endpoint = database_target_runtime_endpoint(args, target)
+        if not endpoint:
+            return
+        enriched = endpoint_with_source_metadata(target, endpoint, target_name)
+        add_database_rewrite(rewrites, ambiguous, f"target:{target_name}", enriched)
+        if source_port:
+            add_database_rewrite(rewrites, ambiguous, str(source_port), enriched)
+        for alias in database_target_source_endpoints(target, source_port or None):
+            add_database_rewrite(rewrites, ambiguous, alias, enriched)
+        for database in enriched.get("sourceDatabases", []):
+            add_database_rewrite(rewrites, ambiguous, source_database_key(str(database)), enriched)
+        added_target_names.add(target_name)
+
     for record, _service in service_pairs:
         if record.kind not in POSTGRES_FAMILY_KINDS:
             continue
         source_port = published_port(record)
         target = targets.get(record.name)
-        endpoint = database_target_runtime_endpoint(args, target)
-        if endpoint:
-            enriched = endpoint_with_source_metadata(target, endpoint, record.name)
-            if source_port:
-                add_database_rewrite(rewrites, ambiguous, str(source_port), enriched)
-            for alias in database_target_source_endpoints(target, source_port or "5432"):
-                add_database_rewrite(rewrites, ambiguous, alias, enriched)
-            for database in enriched.get("sourceDatabases", []):
-                add_database_rewrite(rewrites, ambiguous, source_database_key(str(database)), enriched)
+        add_target_rewrites(record.name, target, source_port)
+    for target_name, target in targets.items():
+        if target_name in added_target_names:
+            continue
+        add_target_rewrites(str(target_name), target)
     return rewrites
 
 
