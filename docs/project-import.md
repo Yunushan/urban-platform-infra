@@ -556,8 +556,11 @@ config, or environment. In execute mode the validator now attempts one automatic
 repair pass: it learns non-secret source endpoint hints into the private
 `MIGRATION_DB_TARGETS` file, rebuilds/reloads only the affected imported
 service image(s), reapplies their manifests, and immediately re-runs runtime
-validation. Repaired deployments receive a rollout annotation so unchanged image
-tags are restarted after preload import. For running containers, validation uses
+validation. When target credentials are available through the private target map
+or CloudNativePG app `secretRef`, the same repair also aligns PostgreSQL
+username/password values in imported env, Secrets, mounted config, and baked text
+config. Repaired deployments receive a rollout annotation so unchanged image tags
+are restarted after preload import. For running containers, validation uses
 current logs for endpoint-leak checks so stale pre-repair `--previous` logs do
 not keep failing the run. When a direct legacy PostgreSQL host is found in
 traffic/analytics-style workloads that do not map to a Compose database service,

@@ -96,12 +96,20 @@ IMAGE_CONFIG_TEXT_SUFFIXES = {
 }
 POSTGRES_HOST_KEY_RE = re.compile(r"^(?:PGHOST|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*HOST.*)$", re.IGNORECASE)
 POSTGRES_PORT_KEY_RE = re.compile(r"^(?:PGPORT|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*PORT.*)$", re.IGNORECASE)
+POSTGRES_USER_KEY_RE = re.compile(
+    r"^(?:PGUSER|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*USER(?:NAME)?|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*UID.*)$",
+    re.IGNORECASE,
+)
+POSTGRES_PASSWORD_KEY_RE = re.compile(
+    r"^(?:PGPASSWORD|.*(?:DB|DATABASE|POSTGRES|POSTGIS|TIMESCALE).*(?:PASS|PASSWORD|PWD).*)$",
+    re.IGNORECASE,
+)
 POSTGRES_PRIVATE_ENDPOINT_RE = re.compile(
     rf"(?<![A-Za-z0-9_.-])(?:tcp://)?{PRIVATE_OR_LOCAL_HOST_RE}:5432\b",
     re.IGNORECASE,
 )
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 28
+MANIFEST_GENERATOR_VERSION = 29
 DOTNET_FROM_IMAGE_RE = re.compile(
     r"^(?P<prefix>\s*FROM\s+(?:--platform=\S+\s+)?)"
     r"(?P<image>mcr[.]microsoft[.]com/dotnet/(?P<flavor>aspnet|runtime|runtime-deps|sdk):(?P<tag>[^\s]+))"
@@ -1284,6 +1292,62 @@ def database_target_endpoint(target: Any) -> dict[str, str] | None:
     return endpoint
 
 
+def non_placeholder_secret_value(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text or text.startswith("<") or "<" in text:
+        return ""
+    return text
+
+
+def cached_k8s_secret_data(args: argparse.Namespace, namespace: str, name: str) -> dict[str, str] | None:
+    cache = getattr(args, "_k8s_secret_data_cache", None)
+    if cache is None:
+        cache = {}
+        setattr(args, "_k8s_secret_data_cache", cache)
+    key = (namespace, name)
+    if key in cache:
+        return cache[key]
+    try:
+        data = k8s_secret_data(namespace, name, args.kubeconfig)
+    except subprocess.CalledProcessError:
+        data = None
+    cache[key] = data
+    return data
+
+
+def database_target_runtime_endpoint(args: argparse.Namespace, target: Any) -> dict[str, str] | None:
+    endpoint = database_target_endpoint(target)
+    if endpoint is None or not isinstance(target, dict):
+        return endpoint
+
+    username = non_placeholder_secret_value(target.get("username") or target.get("user") or target.get("owner"))
+    password = non_placeholder_secret_value(target.get("password"))
+    secret_ref = target.get("secretRef") or target.get("secret")
+    if isinstance(secret_ref, dict) and args.execute and args.allow_secret_material:
+        secret_namespace = str(secret_ref.get("namespace") or args.namespace)
+        secret_name = str(secret_ref.get("name") or "").strip()
+        if secret_name:
+            secret_data = cached_k8s_secret_data(args, secret_namespace, secret_name)
+            if secret_data:
+                username = username or non_placeholder_secret_value(secret_data.get(str(secret_ref.get("usernameKey", "username"))))
+                password = password or non_placeholder_secret_value(secret_data.get(str(secret_ref.get("passwordKey", "password"))))
+                database = non_placeholder_secret_value(secret_data.get(str(secret_ref.get("databaseKey", "dbname"))))
+                host = non_placeholder_secret_value(secret_data.get(str(secret_ref.get("hostKey", "host"))))
+                port = non_placeholder_secret_value(secret_data.get(str(secret_ref.get("portKey", "port"))))
+                if database:
+                    endpoint["database"] = database
+                if host:
+                    endpoint["host"] = host
+                if port:
+                    endpoint["port"] = port
+
+    if username:
+        endpoint["username"] = username
+    if password:
+        endpoint["password"] = password
+    return endpoint
+
+
 def parse_source_endpoint(value: Any, default_port: str = "5432") -> tuple[str, str] | None:
     text = str(value or "").strip().strip("\"'")
     if not text or "<" in text:
@@ -1577,7 +1641,7 @@ def database_endpoint_rewrites(
             continue
         source_port = published_port(record)
         target = targets.get(record.name)
-        endpoint = database_target_endpoint(target)
+        endpoint = database_target_runtime_endpoint(args, target)
         if endpoint:
             enriched = endpoint_with_source_metadata(target, endpoint, record.name)
             if source_port:
@@ -1684,6 +1748,47 @@ def replace_postgres_database_name(value: str, endpoint: dict[str, Any]) -> str:
     return value
 
 
+def replace_postgres_credentials(value: str, endpoint: dict[str, Any]) -> str:
+    username = str(endpoint.get("username") or "").strip()
+    password = str(endpoint.get("password") or "")
+    if username:
+        url_username = quote(username, safe="")
+        value = re.sub(
+            r"(?i)(?P<key>\b(?:User\s*Id|User\s*ID|Username|User|UID)\s*=\s*)[^;\r\n]*",
+            lambda match: f"{match.group('key')}{username}",
+            value,
+        )
+        value = re.sub(
+            r"(?i)(?P<key>[\"']?(?:UserId|UserID|UserName|Username|User|Uid|UID)[\"']?\s*:\s*[\"']?)[^\"',}\s]+(?P<tail>[\"']?)",
+            lambda match: f"{match.group('key')}{username}{match.group('tail')}",
+            value,
+        )
+        value = re.sub(
+            r"(?i)(?P<scheme>postgres(?:ql)?://)[^:/@\s]+(?P<tail>(?::[^@\s/]*)?@)",
+            lambda match: f"{match.group('scheme')}{url_username}{match.group('tail')}",
+            value,
+        )
+    if password:
+        value = re.sub(
+            r"(?i)(?P<key>\b(?:Password|Pwd)\s*=\s*)[^;\r\n]*",
+            lambda match: f"{match.group('key')}{password}",
+            value,
+        )
+        value = re.sub(
+            r"(?i)(?P<key>[\"']?(?:Password|Pwd)[\"']?\s*:\s*[\"']?)[^\"',}\s]+(?P<tail>[\"']?)",
+            lambda match: f"{match.group('key')}{password}{match.group('tail')}",
+            value,
+        )
+        if username:
+            url_username = re.escape(quote(username, safe=""))
+            value = re.sub(
+                rf"(?i)(?P<scheme>postgres(?:ql)?://){url_username}:(?P<password>[^@\s/]*)@",
+                lambda match: f"{match.group('scheme')}{quote(username, safe='')}:{quote(password, safe='')}@",
+                value,
+            )
+    return value
+
+
 def replace_postgres_host_port_pair(value: str, source_key: str, endpoint: dict[str, Any]) -> str:
     if database := database_key_source(source_key):
         if not postgres_database_name_matches(value, database):
@@ -1703,7 +1808,8 @@ def replace_postgres_host_port_pair(value: str, source_key: str, endpoint: dict[
             rf"\g<key>{endpoint['port']}\g<tail>",
             value,
         )
-        return replace_postgres_database_name(value, endpoint)
+        value = replace_postgres_database_name(value, endpoint)
+        return replace_postgres_credentials(value, endpoint)
     parsed = parse_source_endpoint(source_key)
     exact_host = ":" in source_key and parsed is not None
     source_host, source_port = parsed if exact_host and parsed else ("", source_key)
@@ -1735,6 +1841,7 @@ def replace_postgres_host_port_pair(value: str, source_key: str, endpoint: dict[
         value,
     )
     value = replace_postgres_database_name(value, endpoint)
+    value = replace_postgres_credentials(value, endpoint)
     return value
 
 
@@ -1762,6 +1869,7 @@ def normalize_postgres_endpoint_text(
             value,
         )
         value = replace_postgres_database_name(value, service_endpoint)
+        value = replace_postgres_credentials(value, service_endpoint)
     return value
 
 
@@ -1816,6 +1924,10 @@ def normalize_imported_env_value(
         and (value.strip() == "5432" or (db_rewrites and value.strip() in db_rewrites))
     ):
         value = service_db_endpoint["port"]
+    if service_db_endpoint and POSTGRES_USER_KEY_RE.fullmatch(key) and service_db_endpoint.get("username"):
+        value = str(service_db_endpoint["username"])
+    if service_db_endpoint and POSTGRES_PASSWORD_KEY_RE.fullmatch(key) and service_db_endpoint.get("password"):
+        value = str(service_db_endpoint["password"])
     return value
 
 
@@ -1839,6 +1951,17 @@ def normalize_imported_secret_entries(
     }
 
 
+def public_database_endpoint_material(endpoint: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in endpoint.items()
+        if key not in {"username", "password"}
+    } | {
+        "hasUsername": bool(endpoint.get("username")),
+        "hasPassword": bool(endpoint.get("password")),
+    }
+
+
 def env_rewrite_fingerprint(
     args: argparse.Namespace,
     record: import_project.ServiceRecord,
@@ -1849,7 +1972,7 @@ def env_rewrite_fingerprint(
     public_material = {
         "generator": MANIFEST_GENERATOR_VERSION,
         "record": [record.file, record.name],
-        "databaseEndpoint": service_endpoint,
+        "databaseEndpoint": public_database_endpoint_material(service_endpoint),
         "kafkaBootstrap": selected_kafka_bootstrap_servers(args),
     }
     return hashlib.sha256(json.dumps(public_material, sort_keys=True).encode("utf-8")).hexdigest()[:12]
@@ -2563,12 +2686,39 @@ def sed_replacement(value: str) -> str:
     return value.replace("\\", "\\\\").replace("&", r"\&").replace("#", r"\#")
 
 
+def image_config_credential_sed_scripts(endpoint: dict[str, Any]) -> list[str]:
+    scripts: list[str] = []
+    username = str(endpoint.get("username") or "").strip()
+    password = str(endpoint.get("password") or "")
+    if username:
+        username_replacement = sed_replacement(username)
+        url_username = sed_replacement(quote(username, safe=""))
+        scripts.append(
+            rf"s#((User[[:space:]]*Id|User[[:space:]]*ID|Username|User|UID)[[:space:]]*=[[:space:]]*)[^;\r\n]*#\1{username_replacement}#g"
+        )
+        scripts.append(
+            rf"s#([\"']?(UserId|UserID|UserName|Username|User|Uid|UID)[\"']?[[:space:]]*:[[:space:]]*[\"']?)[^\"',}}[:space:]]+([\"']?)#\1{username_replacement}\3#g"
+        )
+        scripts.append(rf"s#(postgres(ql)?://)[^:/@[:space:]]+(:[^@[:space:]/]*)?@#\1{url_username}\3@#g")
+    if password:
+        password_replacement = sed_replacement(password)
+        scripts.append(rf"s#((Password|Pwd)[[:space:]]*=[[:space:]]*)[^;\r\n]*#\1{password_replacement}#g")
+        scripts.append(
+            rf"s#([\"']?(Password|Pwd)[\"']?[[:space:]]*:[[:space:]]*[\"']?)[^\"',}}[:space:]]+([\"']?)#\1{password_replacement}\3#g"
+        )
+        if username:
+            url_username_pattern = re.escape(quote(username, safe=""))
+            url_password = sed_replacement(quote(password, safe=""))
+            scripts.append(rf"s#(postgres(ql)?://){url_username_pattern}:[^@[:space:]/]*@#\1{url_username}:{url_password}@#g")
+    return scripts
+
+
 def image_config_database_sed_scripts(endpoint: dict[str, Any]) -> list[str]:
+    scripts = image_config_credential_sed_scripts(endpoint)
     target_database = str(endpoint.get("database") or "").strip()
     if not target_database:
-        return []
+        return scripts
     target_database_replacement = sed_replacement(target_database)
-    scripts: list[str] = []
     for source_database in endpoint.get("sourceDatabases", []):
         source_database = str(source_database or "").strip()
         if not source_database or source_database == target_database:
@@ -2741,7 +2891,8 @@ def create_image_config_rewrite_dockerfile(
     sed_args = " ".join(f"-e {shlex.quote(script)}" for script in sed_scripts)
     text_probe = shlex.quote(
         r"10[.]|192[.]168|172[.]|127[.]0[.]0[.]1|localhost|"
-        r"Host|Server|Data Source|Address|Network Address|Database|Initial Catalog|Npgsql|5432"
+        r"Host|Server|Data Source|Address|Network Address|Database|Initial Catalog|Npgsql|"
+        r"Username|UserName|User Id|User ID|Password|Pwd|5432"
     )
     with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(f"FROM {base_image}\n")
