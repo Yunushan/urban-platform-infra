@@ -101,7 +101,7 @@ POSTGRES_PRIVATE_ENDPOINT_RE = re.compile(
     re.IGNORECASE,
 )
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 25
+MANIFEST_GENERATOR_VERSION = 26
 DOTNET_FROM_IMAGE_RE = re.compile(
     r"^(?P<prefix>\s*FROM\s+(?:--platform=\S+\s+)?)"
     r"(?P<image>mcr[.]microsoft[.]com/dotnet/(?P<flavor>aspnet|runtime|runtime-deps|sdk):(?P<tag>[^\s]+))"
@@ -1472,6 +1472,12 @@ def service_database_alias_hints(record: import_project.ServiceRecord | None, se
     aliases: set[str] = set()
     for value in raw_candidates:
         aliases.update(source_alias_hint_variants(value))
+    if any(
+        token in alias
+        for alias in aliases
+        for token in ("analytics", "loop", "traffic", "traffic-count", "traffic-counts")
+    ):
+        aliases.update({"timescale", "timescaledb", "timeseries"})
 
     dependency_aliases: set[str] = set()
     for value in dependency_candidates:
@@ -6987,7 +6993,7 @@ def postgres_leak_detection_log_text(reason: str, previous: str, current: str) -
 def postgres_endpoint_leak_items(args: argparse.Namespace, pods: list[dict[str, Any]]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     pods_by_name = pod_status_by_name(pods)
-    for pod_name, container_name, reason in pod_runtime_diagnostic_targets(pods)[:20]:
+    for pod_name, container_name, reason in pod_runtime_diagnostic_targets(pods)[:120]:
         previous, current = capture_container_logs(args, pod_name, container_name)
         combined = postgres_leak_detection_log_text(reason, previous, current)
         endpoints: list[dict[str, str]] = []

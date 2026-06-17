@@ -559,7 +559,10 @@ service image(s), reapplies their manifests, and immediately re-runs runtime
 validation. Repaired deployments receive a rollout annotation so unchanged image
 tags are restarted after preload import. For running containers, validation uses
 current logs for endpoint-leak checks so stale pre-repair `--previous` logs do
-not keep failing the run. Preload mode still needs the normal RKE2 node/SSH
+not keep failing the run. When a direct legacy PostgreSQL host is found in
+traffic/analytics-style workloads that do not map to a Compose database service,
+the repair pass can infer the existing TimescaleDB target from service aliases
+and use it for the rewrite. Preload mode still needs the normal RKE2 node/SSH
 inputs in the command environment so the repaired image can be streamed to the
 nodes.
 
