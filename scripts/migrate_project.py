@@ -109,7 +109,7 @@ POSTGRES_PRIVATE_ENDPOINT_RE = re.compile(
     re.IGNORECASE,
 )
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 29
+MANIFEST_GENERATOR_VERSION = 30
 DOTNET_FROM_IMAGE_RE = re.compile(
     r"^(?P<prefix>\s*FROM\s+(?:--platform=\S+\s+)?)"
     r"(?P<image>mcr[.]microsoft[.]com/dotnet/(?P<flavor>aspnet|runtime|runtime-deps|sdk):(?P<tag>[^\s]+))"
@@ -1748,6 +1748,91 @@ def replace_postgres_database_name(value: str, endpoint: dict[str, Any]) -> str:
     return value
 
 
+def postgres_connection_string(endpoint: dict[str, Any]) -> str:
+    required = ["host", "port", "database", "username", "password"]
+    if any(not str(endpoint.get(key) or "").strip() for key in required):
+        return ""
+    return (
+        f"Host={endpoint['host']};"
+        f"Port={endpoint['port']};"
+        f"Database={endpoint['database']};"
+        f"Username={endpoint['username']};"
+        f"Password={endpoint['password']}"
+    )
+
+
+def pascal_case_identifier(value: Any) -> str:
+    parts = [part for part in re.split(r"[^A-Za-z0-9]+", str(value or "")) if part]
+    return "".join(part[:1].upper() + part[1:] for part in parts)
+
+
+def service_connection_string_names(
+    record: import_project.ServiceRecord,
+    service: dict[str, Any],
+    endpoint: dict[str, Any],
+) -> list[str]:
+    names = [
+        "DefaultConnection",
+        "Default",
+        "Database",
+        "Postgres",
+        "PostgreSQL",
+        "TimescaleDB",
+    ]
+    aliases, dependency_aliases = service_database_alias_hints(record, service)
+    alias_values = {
+        *aliases,
+        *dependency_aliases,
+        str(endpoint.get("_targetName") or ""),
+        *[str(item) for item in endpoint.get("sourceDatabases", []) or []],
+    }
+    for alias in sorted(alias_values):
+        pascal = pascal_case_identifier(alias)
+        if not pascal or pascal in names:
+            continue
+        names.extend([pascal, f"{pascal}Connection", f"{pascal}Db", f"{pascal}Database"])
+    return list(dict.fromkeys(names))[:40]
+
+
+def imported_database_secret_defaults(
+    record: import_project.ServiceRecord,
+    service: dict[str, Any],
+    service_endpoint: dict[str, Any] | None,
+) -> dict[str, str]:
+    if not service_endpoint or not service_endpoint.get("username") or not service_endpoint.get("password"):
+        return {}
+    entries = {
+        "PGHOST": str(service_endpoint.get("host", "")),
+        "PGPORT": str(service_endpoint.get("port", "")),
+        "PGDATABASE": str(service_endpoint.get("database", "")),
+        "PGUSER": str(service_endpoint.get("username", "")),
+        "PGPASSWORD": str(service_endpoint.get("password", "")),
+        "POSTGRES_HOST": str(service_endpoint.get("host", "")),
+        "POSTGRES_PORT": str(service_endpoint.get("port", "")),
+        "POSTGRES_DB": str(service_endpoint.get("database", "")),
+        "POSTGRES_USER": str(service_endpoint.get("username", "")),
+        "POSTGRES_PASSWORD": str(service_endpoint.get("password", "")),
+        "DB_HOST": str(service_endpoint.get("host", "")),
+        "DB_PORT": str(service_endpoint.get("port", "")),
+        "DB_DATABASE": str(service_endpoint.get("database", "")),
+        "DB_NAME": str(service_endpoint.get("database", "")),
+        "DB_USER": str(service_endpoint.get("username", "")),
+        "DB_USERNAME": str(service_endpoint.get("username", "")),
+        "DB_PASSWORD": str(service_endpoint.get("password", "")),
+        "DATABASE_HOST": str(service_endpoint.get("host", "")),
+        "DATABASE_PORT": str(service_endpoint.get("port", "")),
+        "DATABASE_NAME": str(service_endpoint.get("database", "")),
+        "DATABASE_USER": str(service_endpoint.get("username", "")),
+        "DATABASE_USERNAME": str(service_endpoint.get("username", "")),
+        "DATABASE_PASSWORD": str(service_endpoint.get("password", "")),
+    }
+    connection = postgres_connection_string(service_endpoint)
+    if connection:
+        for name in service_connection_string_names(record, service, service_endpoint):
+            entries[f"ConnectionStrings__{name}"] = connection
+    return {key: value for key, value in entries.items() if value}
+
+
 def replace_postgres_credentials(value: str, endpoint: dict[str, Any]) -> str:
     username = str(endpoint.get("username") or "").strip()
     password = str(endpoint.get("password") or "")
@@ -1789,7 +1874,13 @@ def replace_postgres_credentials(value: str, endpoint: dict[str, Any]) -> str:
     return value
 
 
-def replace_postgres_host_port_pair(value: str, source_key: str, endpoint: dict[str, Any]) -> str:
+def replace_postgres_host_port_pair(
+    value: str,
+    source_key: str,
+    endpoint: dict[str, Any],
+    *,
+    include_credentials: bool = True,
+) -> str:
     if database := database_key_source(source_key):
         if not postgres_database_name_matches(value, database):
             return value
@@ -1809,7 +1900,9 @@ def replace_postgres_host_port_pair(value: str, source_key: str, endpoint: dict[
             value,
         )
         value = replace_postgres_database_name(value, endpoint)
-        return replace_postgres_credentials(value, endpoint)
+        if include_credentials:
+            value = replace_postgres_credentials(value, endpoint)
+        return value
     parsed = parse_source_endpoint(source_key)
     exact_host = ":" in source_key and parsed is not None
     source_host, source_port = parsed if exact_host and parsed else ("", source_key)
@@ -1841,7 +1934,8 @@ def replace_postgres_host_port_pair(value: str, source_key: str, endpoint: dict[
         value,
     )
     value = replace_postgres_database_name(value, endpoint)
-    value = replace_postgres_credentials(value, endpoint)
+    if include_credentials:
+        value = replace_postgres_credentials(value, endpoint)
     return value
 
 
@@ -1849,9 +1943,11 @@ def normalize_postgres_endpoint_text(
     value: str,
     rewrites: dict[str, dict[str, Any]],
     service_endpoint: dict[str, Any] | None = None,
+    *,
+    include_credentials: bool = True,
 ) -> str:
     for source_key, endpoint in rewrites.items():
-        value = replace_postgres_host_port_pair(value, source_key, endpoint)
+        value = replace_postgres_host_port_pair(value, source_key, endpoint, include_credentials=include_credentials)
     if service_endpoint:
         value = re.sub(
             rf"(?<![A-Za-z0-9_.-])(?:tcp://)?{PRIVATE_OR_LOCAL_HOST_RE}:5432\b",
@@ -1869,7 +1965,8 @@ def normalize_postgres_endpoint_text(
             value,
         )
         value = replace_postgres_database_name(value, service_endpoint)
-        value = replace_postgres_credentials(value, service_endpoint)
+        if include_credentials:
+            value = replace_postgres_credentials(value, service_endpoint)
     return value
 
 
@@ -1939,7 +2036,7 @@ def normalize_imported_secret_entries(
     db_rewrites: dict[str, dict[str, Any]],
 ) -> dict[str, str]:
     service_db_endpoint = service_postgres_target_endpoint(record, service, db_rewrites)
-    return {
+    normalized = {
         key: normalize_imported_env_value(
             args,
             key,
@@ -1949,6 +2046,9 @@ def normalize_imported_secret_entries(
         )
         for key, value in entries.items()
     }
+    defaults = imported_database_secret_defaults(record, service, service_db_endpoint)
+    defaults.update(normalized)
+    return defaults
 
 
 def public_database_endpoint_material(endpoint: dict[str, Any]) -> dict[str, Any]:
@@ -2153,7 +2253,12 @@ def normalize_imported_config_text(
     if KAFKA_CONTEXT_RE.search(target) or KAFKA_CONTEXT_RE.search(value):
         value = normalize_kafka_endpoint_text(args, value)
     if db_rewrites and (POSTGRES_CONTEXT_RE.search(target) or POSTGRES_CONTEXT_RE.search(value)):
-        value = normalize_postgres_endpoint_text(value, db_rewrites, service_db_endpoint)
+        value = normalize_postgres_endpoint_text(
+            value,
+            db_rewrites,
+            service_db_endpoint,
+            include_credentials=False,
+        )
     if frontend_static_config_target(record, target):
         value = normalize_private_frontend_http_endpoints(args, value)
     if record.kind == "nginx" and (target == "/etc/nginx/nginx.conf" or target.startswith("/etc/nginx/")):
@@ -2431,6 +2536,13 @@ def kubernetes_workload_manifests(
             "app.kubernetes.io/managed-by": "urban-platform-import",
         }
         service_db_endpoint = service_postgres_target_endpoint(record, service, db_rewrites)
+        workload_secret_entries = normalize_imported_secret_entries(
+            args,
+            record,
+            service,
+            secret_entries(service),
+            db_rewrites,
+        )
         env = [
             {
                 "name": key,
@@ -2463,7 +2575,7 @@ def kubernetes_workload_manifests(
             container["livenessProbe"] = {"tcpSocket": {"port": probe_port}, "initialDelaySeconds": 45, "periodSeconds": 20}
         if env:
             container["env"] = env
-        if secret_entries(service):
+        if workload_secret_entries:
             container["envFrom"] = [{"secretRef": {"name": k8s_name(record.name, "import-env"), "optional": True}}]
         resources = imported_workload_resources(args)
         if resources:
@@ -2714,7 +2826,7 @@ def image_config_credential_sed_scripts(endpoint: dict[str, Any]) -> list[str]:
 
 
 def image_config_database_sed_scripts(endpoint: dict[str, Any]) -> list[str]:
-    scripts = image_config_credential_sed_scripts(endpoint)
+    scripts: list[str] = []
     target_database = str(endpoint.get("database") or "").strip()
     if not target_database:
         return scripts
