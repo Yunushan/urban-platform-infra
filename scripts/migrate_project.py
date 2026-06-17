@@ -109,7 +109,7 @@ POSTGRES_PRIVATE_ENDPOINT_RE = re.compile(
     re.IGNORECASE,
 )
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 30
+MANIFEST_GENERATOR_VERSION = 31
 DOTNET_FROM_IMAGE_RE = re.compile(
     r"^(?P<prefix>\s*FROM\s+(?:--platform=\S+\s+)?)"
     r"(?P<image>mcr[.]microsoft[.]com/dotnet/(?P<flavor>aspnet|runtime|runtime-deps|sdk):(?P<tag>[^\s]+))"
@@ -2103,12 +2103,42 @@ def imported_kafka_environment_defaults(args: argparse.Namespace) -> dict[str, s
     }
 
 
-def merge_container_env(env: list[dict[str, str]], defaults: dict[str, str]) -> list[dict[str, str]]:
+def merge_container_env(env: list[dict[str, Any]], defaults: dict[str, str]) -> list[dict[str, Any]]:
     existing = {entry["name"] for entry in env if "name" in entry}
     merged = list(env)
     for key, value in defaults.items():
         if key not in existing:
             merged.append({"name": key, "value": value})
+    return merged
+
+
+def merge_secret_env_overrides(
+    env: list[dict[str, Any]],
+    secret_name: str,
+    entries: dict[str, str],
+) -> list[dict[str, Any]]:
+    secret_env_names = [
+        key
+        for key in sorted(entries)
+        if KUBERNETES_ENV_NAME_RE.fullmatch(key)
+    ]
+    if not secret_env_names:
+        return env
+    secret_env_name_set = set(secret_env_names)
+    merged = [entry for entry in env if entry.get("name") not in secret_env_name_set]
+    merged.extend(
+        {
+            "name": key,
+            "valueFrom": {
+                "secretKeyRef": {
+                    "name": secret_name,
+                    "key": key,
+                    "optional": True,
+                }
+            },
+        }
+        for key in secret_env_names
+    )
     return merged
 
 
@@ -2543,6 +2573,11 @@ def kubernetes_workload_manifests(
             secret_entries(service),
             db_rewrites,
         )
+        if workload_secret_entries and (
+            args.secret_provider in {"external-secrets", "vault"}
+            or (args.secret_provider == "kubernetes" and args.allow_secret_material)
+        ):
+            manifests.append(secret_delivery_manifest(args, record, workload_secret_entries))
         env = [
             {
                 "name": key,
@@ -2558,6 +2593,8 @@ def kubernetes_workload_manifests(
             if value is not None and not SECRET_ENV_RE.search(key) and KUBERNETES_ENV_NAME_RE.fullmatch(key)
         ]
         env = merge_container_env(env, default_import_environment(args, record, service))
+        secret_name = imported_secret_name(record)
+        env = merge_secret_env_overrides(env, secret_name, workload_secret_entries)
         container: dict[str, Any] = {
             "name": name,
             "image": image,
@@ -2576,7 +2613,7 @@ def kubernetes_workload_manifests(
         if env:
             container["env"] = env
         if workload_secret_entries:
-            container["envFrom"] = [{"secretRef": {"name": k8s_name(record.name, "import-env"), "optional": True}}]
+            container["envFrom"] = [{"secretRef": {"name": secret_name, "optional": True}}]
         resources = imported_workload_resources(args)
         if resources:
             container["resources"] = resources
@@ -4533,11 +4570,12 @@ def migration_stage_scope(args: argparse.Namespace, stage: str, service_pairs: l
         "tlsExtraHosts": sorted(split_csv(args.tls_extra_hosts)) if stage == "manifests" else [],
         "tlsIssuerName": args.tls_le_issuer_name if stage == "manifests" else "",
         "tlsIssuerKind": args.tls_le_issuer_kind if stage == "manifests" else "",
-        "manifestGeneratorVersion": MANIFEST_GENERATOR_VERSION if stage in {"images", "manifests"} else "",
-        "databaseTargets": str(database_target_path) if stage in {"databases", "images", "manifests"} else "",
+        "manifestGeneratorVersion": MANIFEST_GENERATOR_VERSION if stage in {"secrets", "images", "manifests"} else "",
+        "databaseTargets": str(database_target_path) if stage in {"secrets", "databases", "images", "manifests"} else "",
         "databaseTargetsFingerprint": file_fingerprint(database_target_path)
-        if stage in {"databases", "images", "manifests"}
+        if stage in {"secrets", "databases", "images", "manifests"}
         else "",
+        "allowSecretMaterial": args.allow_secret_material if stage == "secrets" else "",
         "skipUnavailableDatabases": args.skip_unavailable_databases if stage == "databases" else "",
         "secretProvider": args.secret_provider if stage == "secrets" else "",
         "secretRemotePrefix": args.secret_remote_prefix if stage == "secrets" else "",
@@ -5485,6 +5523,12 @@ def kubernetes_secret_manifest(args: argparse.Namespace, record: import_project.
     }
 
 
+def secret_delivery_manifest(args: argparse.Namespace, record: import_project.ServiceRecord, entries: dict[str, str]) -> dict[str, Any]:
+    if args.secret_provider == "kubernetes":
+        return kubernetes_secret_manifest(args, record, entries)
+    return external_secret_manifest(args, record, entries)
+
+
 def external_secret_manifest(args: argparse.Namespace, record: import_project.ServiceRecord, entries: dict[str, str]) -> dict[str, Any]:
     secret_name = imported_secret_name(record)
     remote_key = secret_remote_key(args, secret_name)
@@ -5577,10 +5621,7 @@ def stage_secrets(args: argparse.Namespace, service_pairs: list[tuple[import_pro
     if args.secret_provider == "kubernetes" and not args.allow_secret_material:
         raise SystemExit("Refusing to read/apply secret material without --allow-secret-material.")
     for record, entries in secrets:
-        if args.secret_provider == "kubernetes":
-            manifest = kubernetes_secret_manifest(args, record, entries)
-        else:
-            manifest = external_secret_manifest(args, record, entries)
+        manifest = secret_delivery_manifest(args, record, entries)
         run_command(
             kubectl_apply_stdin_command(args, namespace=args.namespace),
             stdin=yaml.safe_dump(manifest, sort_keys=False),
