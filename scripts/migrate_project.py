@@ -101,7 +101,7 @@ POSTGRES_PRIVATE_ENDPOINT_RE = re.compile(
     re.IGNORECASE,
 )
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 27
+MANIFEST_GENERATOR_VERSION = 28
 DOTNET_FROM_IMAGE_RE = re.compile(
     r"^(?P<prefix>\s*FROM\s+(?:--platform=\S+\s+)?)"
     r"(?P<image>mcr[.]microsoft[.]com/dotnet/(?P<flavor>aspnet|runtime|runtime-deps|sdk):(?P<tag>[^\s]+))"
@@ -6782,6 +6782,56 @@ def runtime_log_excerpt(text: str, *, limit: int = 12000) -> str:
     return f"{compact[-limit:]}\n<truncated to last {limit} characters>"
 
 
+CRASH_LOG_HINT_RE = re.compile(
+    r"exception|failed|fatal|panic|error|timeout|timed out|refused|denied|not found|"
+    r"could not|cannot|connection|npgsql|postgres|postgis|timescale|kafka|redis|migration",
+    re.IGNORECASE,
+)
+SENSITIVE_LOG_VALUE_RE = re.compile(
+    r"(?i)\b(password|passwd|pwd|secret|token|apikey|api_key|access_key|private_key)\b"
+    r"([\"']?\s*[:=]\s*[\"']?)([^;,\s\"']+)"
+)
+URL_CREDENTIAL_RE = re.compile(r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)(?P<user>[^:/\s@]+):(?P<password>[^@\s]+)@")
+
+
+def redact_runtime_log_hint(line: str) -> str:
+    text = " ".join(str(line or "").replace("```", "` ` `").split())
+    text = URL_CREDENTIAL_RE.sub(r"\g<scheme><redacted>:<redacted>@", text)
+    text = SENSITIVE_LOG_VALUE_RE.sub(r"\1\2<redacted>", text)
+    text = PRIVATE_IPV4_RE.sub("<private-ip>", text)
+    text = re.sub(r"(?i)(Host|Server|Data Source|Address|Addr|Network Address)(\s*=\s*)[^;\s]+", r"\1\2<redacted-host>", text)
+    return compact_runtime_message(text, limit=260)
+
+
+def runtime_log_hint_lines(text: str, *, limit: int = 4) -> list[str]:
+    hints: list[str] = []
+    seen: set[str] = set()
+    for line in reversed(str(text or "").splitlines()):
+        stripped = line.strip()
+        if not stripped or not CRASH_LOG_HINT_RE.search(stripped):
+            continue
+        redacted = redact_runtime_log_hint(stripped)
+        if not redacted or redacted in seen:
+            continue
+        hints.append(redacted)
+        seen.add(redacted)
+        if len(hints) >= limit:
+            break
+    return list(reversed(hints))
+
+
+def runtime_crash_log_hints(args: argparse.Namespace, pods: list[dict[str, Any]], *, limit: int = 6) -> list[str]:
+    hints: list[str] = []
+    for pod_name, container_name, reason in pod_runtime_diagnostic_targets(pods)[:limit]:
+        previous, current = capture_container_logs(args, pod_name, container_name)
+        lines = runtime_log_hint_lines("\n".join([previous, current]))
+        if not lines:
+            continue
+        summary = " | ".join(lines[:4])
+        hints.append(f"{pod_name}/{container_name} ({reason}): {summary}")
+    return hints
+
+
 def capture_container_logs(args: argparse.Namespace, pod_name: str, container_name: str) -> tuple[str, str]:
     previous = kubectl_capture(
         args,
@@ -7641,6 +7691,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
     dotnet_mismatches: list[str] = []
     pod_waiting = pod_waiting_summaries(workload_pods)
     postgres_endpoint_leaks = postgres_endpoint_leak_summaries(args, workload_pods)
+    crash_log_hints: list[str] = []
     private_diagnostics_path = None
     for item in deployments:
         name = item.get("metadata", {}).get("name", "unknown")
@@ -7664,6 +7715,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
                 dotnet_mismatches.append(f"{name}: expected .NET {dotnet_target}, got {actual_runtimes}")
     if pod_waiting or not_ready:
         private_diagnostics_path = write_private_runtime_diagnostics(args, workload_pods, pod_waiting)
+        crash_log_hints = runtime_crash_log_hints(args, workload_pods)
 
     runtime_images = sorted({image for pod in pods for image in pod_container_images(pod)})
     database_images = [
@@ -7683,6 +7735,7 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
             f"- Ingresses in namespace: `{len(ingresses)}`",
             f"- Runtime images observed: `{len(runtime_images)}`",
             f"- Imported pods with waiting containers: `{len(pod_waiting)}`",
+            f"- Redacted crash log hints: `{len(crash_log_hints)}`",
             f"- Legacy PostgreSQL endpoints in crash logs: `{len(postgres_endpoint_leaks)}`",
             f"- CNPG clusters needing attention: `{len(cnpg_summaries)}`",
             f"- CNPG expected PVCs missing: `{len(cnpg_missing_pvcs)}`",
@@ -7707,6 +7760,15 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
             lines.append(f"- `+{len(pod_waiting) - 120}` more")
     else:
         lines.append("- No waiting container reasons were observed.")
+
+    lines.extend(["", "## Redacted Crash Log Hints", ""])
+    if crash_log_hints:
+        lines.extend(f"- `{item}`" for item in crash_log_hints)
+        lines.append(
+            "- Full application logs remain private in the diagnostics file above; this section redacts private IPs and obvious secret values."
+        )
+    else:
+        lines.append("- No crash log hints were available from inspected waiting containers.")
 
     lines.extend(["", "## Legacy PostgreSQL Endpoint Leaks", ""])
     if postgres_endpoint_leaks:
@@ -7793,6 +7855,10 @@ def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
             print("First runtime validation blockers:")
             for item in [*pod_waiting[:5], *postgres_endpoint_leaks[:5], *cnpg_summaries[:5], *cnpg_missing_pvcs[:5], *pvc_summaries[:5], *not_ready[:5]][:10]:
                 print(f"- {item}")
+            if crash_log_hints:
+                print("First redacted crash log hints:")
+                for item in crash_log_hints[:5]:
+                    print(f"- {item}")
             if has_run_as_non_root_rejection(pod_waiting):
                 print(
                     "Detected imported legacy images rejected by runAsNonRoot. "
