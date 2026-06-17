@@ -101,7 +101,7 @@ POSTGRES_PRIVATE_ENDPOINT_RE = re.compile(
     re.IGNORECASE,
 )
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 26
+MANIFEST_GENERATOR_VERSION = 27
 DOTNET_FROM_IMAGE_RE = re.compile(
     r"^(?P<prefix>\s*FROM\s+(?:--platform=\S+\s+)?)"
     r"(?P<image>mcr[.]microsoft[.]com/dotnet/(?P<flavor>aspnet|runtime|runtime-deps|sdk):(?P<tag>[^\s]+))"
@@ -2739,6 +2739,10 @@ def create_image_config_rewrite_dockerfile(
     dockerfile_path = Path(path)
     suffix_expr = " -o ".join(f"-name '*{suffix}'" for suffix in sorted(IMAGE_CONFIG_TEXT_SUFFIXES))
     sed_args = " ".join(f"-e {shlex.quote(script)}" for script in sed_scripts)
+    text_probe = shlex.quote(
+        r"10[.]|192[.]168|172[.]|127[.]0[.]0[.]1|localhost|"
+        r"Host|Server|Data Source|Address|Network Address|Database|Initial Catalog|Npgsql|5432"
+    )
     with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(f"FROM {base_image}\n")
         for key, value in sorted(env_overrides.items()):
@@ -2746,10 +2750,17 @@ def create_image_config_rewrite_dockerfile(
         handle.write("USER root\n")
         handle.write(
             "RUN set -eu; "
+            "files=$(mktemp); "
             "for dir in /app /src /opt /srv /usr/share /var/www; do "
             "[ -d \"$dir\" ] || continue; "
-            f"find \"$dir\" -type f \\( {suffix_expr} \\) -size -5M -exec sed -i -E {sed_args} {{}} +; "
-            "done\n"
+            f"find \"$dir\" -type f \\( {suffix_expr} \\) -size -5M -print >> \"$files\"; "
+            f"find \"$dir\" -type f -size -5M -exec grep -IlE {text_probe} {{}} + >> \"$files\" 2>/dev/null || true; "
+            "done; "
+            "sort -u \"$files\" > \"$files.sorted\"; "
+            "while IFS= read -r file; do "
+            f"[ -n \"$file\" ] && sed -i -E {sed_args} \"$file\"; "
+            "done < \"$files.sorted\"; "
+            "rm -f \"$files\" \"$files.sorted\"\n"
         )
         if final_user:
             handle.write(f"USER {final_user}\n")
