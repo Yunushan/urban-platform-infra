@@ -114,6 +114,7 @@ POSTGRES_AUTH_FAILURE_RE = re.compile(
 )
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
 MANIFEST_GENERATOR_VERSION = 32
+POSTGRES_REPAIR_RUNTIME_VALIDATION_MIN_WAIT_SECONDS = 180
 DOTNET_FROM_IMAGE_RE = re.compile(
     r"^(?P<prefix>\s*FROM\s+(?:--platform=\S+\s+)?)"
     r"(?P<image>mcr[.]microsoft[.]com/dotnet/(?P<flavor>aspnet|runtime|runtime-deps|sdk):(?P<tag>[^\s]+))"
@@ -8010,6 +8011,19 @@ def wait_for_post_migration_runtime(args: argparse.Namespace) -> None:
         time.sleep(interval)
 
 
+def wait_for_post_repair_runtime(args: argparse.Namespace) -> None:
+    original_timeout = args.runtime_validation_timeout
+    repair_timeout = max(
+        int(original_timeout or 0),
+        POSTGRES_REPAIR_RUNTIME_VALIDATION_MIN_WAIT_SECONDS,
+    )
+    try:
+        args.runtime_validation_timeout = repair_timeout
+        wait_for_post_migration_runtime(args)
+    finally:
+        args.runtime_validation_timeout = original_timeout
+
+
 def write_post_migration_runtime_report(args: argparse.Namespace) -> None:
     output = Path(args.output).expanduser()
     lines = [
@@ -8310,7 +8324,7 @@ def stage_validate(
             write_post_migration_runtime_report(args)
         except SystemExit:
             if auto_repair_runtime_postgres_leaks(args, project_path, service_pairs, values):
-                wait_for_post_migration_runtime(args)
+                wait_for_post_repair_runtime(args)
                 write_post_migration_runtime_report(args)
                 return
             raise
