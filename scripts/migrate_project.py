@@ -6977,12 +6977,19 @@ def postgres_endpoint_from_match(match: re.Match[str]) -> dict[str, str] | None:
     return {"host": host, "port": port}
 
 
+def postgres_leak_detection_log_text(reason: str, previous: str, current: str) -> str:
+    normalized_reason = str(reason or "").strip().lower()
+    if normalized_reason in {"running", "succeeded"}:
+        return current
+    return "\n".join([previous, current])
+
+
 def postgres_endpoint_leak_items(args: argparse.Namespace, pods: list[dict[str, Any]]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     pods_by_name = pod_status_by_name(pods)
     for pod_name, container_name, reason in pod_runtime_diagnostic_targets(pods)[:20]:
         previous, current = capture_container_logs(args, pod_name, container_name)
-        combined = "\n".join([previous, current])
+        combined = postgres_leak_detection_log_text(reason, previous, current)
         endpoints: list[dict[str, str]] = []
         seen_endpoints: set[str] = set()
         for match in POSTGRES_PRIVATE_ENDPOINT_RE.finditer(combined):
@@ -7114,6 +7121,43 @@ def auto_enrich_database_targets_from_postgres_leaks(
     return changed
 
 
+def restart_repaired_import_deployments(
+    args: argparse.Namespace,
+    repair_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+) -> None:
+    if not repair_pairs:
+        return
+    timestamp = utc_timestamp()
+    patch = {
+        "spec": {
+            "template": {
+                "metadata": {
+                    "annotations": {
+                        "urban-platform.io/runtime-postgres-repair-ts": timestamp,
+                    }
+                }
+            }
+        }
+    }
+    for record, _service in repair_pairs:
+        name = kubernetes_workload_name(record)
+        run_command(
+            kubectl_command(
+                args,
+                [
+                    "-n",
+                    args.namespace,
+                    "patch",
+                    "deployment",
+                    name,
+                    "--type=merge",
+                    "-p",
+                    json.dumps(patch, sort_keys=True),
+                ],
+            )
+        )
+
+
 def auto_repair_runtime_postgres_leaks(
     args: argparse.Namespace,
     project_path: Path,
@@ -7177,6 +7221,7 @@ def auto_repair_runtime_postgres_leaks(
         verify_selected_preload_images_on_nodes(args, service_pairs)
         reconcile_import_namespace_pod_security(args)
         stage_manifests(args, service_pairs, values)
+        restart_repaired_import_deployments(args, repair_pairs)
         cleanup_stale_restricted_import_workloads(args)
         print("Automatic runtime PostgreSQL endpoint repair applied; re-running runtime validation.")
         return True
