@@ -113,7 +113,7 @@ POSTGRES_AUTH_FAILURE_RE = re.compile(
     re.IGNORECASE,
 )
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 39
+MANIFEST_GENERATOR_VERSION = 40
 HTTP_ONLY_TLS_MODES = {"http", "disabled"}
 IMPORTED_EDGE_TRAEFIK_PRIORITY = "10000"
 POSTGRES_REPAIR_RUNTIME_VALIDATION_MIN_WAIT_SECONDS = 180
@@ -2082,7 +2082,9 @@ def ensure_nginx_frontend_api_guard(value: str, upstream: str) -> str:
     return re.sub(r"(?m)^(?P<indent>\s*)server\s*\{\s*(?:#.*)?$", insert, value)
 
 
-def nginx_frontend_external_port(record: import_project.ServiceRecord, service: dict[str, Any]) -> int:
+def nginx_frontend_external_port(args: argparse.Namespace, record: import_project.ServiceRecord, service: dict[str, Any]) -> int:
+    if record.kind == "nginx" and nginx_static_html_bind_source(args, record, service) is not None:
+        return 80
     ports = kubernetes_container_ports(record, service)
     if not ports:
         return 80
@@ -2095,7 +2097,7 @@ def generated_nginx_frontend_config(
     service: dict[str, Any],
     upstream: str,
 ) -> str:
-    listen_port = nginx_internal_port(args, record, nginx_frontend_external_port(record, service))
+    listen_port = nginx_internal_port(args, record, nginx_frontend_external_port(args, record, service))
     api_guard = nginx_api_guard_location_block("        ", upstream)
     return "\n".join(
         [
@@ -2754,6 +2756,8 @@ def collect_kubernetes_workload_inputs(
             continue
         image = image_for_kubernetes_manifest(args, record, service)
         ports = kubernetes_container_ports(record, service)
+        if record.kind == "nginx" and nginx_static_html_bind_source(args, record, service) is not None:
+            ports = [80]
         if not image or not ports:
             continue
         workload_inputs.append((record, service, image, ports))

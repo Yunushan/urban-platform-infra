@@ -227,12 +227,14 @@ escaped `<!doctype html>` when an API URL accidentally falls through to static
 content, and avoids relying on an empty APISIX route table when the application
 already ships its own gateway service. Static SPA imports also use a generated
 nginx main config so old Compose gateway rules cannot proxy `/login` or
-`/dashboard` away from the baked frontend. The generated listener and Traefik
-backend service port are aligned to the imported Compose edge target port, so
-HTTPS-oriented Compose services do not leave Traefik pointing at an unused
-backend port. Hostless IP-based Traefik routes are emitted with a high explicit
-router priority so older/default or path-specific hostless routes do not take
-`/login` or `/dashboard` traffic away from the imported frontend.
+`/dashboard` away from the baked frontend. Static frontend Services are
+normalized to a plain service port `80` behind Traefik, with the Service target
+port mapped to the generated unprivileged nginx listener. This keeps the
+Ingress backend stable even when the old Compose edge service exposed `443`,
+`8080`, or another external port. Hostless IP-based Traefik routes are emitted
+with a high explicit router priority so older/default or path-specific hostless
+routes do not take `/login` or `/dashboard` traffic away from the imported
+frontend.
 
 To run later lab batches after the first automatic batch, rerun the same
 `import-auto` command. Resume state skips completed batch stages and
