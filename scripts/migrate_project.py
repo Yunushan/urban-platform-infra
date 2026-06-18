@@ -113,7 +113,7 @@ POSTGRES_AUTH_FAILURE_RE = re.compile(
     re.IGNORECASE,
 )
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 34
+MANIFEST_GENERATOR_VERSION = 35
 POSTGRES_REPAIR_RUNTIME_VALIDATION_MIN_WAIT_SECONDS = 180
 DOTNET_FROM_IMAGE_RE = re.compile(
     r"^(?P<prefix>\s*FROM\s+(?:--platform=\S+\s+)?)"
@@ -2457,6 +2457,8 @@ def configmap_mount_manifests(
     mounted_nginx_main_config = False
     for index, (source, target) in enumerate(compose_bind_mounts(service), start=1):
         if nginx_static_html_target(target) and nginx_static_html_bind_source(args, record, service) is not None:
+            continue
+        if frontend_api_guard and record.kind == "nginx" and target == "/etc/nginx/nginx.conf":
             continue
         if not should_mount_bind_as_configmap(record, target):
             continue
