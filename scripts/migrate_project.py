@@ -113,7 +113,8 @@ POSTGRES_AUTH_FAILURE_RE = re.compile(
     re.IGNORECASE,
 )
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 37
+MANIFEST_GENERATOR_VERSION = 38
+HTTP_ONLY_TLS_MODES = {"http", "disabled"}
 POSTGRES_REPAIR_RUNTIME_VALIDATION_MIN_WAIT_SECONDS = 180
 DOTNET_FROM_IMAGE_RE = re.compile(
     r"^(?P<prefix>\s*FROM\s+(?:--platform=\S+\s+)?)"
@@ -2028,7 +2029,8 @@ def canonical_frontend_base_url(args: argparse.Namespace) -> str:
         return ""
     if re.match(r"^https?://", host, re.IGNORECASE):
         return host
-    return f"https://{host}"
+    scheme = "http" if selected_tls_mode(args) in HTTP_ONLY_TLS_MODES else "https"
+    return f"{scheme}://{host}"
 
 
 def normalize_private_frontend_http_endpoints(args: argparse.Namespace, value: str) -> str:
@@ -5210,8 +5212,10 @@ def preflight_check_ingress_endpoint(
         preflight_record(lines, "WARN", message)
         return
 
+    endpoint_port = 80 if mode in HTTP_ONLY_TLS_MODES else 443
+    endpoint_label = "HTTP" if mode in HTTP_ONLY_TLS_MODES else "TLS"
     try:
-        addresses = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+        addresses = socket.getaddrinfo(host, endpoint_port, proto=socket.IPPROTO_TCP)
     except OSError as exc:
         message = f"Ingress host `{host}` does not resolve from the operator: {exc}"
         if args.preflight_require_ingress_endpoint:
@@ -5224,12 +5228,13 @@ def preflight_check_ingress_endpoint(
     preflight_record(lines, "OK", f"Ingress host `{host}` resolved to `{len(addresses)}` address record(s).")
 
     try:
-        with socket.create_connection((host, 443), timeout=5) as sock:
-            context = ssl._create_unverified_context()
-            with context.wrap_socket(sock, server_hostname=host):
-                pass
+        with socket.create_connection((host, endpoint_port), timeout=5) as sock:
+            if mode not in HTTP_ONLY_TLS_MODES:
+                context = ssl._create_unverified_context()
+                with context.wrap_socket(sock, server_hostname=host):
+                    pass
     except OSError as exc:
-        message = f"Ingress TLS endpoint `{host}:443` is not reachable yet: {exc}"
+        message = f"Ingress {endpoint_label} endpoint `{host}:{endpoint_port}` is not reachable yet: {exc}"
         if args.preflight_require_ingress_endpoint:
             errors.append(message)
             preflight_record(lines, "ERROR", message)
@@ -5237,7 +5242,7 @@ def preflight_check_ingress_endpoint(
             warnings.append(message)
             preflight_record(lines, "WARN", message)
         return
-    preflight_record(lines, "OK", f"Ingress TLS endpoint `{host}:443` accepted a TLS connection.")
+    preflight_record(lines, "OK", f"Ingress {endpoint_label} endpoint `{host}:{endpoint_port}` accepted a connection.")
 
 
 def parse_remote_preflight_output(output: str) -> dict[str, Any]:
@@ -6538,6 +6543,12 @@ def selected_tls_mode(args: argparse.Namespace) -> str:
     return "lab-ca"
 
 
+def ingress_tls_enabled(args: argparse.Namespace, values: dict[str, Any]) -> bool:
+    if selected_tls_mode(args) in HTTP_ONLY_TLS_MODES:
+        return False
+    return bool(values.get("ingress", {}).get("tls", {}).get("enabled", True))
+
+
 def tls_private_dir(args: argparse.Namespace) -> Path:
     path = Path(args.private_dir).expanduser() / "tls"
     secure_directory(path)
@@ -7149,7 +7160,7 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
     rule_host = ingress_rule_host(host)
     if host and not rule_host:
         print(f"Ingress host `{host}` is an IP address; generating hostless Traefik Ingress rules.")
-    tls_enabled = bool(values.get("ingress", {}).get("tls", {}).get("enabled", True))
+    tls_enabled = ingress_tls_enabled(args, values)
     tls_secret_name = ingress_tls_secret_name(values)
     edge_service_pairs = [
         (record, service)
@@ -7182,7 +7193,7 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
                 "rules": [rule],
             }
             annotations = {
-                "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
+                "traefik.ingress.kubernetes.io/router.entrypoints": "websecure" if tls_enabled else "web",
                 "traefik.ingress.kubernetes.io/router.priority": "100",
             }
             if ingress_source_allowlist_cidrs(values):
@@ -7268,7 +7279,8 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
         )
         cleanup_stale_import_configmaps(args, workload_manifests)
     if args.execute and ingress_manifests:
-        ensure_ingress_tls_secret(args, values, host)
+        if tls_enabled:
+            ensure_ingress_tls_secret(args, values, host)
         executable_manifests = executable_ingress_manifests(args, ingress_manifests)
         if executable_manifests:
             run_command(
@@ -8624,7 +8636,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--ingress-host", default=os.environ.get("MIGRATION_INGRESS_HOST", os.environ.get("MIGRATION_CLUSTER_DOMAIN", "")))
     parser.add_argument("--tls-cert-file", default=os.environ.get("MIGRATION_TLS_CERT_FILE", ""))
     parser.add_argument("--tls-key-file", default=os.environ.get("MIGRATION_TLS_KEY_FILE", ""))
-    parser.add_argument("--tls-mode", choices=["auto", "existing-secret", "lab-ca", "self-signed", "cert-files", "pfx", "letsencrypt"], default=os.environ.get("MIGRATION_TLS_MODE", "auto"))
+    parser.add_argument(
+        "--tls-mode",
+        choices=["auto", "http", "disabled", "existing-secret", "lab-ca", "self-signed", "cert-files", "pfx", "letsencrypt"],
+        default=os.environ.get("MIGRATION_TLS_MODE", "auto"),
+    )
     parser.add_argument("--tls-extra-hosts", default=os.environ.get("MIGRATION_TLS_EXTRA_HOSTS", ""))
     parser.add_argument("--tls-pfx-file", default=os.environ.get("MIGRATION_TLS_PFX_FILE", ""))
     parser.add_argument("--tls-pfx-password-file", default=os.environ.get("MIGRATION_TLS_PFX_PASSWORD_FILE", ""))

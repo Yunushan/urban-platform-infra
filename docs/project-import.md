@@ -479,7 +479,10 @@ private/self-signed CA trusted automatically by Chrome. Use
 `MIGRATION_TLS_MODE=letsencrypt` with cert-manager ACME settings when a real DNS
 name and issuer are available. Wildcard SANs can be passed with
 `MIGRATION_TLS_EXTRA_HOSTS`, but Let's Encrypt wildcards require a DNS-01 issuer
-that already has DNS provider credentials.
+that already has DNS provider credentials. For isolated lab access where browser
+certificate trust is not desired, use `MIGRATION_TLS_MODE=http` (or
+`disabled`) to render only Traefik `web` HTTP routes, skip the TLS secret and
+HTTPS redirect, and rewrite imported frontend URLs to `http://`.
 When execution is enabled, generated Ingress candidates are applied only if
 their backend Kubernetes Service already exists in the target namespace. If the
 Compose edge service has not been converted to a chart workload yet, the
