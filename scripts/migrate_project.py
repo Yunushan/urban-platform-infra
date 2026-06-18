@@ -7177,7 +7177,7 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
     for record, service in edge_service_pairs:
         if record.kind == "nginx" and import_project.has_edge_publish(record.ports):
             name = kubernetes_workload_name(record)
-            backend_service_port = nginx_frontend_external_port(record, service)
+            backend_service_port = nginx_frontend_external_port(args, record, service)
             rule: dict[str, Any] = {
                 "http": {
                     "paths": [
