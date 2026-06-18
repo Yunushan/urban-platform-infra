@@ -113,7 +113,7 @@ POSTGRES_AUTH_FAILURE_RE = re.compile(
     re.IGNORECASE,
 )
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 32
+MANIFEST_GENERATOR_VERSION = 33
 POSTGRES_REPAIR_RUNTIME_VALIDATION_MIN_WAIT_SECONDS = 180
 DOTNET_FROM_IMAGE_RE = re.compile(
     r"^(?P<prefix>\s*FROM\s+(?:--platform=\S+\s+)?)"
@@ -837,6 +837,14 @@ def compose_service_dns_alias(record: import_project.ServiceRecord) -> str:
         return safe
     digest = hashlib.sha256(record.name.encode("utf-8")).hexdigest()[:8]
     return f"{safe[:54].strip('-')}-{digest}".strip("-")
+
+
+def preferred_service_dns_name(record: import_project.ServiceRecord, alias_counts: dict[str, int], generated_names: set[str]) -> str:
+    name = kubernetes_workload_name(record)
+    alias = compose_service_dns_alias(record)
+    if alias != name and alias_counts.get(alias) == 1 and alias not in generated_names:
+        return alias
+    return name
 
 
 def service_identity_text(record: import_project.ServiceRecord, service: dict[str, Any]) -> str:
@@ -2035,6 +2043,83 @@ def normalize_private_frontend_http_endpoints(args: argparse.Namespace, value: s
     return FRONTEND_PRIVATE_HTTP_URL_RE.sub(replace_url, value)
 
 
+def nginx_api_guard_location_block(indent: str, upstream: str) -> str:
+    lines = [
+        f"{indent}location = /api {{",
+        f"{indent}    return 308 /api/;",
+        f"{indent}}}",
+        f"{indent}location ^~ /api/ {{",
+    ]
+    if upstream:
+        lines.extend(
+            [
+                f"{indent}    proxy_http_version 1.1;",
+                f"{indent}    proxy_set_header Host $host;",
+                f"{indent}    proxy_set_header X-Real-IP $remote_addr;",
+                f"{indent}    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
+                f"{indent}    proxy_set_header X-Forwarded-Proto $scheme;",
+                f"{indent}    proxy_set_header X-Forwarded-Host $host;",
+                f"{indent}    proxy_pass {upstream};",
+            ]
+        )
+    else:
+        lines.append(f"{indent}    return 502;")
+    lines.append(f"{indent}}}")
+    return "\n".join(lines)
+
+
+def ensure_nginx_frontend_api_guard(value: str, upstream: str) -> str:
+    if re.search(r"(?m)^\s*location\s+(?:=|~\*?|~|\^~)?\s*/api(?:/|\b)", value):
+        return value
+
+    def insert(match: re.Match[str]) -> str:
+        indent = f"{match.group('indent')}    "
+        return f"{match.group(0)}\n{nginx_api_guard_location_block(indent, upstream)}"
+
+    return re.sub(r"(?m)^(?P<indent>\s*)server\s*\{\s*(?:#.*)?$", insert, value)
+
+
+def generated_nginx_frontend_config(args: argparse.Namespace, record: import_project.ServiceRecord, upstream: str) -> str:
+    listen_port = nginx_internal_port(args, record, 80)
+    api_guard = nginx_api_guard_location_block("        ", upstream)
+    return "\n".join(
+        [
+            "user nginx;",
+            "worker_processes auto;",
+            "pid /tmp/nginx.pid;",
+            "",
+            "events {",
+            "    worker_connections 1024;",
+            "}",
+            "",
+            "http {",
+            "    include /etc/nginx/mime.types;",
+            "    default_type application/octet-stream;",
+            "    sendfile on;",
+            "    client_body_temp_path /tmp/nginx/client_body;",
+            "    proxy_temp_path /tmp/nginx/proxy;",
+            "    fastcgi_temp_path /tmp/nginx/fastcgi;",
+            "    uwsgi_temp_path /tmp/nginx/uwsgi;",
+            "    scgi_temp_path /tmp/nginx/scgi;",
+            "",
+            "    server {",
+            f"        listen {listen_port};",
+            "        server_name _;",
+            "        root /usr/share/nginx/html;",
+            "        index index.html;",
+            "",
+            api_guard,
+            "",
+            "        location / {",
+            "            try_files $uri $uri/ /index.html;",
+            "        }",
+            "    }",
+            "}",
+            "",
+        ]
+    )
+
+
 def normalize_imported_env_value(
     args: argparse.Namespace,
     key: str,
@@ -2117,6 +2202,20 @@ def config_rewrite_fingerprint(args: argparse.Namespace, record: import_project.
         "generator": MANIFEST_GENERATOR_VERSION,
         "record": [record.file, record.name],
         "frontendBaseUrl": canonical_frontend_base_url(args),
+    }
+    return hashlib.sha256(json.dumps(public_material, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+
+
+def nginx_frontend_runtime_config_fingerprint(
+    args: argparse.Namespace,
+    record: import_project.ServiceRecord,
+    api_proxy_upstream: str,
+) -> str:
+    public_material = {
+        "apiProxyUpstream": api_proxy_upstream,
+        "frontendBaseUrl": canonical_frontend_base_url(args),
+        "generator": MANIFEST_GENERATOR_VERSION,
+        "record": [record.file, record.name],
     }
     return hashlib.sha256(json.dumps(public_material, sort_keys=True).encode("utf-8")).hexdigest()[:12]
 
@@ -2310,6 +2409,8 @@ def normalize_imported_config_text(
     *,
     db_rewrites: dict[str, dict[str, Any]] | None = None,
     service_db_endpoint: dict[str, Any] | None = None,
+    frontend_api_guard: bool = False,
+    frontend_api_proxy_upstream: str = "",
 ) -> str:
     if apisix_config_text(record, target):
         value = re.sub(r"(?<![A-Za-z0-9.-])127[.]0[.]0[.]1:2379\b", "etcd:2379", value)
@@ -2326,6 +2427,8 @@ def normalize_imported_config_text(
     if frontend_static_config_target(record, target):
         value = normalize_private_frontend_http_endpoints(args, value)
     if record.kind == "nginx" and (target == "/etc/nginx/nginx.conf" or target.startswith("/etc/nginx/")):
+        if frontend_api_guard:
+            value = ensure_nginx_frontend_api_guard(value, frontend_api_proxy_upstream)
         value = rewrite_nginx_listen_ports_for_unprivileged(args, record, value)
         value = rewrite_nginx_runtime_paths_for_unprivileged(args, record, target, value)
     return value
@@ -2345,10 +2448,13 @@ def configmap_mount_manifests(
     *,
     db_rewrites: dict[str, dict[str, Any]] | None = None,
     service_db_endpoint: dict[str, Any] | None = None,
+    frontend_api_guard: bool = False,
+    frontend_api_proxy_upstream: str = "",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     manifests: list[dict[str, Any]] = []
     volumes: list[dict[str, Any]] = []
     volume_mounts: list[dict[str, Any]] = []
+    mounted_nginx_main_config = False
     for index, (source, target) in enumerate(compose_bind_mounts(service), start=1):
         if nginx_static_html_target(target) and nginx_static_html_bind_source(args, record, service) is not None:
             continue
@@ -2359,6 +2465,8 @@ def configmap_mount_manifests(
         source_path = resolve_bind_source(args, record, source)
         if source_path is None:
             continue
+        if record.kind == "nginx" and target == "/etc/nginx/nginx.conf":
+            mounted_nginx_main_config = True
         cm_name = k8s_name(f"{kubernetes_workload_name(record)}-{index}", "import-cm")
         volume_name = f"cm-{index}"
         data: dict[str, str] = {}
@@ -2380,6 +2488,8 @@ def configmap_mount_manifests(
                     value,
                     db_rewrites=db_rewrites,
                     service_db_endpoint=service_db_endpoint,
+                    frontend_api_guard=frontend_api_guard,
+                    frontend_api_proxy_upstream=frontend_api_proxy_upstream,
                 )
             total_size += len(value.encode("utf-8"))
             if kind == "text":
@@ -2420,6 +2530,8 @@ def configmap_mount_manifests(
                         value,
                         db_rewrites=db_rewrites,
                         service_db_endpoint=service_db_endpoint,
+                        frontend_api_guard=frontend_api_guard,
+                        frontend_api_proxy_upstream=frontend_api_proxy_upstream,
                     )
                 entry_size = len(value.encode("utf-8"))
                 if total_size + entry_size > CONFIGMAP_TOTAL_MAX_BYTES:
@@ -2474,6 +2586,20 @@ def configmap_mount_manifests(
             config_map["binaryData"] = binary_data
         manifests.append(config_map)
         volumes.append({"name": volume_name, "configMap": {"name": cm_name, "items": items}})
+    if frontend_api_guard and record.kind == "nginx" and not mounted_nginx_main_config:
+        cm_name = k8s_name(f"{kubernetes_workload_name(record)}-generated-nginx", "import-cm")
+        volume_name = "cm-generated-nginx"
+        key = "nginx.conf"
+        manifests.append(
+            {
+                "apiVersion": "v1",
+                "kind": "ConfigMap",
+                "metadata": {"name": cm_name, "namespace": args.namespace, "labels": labels},
+                "data": {key: generated_nginx_frontend_config(args, record, frontend_api_proxy_upstream)},
+            }
+        )
+        volumes.append({"name": volume_name, "configMap": {"name": cm_name, "items": [{"key": key, "path": key}]}})
+        volume_mounts.append({"name": volume_name, "mountPath": "/etc/nginx/nginx.conf", "subPath": key, "readOnly": True})
     return manifests, volumes, volume_mounts
 
 
@@ -2562,19 +2688,50 @@ def nginx_unprivileged_startup_script(args: argparse.Namespace, record: import_p
     )
 
 
-def kubernetes_workload_manifests(
+def first_preferred_port(ports: list[int], preferred: list[int]) -> int:
+    for port in preferred:
+        if port in ports:
+            return port
+    return ports[0]
+
+
+def frontend_api_proxy_upstream_for_workloads(
+    workload_inputs: list[tuple[import_project.ServiceRecord, dict[str, Any], str, list[int]]],
+    alias_counts: dict[str, int],
+    generated_names: set[str],
+) -> str:
+    apisix_candidates: list[tuple[import_project.ServiceRecord, list[int]]] = []
+    gateway_candidates: list[tuple[import_project.ServiceRecord, list[int]]] = []
+    for record, service, _image, ports in workload_inputs:
+        if not ports:
+            continue
+        identity = service_identity_text(record, service)
+        if "apisix" in identity:
+            apisix_candidates.append((record, ports))
+        elif "gateway" in identity:
+            gateway_candidates.append((record, ports))
+    if apisix_candidates:
+        record, ports = sorted(apisix_candidates, key=lambda item: preferred_service_dns_name(item[0], alias_counts, generated_names))[0]
+        service_name = preferred_service_dns_name(record, alias_counts, generated_names)
+        return f"http://{service_name}:{first_preferred_port(ports, [9080, 80, 8080])}"
+    if gateway_candidates:
+        record, ports = sorted(gateway_candidates, key=lambda item: preferred_service_dns_name(item[0], alias_counts, generated_names))[0]
+        service_name = preferred_service_dns_name(record, alias_counts, generated_names)
+        return f"http://{service_name}:{first_preferred_port(ports, [5000, 8080, 80])}"
+    return ""
+
+
+def collect_kubernetes_workload_inputs(
     args: argparse.Namespace,
     service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
-    values: dict[str, Any],
-    *,
-    database_service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]] | None = None,
-) -> list[dict[str, Any]]:
-    manifests: list[dict[str, Any]] = []
+) -> tuple[
+    list[tuple[import_project.ServiceRecord, dict[str, Any], str, list[int]]],
+    dict[str, int],
+    set[str],
+]:
     workload_inputs: list[tuple[import_project.ServiceRecord, dict[str, Any], str, list[int]]] = []
     generated_names: set[str] = set()
     alias_counts: dict[str, int] = {}
-    db_rewrites = database_endpoint_rewrites(args, database_service_pairs or service_pairs, values)
-
     for record, service in service_pairs:
         if not should_generate_kubernetes_workload(args, record, service):
             continue
@@ -2586,6 +2743,29 @@ def kubernetes_workload_manifests(
         generated_names.add(kubernetes_workload_name(record))
         alias = compose_service_dns_alias(record)
         alias_counts[alias] = alias_counts.get(alias, 0) + 1
+    return workload_inputs, alias_counts, generated_names
+
+
+def kubernetes_workload_manifests(
+    args: argparse.Namespace,
+    service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+    values: dict[str, Any],
+    *,
+    database_service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]] | None = None,
+) -> list[dict[str, Any]]:
+    manifests: list[dict[str, Any]] = []
+    db_rewrites = database_endpoint_rewrites(args, database_service_pairs or service_pairs, values)
+    workload_inputs, alias_counts, generated_names = collect_kubernetes_workload_inputs(args, service_pairs)
+    reference_inputs, reference_alias_counts, reference_generated_names = collect_kubernetes_workload_inputs(
+        args,
+        database_service_pairs or service_pairs,
+    )
+
+    frontend_api_proxy_upstream = frontend_api_proxy_upstream_for_workloads(
+        reference_inputs,
+        reference_alias_counts,
+        reference_generated_names,
+    )
 
     for record, service, image, ports in workload_inputs:
         name = kubernetes_workload_name(record)
@@ -2651,6 +2831,7 @@ def kubernetes_workload_manifests(
         resources = imported_workload_resources(args)
         if resources:
             container["resources"] = resources
+        frontend_api_guard = record.kind == "nginx" and nginx_static_html_bind_source(args, record, service) is not None
         config_map_manifests, volumes, volume_mounts = configmap_mount_manifests(
             args,
             record,
@@ -2658,6 +2839,8 @@ def kubernetes_workload_manifests(
             labels,
             db_rewrites=db_rewrites,
             service_db_endpoint=service_db_endpoint,
+            frontend_api_guard=frontend_api_guard,
+            frontend_api_proxy_upstream=frontend_api_proxy_upstream if frontend_api_guard else "",
         )
         if startup_script := nginx_unprivileged_startup_script(args, record):
             container["command"] = ["/bin/sh", "-ec"]
@@ -2689,6 +2872,12 @@ def kubernetes_workload_manifests(
             )
         if record.kind == "nginx" and canonical_frontend_base_url(args):
             pod_template_annotations["urban-platform.io/config-rewrite-fingerprint"] = config_rewrite_fingerprint(args, record)
+        if frontend_api_guard:
+            pod_template_annotations["urban-platform.io/nginx-api-guard-fingerprint"] = nginx_frontend_runtime_config_fingerprint(
+                args,
+                record,
+                frontend_api_proxy_upstream,
+            )
         if nginx_base_image := nginx_rollout_base_image(args, record):
             pod_template_annotations["urban-platform.io/nginx-base-image"] = nginx_base_image
             rollout_fingerprint = hashlib.sha256(
