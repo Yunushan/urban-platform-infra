@@ -113,8 +113,9 @@ POSTGRES_AUTH_FAILURE_RE = re.compile(
     re.IGNORECASE,
 )
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 38
+MANIFEST_GENERATOR_VERSION = 39
 HTTP_ONLY_TLS_MODES = {"http", "disabled"}
+IMPORTED_EDGE_TRAEFIK_PRIORITY = "10000"
 POSTGRES_REPAIR_RUNTIME_VALIDATION_MIN_WAIT_SECONDS = 180
 DOTNET_FROM_IMAGE_RE = re.compile(
     r"^(?P<prefix>\s*FROM\s+(?:--platform=\S+\s+)?)"
@@ -7194,7 +7195,7 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
             }
             annotations = {
                 "traefik.ingress.kubernetes.io/router.entrypoints": "websecure" if tls_enabled else "web",
-                "traefik.ingress.kubernetes.io/router.priority": "100",
+                "traefik.ingress.kubernetes.io/router.priority": IMPORTED_EDGE_TRAEFIK_PRIORITY,
             }
             if ingress_source_allowlist_cidrs(values):
                 annotations["traefik.ingress.kubernetes.io/router.middlewares"] = traefik_source_allowlist_middleware_ref(args)
@@ -7231,7 +7232,7 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
                             "annotations": {
                                 "traefik.ingress.kubernetes.io/router.entrypoints": "web",
                                 "traefik.ingress.kubernetes.io/router.middlewares": traefik_middleware_ref(args, redirect_middleware_name),
-                                "traefik.ingress.kubernetes.io/router.priority": "100",
+                                "traefik.ingress.kubernetes.io/router.priority": IMPORTED_EDGE_TRAEFIK_PRIORITY,
                             },
                         },
                         "spec": {
