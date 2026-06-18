@@ -113,7 +113,7 @@ POSTGRES_AUTH_FAILURE_RE = re.compile(
     re.IGNORECASE,
 )
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 33
+MANIFEST_GENERATOR_VERSION = 34
 POSTGRES_REPAIR_RUNTIME_VALIDATION_MIN_WAIT_SECONDS = 180
 DOTNET_FROM_IMAGE_RE = re.compile(
     r"^(?P<prefix>\s*FROM\s+(?:--platform=\S+\s+)?)"
@@ -2710,14 +2710,14 @@ def frontend_api_proxy_upstream_for_workloads(
             apisix_candidates.append((record, ports))
         elif "gateway" in identity:
             gateway_candidates.append((record, ports))
-    if apisix_candidates:
-        record, ports = sorted(apisix_candidates, key=lambda item: preferred_service_dns_name(item[0], alias_counts, generated_names))[0]
-        service_name = preferred_service_dns_name(record, alias_counts, generated_names)
-        return f"http://{service_name}:{first_preferred_port(ports, [9080, 80, 8080])}"
     if gateway_candidates:
         record, ports = sorted(gateway_candidates, key=lambda item: preferred_service_dns_name(item[0], alias_counts, generated_names))[0]
         service_name = preferred_service_dns_name(record, alias_counts, generated_names)
         return f"http://{service_name}:{first_preferred_port(ports, [5000, 8080, 80])}"
+    if apisix_candidates:
+        record, ports = sorted(apisix_candidates, key=lambda item: preferred_service_dns_name(item[0], alias_counts, generated_names))[0]
+        service_name = preferred_service_dns_name(record, alias_counts, generated_names)
+        return f"http://{service_name}:{first_preferred_port(ports, [9080, 80, 8080])}"
     return ""
 
 

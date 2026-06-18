@@ -218,11 +218,14 @@ When the selected platform image is `nginxinc/nginx-unprivileged`, imported
 nginx config text is also normalized for unprivileged runtime paths, including
 `pid /tmp/nginx.pid;` and writable temporary directories under `/tmp/nginx`.
 For static SPA frontends, the importer also guards `/api` routes before the
-SPA `try_files ... /index.html` fallback. If an imported APISIX service is
-present, nginx proxies `/api/` to that service; otherwise `/api/` returns a
-clear `502` instead of serving the React HTML shell as an API response. This
-prevents browser pages such as `/dashboard` from rendering escaped
-`<!doctype html>` when an API URL accidentally falls through to static content.
+SPA `try_files ... /index.html` fallback. If an imported application gateway is
+present, nginx proxies `/api/` to that gateway. If no application gateway is
+present but APISIX is imported, nginx uses APISIX instead. When neither exists,
+`/api/` returns a clear `502` instead of serving the React HTML shell as an API
+response. This prevents browser pages such as `/dashboard` from rendering
+escaped `<!doctype html>` when an API URL accidentally falls through to static
+content, and avoids relying on an empty APISIX route table when the application
+already ships its own gateway service.
 
 To run later lab batches after the first automatic batch, rerun the same
 `import-auto` command. Resume state skips completed batch stages and
