@@ -481,6 +481,13 @@ The client workstation still needs to trust the generated lab CA; enterprise
 deployments should serve application traffic only through the canonical DNS name
 and its trusted certificate.
 
+If `MIGRATION_INGRESS_HOST` is an IP address, Kubernetes cannot place that IP in
+`spec.rules.host`, so the importer generates hostless Traefik Ingress rules and
+includes the IP as a certificate SAN for lab/self-signed TLS. Switching from a
+DNS host to IP-serving mode also prunes stale imported canonical redirect
+Ingress/Middleware resources so the VIP does not keep redirecting to the old
+FQDN.
+
 No-registry preload example:
 
 ```bash
@@ -555,8 +562,9 @@ is still reading an old source database host from baked image config, mounted
 config, or environment. In execute mode the validator now attempts one automatic
 repair pass: it learns non-secret source endpoint hints into the private
 `MIGRATION_DB_TARGETS` file, rebuilds/reloads only the affected imported
-service image(s), reapplies their manifests, and immediately re-runs runtime
-validation. When target credentials are available through the private target map
+service image(s), bypassing stale preload reuse for those repaired images,
+reapplies their manifests, and immediately re-runs runtime validation. When
+target credentials are available through the private target map
 or CloudNativePG app `secretRef`, the same repair also aligns PostgreSQL
 username/password values through the imported per-service Secret and .NET-style
 environment overrides, while baked text config rewrites stay focused on
@@ -576,6 +584,12 @@ the repair pass can infer the existing TimescaleDB target from service aliases
 and use it for the rewrite. Preload mode still needs the normal RKE2 node/SSH
 inputs in the command environment so the repaired image can be streamed to the
 nodes.
+
+When a target contains `secretRef`, the referenced Kubernetes Secret is treated
+as the runtime credential source of truth when secret material import is
+allowed. This prevents stale literal usernames or passwords in an older private
+target map from overriding the live CloudNativePG app Secret during automatic
+repair.
 
 Imported service workloads get TCP readiness and liveness probes by default.
 When legacy services are crash-looping before you can capture logs, rerun only

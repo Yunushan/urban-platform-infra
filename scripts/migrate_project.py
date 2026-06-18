@@ -530,19 +530,21 @@ def target_dsn_from_mapping(target: Any, namespace: str, kubeconfig: str = "") -
     username = target.get("username")
     password = target.get("password")
     secret_ref = target.get("secretRef") or target.get("secret")
-    if isinstance(secret_ref, dict) and (not username or not password):
+    if isinstance(secret_ref, dict):
         secret_namespace = str(secret_ref.get("namespace") or namespace)
         secret_name = str(secret_ref.get("name"))
         try:
             secret_data = k8s_secret_data(secret_namespace, secret_name, kubeconfig)
         except subprocess.CalledProcessError:
-            print(f"Could not read target database secret {secret_namespace}/{secret_name}; restore for this target will be skipped.")
-            return None
-        username = secret_data.get(str(secret_ref.get("usernameKey", "username")))
-        password = password or secret_data.get(str(secret_ref.get("passwordKey", "password")))
-        database = database or secret_data.get(str(secret_ref.get("databaseKey", "dbname")))
-        host = host or secret_data.get(str(secret_ref.get("hostKey", "host")))
-        port = target.get("port") or secret_data.get(str(secret_ref.get("portKey", "port")), 5432)
+            if not username or not password:
+                print(f"Could not read target database secret {secret_namespace}/{secret_name}; restore for this target will be skipped.")
+                return None
+        else:
+            username = secret_data.get(str(secret_ref.get("usernameKey", "username"))) or username
+            password = secret_data.get(str(secret_ref.get("passwordKey", "password"))) or password
+            database = secret_data.get(str(secret_ref.get("databaseKey", "dbname"))) or database
+            host = secret_data.get(str(secret_ref.get("hostKey", "host"))) or host
+            port = secret_data.get(str(secret_ref.get("portKey", "port"))) or target.get("port") or 5432
     if not host or not database or not username or not password:
         return None
     if str(password).startswith("<") or str(username).startswith("<") or str(database).startswith("<"):
@@ -1334,8 +1336,8 @@ def database_target_runtime_endpoint(args: argparse.Namespace, target: Any) -> d
         if secret_name:
             secret_data = cached_k8s_secret_data(args, secret_namespace, secret_name)
             if secret_data:
-                username = username or non_placeholder_secret_value(secret_data.get(str(secret_ref.get("usernameKey", "username"))))
-                password = password or non_placeholder_secret_value(secret_data.get(str(secret_ref.get("passwordKey", "password"))))
+                username = non_placeholder_secret_value(secret_data.get(str(secret_ref.get("usernameKey", "username")))) or username
+                password = non_placeholder_secret_value(secret_data.get(str(secret_ref.get("passwordKey", "password")))) or password
                 database = non_placeholder_secret_value(secret_data.get(str(secret_ref.get("databaseKey", "dbname"))))
                 host = non_placeholder_secret_value(secret_data.get(str(secret_ref.get("hostKey", "host"))))
                 port = non_placeholder_secret_value(secret_data.get(str(secret_ref.get("portKey", "port"))))
@@ -2927,7 +2929,7 @@ def preloaded_image_reuse_allowed(
     service: dict[str, Any],
     db_rewrites: dict[str, dict[str, Any]],
 ) -> bool:
-    return True
+    return not image_config_rewrite_required(record, service, db_rewrites)
 
 
 def image_config_rewrite_sed_scripts(
@@ -5678,12 +5680,19 @@ def stage_images(
             continue
         static_source = nginx_static_html_bind_source(args, record, service)
         platform_nginx_import = nginx_requires_platform_import(args, record)
-        if record.kind != "application" and not record.build_only and static_source is None and not platform_nginx_import:
+        image_config_rewrite = image_config_rewrite_required(record, service, db_rewrites)
+        if (
+            record.kind != "application"
+            and not record.build_only
+            and static_source is None
+            and not platform_nginx_import
+            and not image_config_rewrite
+        ):
             continue
         image = record.image
         build = service.get("build")
         needs_tag = record.build_only or (image is not None and (not image.tag or image.tag in import_project.MUTABLE_TAGS))
-        if needs_tag or static_source is not None or platform_nginx_import:
+        if needs_tag or static_source is not None or platform_nginx_import or image_config_rewrite:
             candidates.append((record, service, build))
     source_image_records: dict[str, list[import_project.ServiceRecord]] = {}
     alias_image_records: dict[str, list[import_project.ServiceRecord]] = {}
@@ -6232,6 +6241,63 @@ def cleanup_stale_import_configmaps(args: argparse.Namespace, workload_manifests
     print("Removing stale imported ConfigMap(s) that are no longer generated by the current manifest set.")
     for name in sorted(set(stale_names)):
         run_command(kubectl_command(args, ["-n", args.namespace, "delete", "configmap", name, "--ignore-not-found=true"]))
+
+
+def cleanup_stale_import_edge_resources(
+    args: argparse.Namespace,
+    ingress_manifests: list[dict[str, Any]],
+    edge_service_pairs: list[tuple[import_project.ServiceRecord, dict[str, Any]]],
+) -> None:
+    if not args.execute or not edge_service_pairs:
+        return
+    edge_names = {kubernetes_workload_name(record) for record, _service in edge_service_pairs}
+    current_ingresses = {
+        metadata_name(manifest)
+        for manifest in ingress_manifests
+        if manifest.get("kind") == "Ingress" and metadata_name(manifest)
+    }
+    current_middlewares = {
+        metadata_name(manifest)
+        for manifest in ingress_manifests
+        if manifest.get("kind") == "Middleware" and metadata_name(manifest)
+    }
+
+    try:
+        ingresses = kubectl_json(args, ["-n", args.namespace, "get", "ingress"]).get("items", [])
+    except RuntimeError as exc:
+        print(f"Could not inspect stale imported Ingress resources for cleanup: {compact_runtime_message(exc)}")
+        ingresses = []
+    stale_ingresses = []
+    for item in ingresses:
+        name = str((item.get("metadata", {}) or {}).get("name") or "")
+        if not name or name in current_ingresses:
+            continue
+        if any(name == f"{edge_name}-traefik" or name.startswith(f"{edge_name}-traefik-") for edge_name in edge_names):
+            stale_ingresses.append(name)
+
+    stale_middlewares = []
+    try:
+        middlewares = kubectl_json(args, ["-n", args.namespace, "get", "middleware.traefik.io"]).get("items", [])
+    except RuntimeError as exc:
+        print(f"Could not inspect stale imported Traefik Middleware resources for cleanup: {compact_runtime_message(exc)}")
+        middlewares = []
+    for item in middlewares:
+        name = str((item.get("metadata", {}) or {}).get("name") or "")
+        if not name or name in current_middlewares:
+            continue
+        if any(name.startswith(f"{edge_name}-") for edge_name in edge_names) and (
+            "canonical-host" in name or "redirect" in name
+        ):
+            stale_middlewares.append(name)
+
+    if stale_ingresses or stale_middlewares:
+        print("Removing stale imported edge routing resource(s) that are no longer generated by the current ingress mode.")
+    for name in sorted(set(stale_ingresses)):
+        run_command(kubectl_command(args, ["-n", args.namespace, "delete", "ingress", name, "--ignore-not-found=true"]))
+    for name in sorted(set(stale_middlewares)):
+        run_command(
+            kubectl_command(args, ["-n", args.namespace, "delete", "middleware.traefik.io", name, "--ignore-not-found=true"])
+        )
 
 
 def ingress_san(host: str) -> str:
@@ -6999,6 +7065,7 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
                 kubectl_apply_stdin_command(args, namespace=args.namespace),
                 stdin=yaml.safe_dump_all(executable_manifests, sort_keys=False),
             )
+            cleanup_stale_import_edge_resources(args, executable_manifests, edge_service_pairs)
         else:
             print("No ingress candidates were applied because their backend services are not present yet.")
 
