@@ -113,7 +113,7 @@ POSTGRES_AUTH_FAILURE_RE = re.compile(
     re.IGNORECASE,
 )
 STATEFUL_MIGRATION_STAGES = {"secrets", "images", "databases", "manifests"}
-MANIFEST_GENERATOR_VERSION = 35
+MANIFEST_GENERATOR_VERSION = 36
 POSTGRES_REPAIR_RUNTIME_VALIDATION_MIN_WAIT_SECONDS = 180
 DOTNET_FROM_IMAGE_RE = re.compile(
     r"^(?P<prefix>\s*FROM\s+(?:--platform=\S+\s+)?)"
@@ -2079,8 +2079,20 @@ def ensure_nginx_frontend_api_guard(value: str, upstream: str) -> str:
     return re.sub(r"(?m)^(?P<indent>\s*)server\s*\{\s*(?:#.*)?$", insert, value)
 
 
-def generated_nginx_frontend_config(args: argparse.Namespace, record: import_project.ServiceRecord, upstream: str) -> str:
-    listen_port = nginx_internal_port(args, record, 80)
+def nginx_frontend_external_port(record: import_project.ServiceRecord, service: dict[str, Any]) -> int:
+    ports = kubernetes_container_ports(record, service)
+    if not ports:
+        return 80
+    return first_preferred_port(ports, [80, 443, 8080, 8443])
+
+
+def generated_nginx_frontend_config(
+    args: argparse.Namespace,
+    record: import_project.ServiceRecord,
+    service: dict[str, Any],
+    upstream: str,
+) -> str:
+    listen_port = nginx_internal_port(args, record, nginx_frontend_external_port(record, service))
     api_guard = nginx_api_guard_location_block("        ", upstream)
     return "\n".join(
         [
@@ -2597,7 +2609,7 @@ def configmap_mount_manifests(
                 "apiVersion": "v1",
                 "kind": "ConfigMap",
                 "metadata": {"name": cm_name, "namespace": args.namespace, "labels": labels},
-                "data": {key: generated_nginx_frontend_config(args, record, frontend_api_proxy_upstream)},
+                "data": {key: generated_nginx_frontend_config(args, record, service, frontend_api_proxy_upstream)},
             }
         )
         volumes.append({"name": volume_name, "configMap": {"name": cm_name, "items": [{"key": key, "path": key}]}})
@@ -7027,6 +7039,7 @@ def canonical_host_http_redirect_manifests(
     *,
     name: str,
     backend_service_name: str,
+    backend_service_port: int,
     canonical_host: str,
     tls_secret_name: str,
 ) -> list[dict[str, Any]]:
@@ -7074,7 +7087,7 @@ def canonical_host_http_redirect_manifests(
                                     "path": "/",
                                     "pathType": "Prefix",
                                     "backend": {
-                                        "service": {"name": backend_service_name, "port": {"number": 80}}
+                                        "service": {"name": backend_service_name, "port": {"number": backend_service_port}}
                                     },
                                 }
                             ]
@@ -7107,7 +7120,7 @@ def canonical_host_http_redirect_manifests(
                                     "path": "/",
                                     "pathType": "Prefix",
                                     "backend": {
-                                        "service": {"name": backend_service_name, "port": {"number": 80}}
+                                        "service": {"name": backend_service_name, "port": {"number": backend_service_port}}
                                     },
                                 }
                             ]
@@ -7148,6 +7161,7 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
     for record, service in edge_service_pairs:
         if record.kind == "nginx" and import_project.has_edge_publish(record.ports):
             name = kubernetes_workload_name(record)
+            backend_service_port = nginx_frontend_external_port(record, service)
             rule: dict[str, Any] = {
                 "http": {
                     "paths": [
@@ -7155,7 +7169,7 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
                             "path": "/",
                             "pathType": "Prefix",
                             "backend": {
-                                "service": {"name": name, "port": {"number": 80}}
+                                "service": {"name": name, "port": {"number": backend_service_port}}
                             },
                         }
                     ]
@@ -7218,6 +7232,7 @@ def stage_manifests(args: argparse.Namespace, service_pairs: list[tuple[import_p
                             values,
                             name=name,
                             backend_service_name=name,
+                            backend_service_port=backend_service_port,
                             canonical_host=rule_host,
                             tls_secret_name=tls_secret_name,
                         )

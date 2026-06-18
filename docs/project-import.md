@@ -227,7 +227,10 @@ escaped `<!doctype html>` when an API URL accidentally falls through to static
 content, and avoids relying on an empty APISIX route table when the application
 already ships its own gateway service. Static SPA imports also use a generated
 nginx main config so old Compose gateway rules cannot proxy `/login` or
-`/dashboard` away from the baked frontend.
+`/dashboard` away from the baked frontend. The generated listener and Traefik
+backend service port are aligned to the imported Compose edge target port, so
+HTTPS-oriented Compose services do not leave Traefik pointing at an unused
+backend port.
 
 To run later lab batches after the first automatic batch, rerun the same
 `import-auto` command. Resume state skips completed batch stages and
