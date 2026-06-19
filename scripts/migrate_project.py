@@ -1163,7 +1163,32 @@ def directory_configmap_file_paths(source_path: Path) -> list[Path]:
     return sorted((path for path in source_path.rglob("*") if path.is_file()), key=sort_key)
 
 
-def service_looks_like_dotnet(record: import_project.ServiceRecord, service: dict[str, Any]) -> bool:
+def service_dockerfile_looks_like_dotnet(
+    args: argparse.Namespace,
+    record: import_project.ServiceRecord,
+    service: dict[str, Any],
+) -> bool:
+    build = service.get("build")
+    if not build:
+        return False
+    project_path = Path(str(getattr(args, "project_path", "") or ".")).expanduser()
+    compose_path = (project_path / record.file).resolve()
+    context, dockerfile, _fallback_note = resolve_build_source(compose_path, build)
+    dockerfile_path = (context / dockerfile).resolve()
+    try:
+        content = dockerfile_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        content = dockerfile_path.read_text(encoding="latin-1")
+    except OSError:
+        return False
+    return any(DOTNET_FROM_IMAGE_RE.match(line.rstrip("\r\n")) for line in content.splitlines())
+
+
+def service_looks_like_dotnet(
+    record: import_project.ServiceRecord,
+    service: dict[str, Any],
+    args: argparse.Namespace | None = None,
+) -> bool:
     image = (record.image.display if record.image else "").lower()
     if any(token in image for token in ["dotnet", "aspnet", "mcr.microsoft.com"]):
         return True
@@ -1172,7 +1197,7 @@ def service_looks_like_dotnet(record: import_project.ServiceRecord, service: dic
         for key, value in import_project.environment_entries(service.get("environment"))
         if value is not None
     }
-    return bool(
+    if bool(
         env_keys
         & {
             "ASPNETCORE_HTTP_PORTS",
@@ -1181,7 +1206,9 @@ def service_looks_like_dotnet(record: import_project.ServiceRecord, service: dic
             "DOTNET_RUNNING_IN_CONTAINER",
             "DOTNET_VERSION",
         }
-    )
+    ):
+        return True
+    return bool(args and service_dockerfile_looks_like_dotnet(args, record, service))
 
 
 def dotnet_target_version(args: argparse.Namespace) -> str:
@@ -2301,7 +2328,7 @@ def default_import_environment(args: argparse.Namespace, record: import_project.
         "DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE": "false",
         "ASPNETCORE_HOSTBUILDER__RELOADCONFIGONCHANGE": "false",
     }
-    if dotnet_rewrite_enabled(args) and service_looks_like_dotnet(record, service):
+    if dotnet_rewrite_enabled(args) and service_looks_like_dotnet(record, service, args):
         roll_forward = str(getattr(args, "dotnet_roll_forward", "") or "").strip()
         if roll_forward:
             defaults["DOTNET_ROLL_FORWARD"] = roll_forward
@@ -2905,7 +2932,7 @@ def kubernetes_workload_manifests(
                 f"{nginx_base_image}|{local_import_image(args, record)}|{MANIFEST_GENERATOR_VERSION}".encode("utf-8")
             ).hexdigest()[:12]
             pod_template_annotations["urban-platform.io/nginx-rollout-fingerprint"] = rollout_fingerprint
-        if dotnet_runtime_reporting_enabled(args) and service_looks_like_dotnet(record, service):
+        if dotnet_runtime_reporting_enabled(args) and service_looks_like_dotnet(record, service, args):
             pod_template_annotations["urban-platform.io/dotnet-version-mode"] = dotnet_version_mode(args)
             pod_template_annotations["urban-platform.io/dotnet-target-version"] = dotnet_target_version(args)
             pod_template_annotations["urban-platform.io/dotnet-image-registry"] = selected_dotnet_image_registry(args)
