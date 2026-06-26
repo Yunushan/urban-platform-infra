@@ -47,7 +47,7 @@ jobs:
             requirements-file: requirements-ci-modern.txt
             ansible-requirements-file: ansible/requirements-modern.yml
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
@@ -90,7 +90,7 @@ jobs:
         run: |
           echo "Dependency Review is disabled for this repository."
           echo "Enable GitHub Dependency Graph and set ENABLE_DEPENDENCY_REVIEW=true to activate it."
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         if: ${{ vars.ENABLE_DEPENDENCY_REVIEW == 'true' }}
       - name: Review dependency changes
         if: ${{ vars.ENABLE_DEPENDENCY_REVIEW == 'true' }}
@@ -119,7 +119,7 @@ jobs:
             python-version: '3.14'
             requirements-file: requirements-ci-modern.txt
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
@@ -140,7 +140,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -171,7 +171,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: static
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Trivy filesystem scan
         uses: aquasecurity/trivy-action@v0.36.0
         with:
