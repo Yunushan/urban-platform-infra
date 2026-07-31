@@ -37,9 +37,9 @@ jobs:
   package:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -98,12 +98,12 @@ jobs:
             --checksums "${CHECKSUM_FILE}"
 
       - name: Attest release artifact provenance
-        uses: actions/attest@v4
+        uses: actions/attest@v4.2.0
         with:
           subject-checksums: ${{ env.CHECKSUM_FILE }}
 
       - name: Attest release SBOM
-        uses: actions/attest@v4
+        uses: actions/attest@v4.2.0
         with:
           subject-path: ${{ env.DIST_DIR }}/*.tgz
           sbom-path: ${{ env.SBOM_FILE }}
