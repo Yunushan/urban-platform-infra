@@ -118,7 +118,7 @@ def build_sbom(
             'downloadLocation': 'NOASSERTION',
             'filesAnalyzed': False,
             'licenseConcluded': 'NOASSERTION',
-            'licenseDeclared': 'MIT',
+            'licenseDeclared': '0BSD',
             'copyrightText': 'NOASSERTION',
             'summary': 'Helm chart source package.',
         }

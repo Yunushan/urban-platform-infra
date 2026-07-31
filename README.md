@@ -7,7 +7,7 @@
 <p align="center">
   <img alt="build" src="https://img.shields.io/badge/build-ready-brightgreen">
   <img alt="release" src="https://img.shields.io/badge/release-v0.1.0-blue">
-  <img alt="license" src="https://img.shields.io/badge/license-MIT-0ea5e9">
+  <img alt="license" src="https://img.shields.io/badge/license-0BSD-0ea5e9">
   <img alt="nodes" src="https://img.shields.io/badge/default%20nodes-3-success">
   <img alt="cluster" src="https://img.shields.io/badge/default%20cluster-RKE2-0f766e">
   <img alt="os" src="https://img.shields.io/badge/default%20OS-Ubuntu%2024.04-e95420">
@@ -401,4 +401,4 @@ Supported database profiles are defined in [`config/databases.catalog.yaml`](con
 
 ## License
 
-This project is released under the MIT License. See [`LICENSE`](LICENSE).
+This project is released under the 0BSD License. See [`LICENSE`](LICENSE).

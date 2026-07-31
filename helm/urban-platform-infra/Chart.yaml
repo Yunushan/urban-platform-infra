@@ -17,4 +17,4 @@ maintainers:
   - name: urban-platform-infra contributors
     email: platform@example.com
 annotations:
-  artifacthub.io/license: MIT
+  artifacthub.io/license: 0BSD
