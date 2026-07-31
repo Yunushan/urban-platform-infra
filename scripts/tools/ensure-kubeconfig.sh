@@ -1128,6 +1128,9 @@ if [ ! -f "${INVENTORY_PATH}" ]; then
       printf '        import-rke2-%02d:\n' "${index}"
       printf '          ansible_host: %s\n' "$(yaml_quote "${node}")"
       printf '          node_ip: %s\n' "$(yaml_quote "${node}")"
+      if [ "${use_load_balancers}" = "true" ]; then
+        printf '          keepalived_priority: %s\n' "$((150 - index))"
+      fi
       index=$((index + 1))
     done
     printf '    rke2_agents:\n'

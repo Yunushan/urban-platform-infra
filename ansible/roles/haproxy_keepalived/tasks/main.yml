@@ -65,6 +65,17 @@
     - not ansible_check_mode
     - haproxy_keepalived_firewalld_state.stdout | default('') == 'active'
 
+- name: Allow Keepalived VRRP advertisements in firewalld
+  ansible.posix.firewalld:
+    rich_rule: rule protocol value="vrrp" accept
+    permanent: true
+    immediate: true
+    state: enabled
+  when:
+    - ansible_system == 'Linux'
+    - not ansible_check_mode
+    - haproxy_keepalived_firewalld_state.stdout | default('') == 'active'
+
 - name: Allow HAProxy to bind VIP frontend ports under SELinux
   ansible.builtin.shell: |
     set -euo pipefail

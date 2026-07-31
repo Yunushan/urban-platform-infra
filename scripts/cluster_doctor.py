@@ -155,6 +155,7 @@ def local_checks(args: argparse.Namespace, aliases: dict[str, str]) -> list[Chec
 
 
 REMOTE_DIAGNOSTICS = r"""
+vip="${1:-}"
 svc_state() {
   systemctl is-active "$1" 2>/dev/null || echo unknown
 }
@@ -162,6 +163,11 @@ echo "service:rke2-server:$(svc_state rke2-server)"
 echo "service:rke2-agent:$(svc_state rke2-agent)"
 echo "service:haproxy:$(svc_state haproxy)"
 echo "service:keepalived:$(svc_state keepalived)"
+if [ -n "${vip}" ] && ip -o -4 addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | grep -Fx -- "${vip}" >/dev/null; then
+  echo "vip:present"
+else
+  echo "vip:absent"
+fi
 if command -v ss >/dev/null 2>&1; then
   for port in 6443 7443 9345 9346 80 443; do
     if ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "(:|\])${port}$"; then
@@ -242,6 +248,7 @@ def remote_checks(args: argparse.Namespace, nodes: list[str], aliases: dict[str,
     if not shutil.which("ssh"):
         return [Check("remote diagnostics", "WARN", "`ssh` is not available", "Install OpenSSH client on the operator host.")]
 
+    vip_owners: list[str] = []
     for node in nodes:
         node_label = aliases.get(node, node)
         ssh_prefix = ssh_base(args) + [f"{args.ssh_user}@{node}"]
@@ -265,13 +272,13 @@ def remote_checks(args: argparse.Namespace, nodes: list[str], aliases: dict[str,
                 "Enable passwordless sudo or set MIGRATION_BECOME_PASSWORD_FILE for repair/import workflows." if sudo_ok.code != 0 else "",
             )
         )
-        diagnostic_command = ssh_prefix + ["sudo", "-n", "sh", "-s"]
+        diagnostic_command = ssh_prefix + ["sudo", "-n", "sh", "-s", args.cluster_vip]
         diagnostic = run(diagnostic_command, timeout=args.remote_timeout, env=None, stdin=REMOTE_DIAGNOSTICS)
         if diagnostic.code == 0:
             parsed = parse_remote(diagnostic.stdout)
         else:
             parsed = {}
-            diagnostic = run(ssh_prefix + ["sh", "-s"], timeout=args.remote_timeout, env=None, stdin=REMOTE_DIAGNOSTICS)
+            diagnostic = run(ssh_prefix + ["sh", "-s", args.cluster_vip], timeout=args.remote_timeout, env=None, stdin=REMOTE_DIAGNOSTICS)
             parsed = parse_remote(diagnostic.stdout) if diagnostic.code == 0 else {}
         if not parsed:
             checks.append(
@@ -283,6 +290,9 @@ def remote_checks(args: argparse.Namespace, nodes: list[str], aliases: dict[str,
                 )
             )
             continue
+
+        if args.cluster_vip and parsed.get("vip") == "present":
+            vip_owners.append(node_label)
 
         for service in ["rke2-server", "rke2-agent", "haproxy", "keepalived"]:
             state = parsed.get(f"service:{service}", "unknown")
@@ -335,6 +345,13 @@ def remote_checks(args: argparse.Namespace, nodes: list[str], aliases: dict[str,
                     "Inspect journal details privately on the node; do not paste private logs into public reports." if status == "WARN" else "",
                 )
             )
+    if args.cluster_vip:
+        if len(vip_owners) == 1:
+            checks.append(Check("Keepalived VIP ownership", "OK", f"owned by {vip_owners[0]}", ""))
+        elif not vip_owners:
+            checks.append(Check("Keepalived VIP ownership", "ERROR", "not present on any configured node", "Run `make cluster-repair`; verify the Keepalived interface and VRRP firewall rule."))
+        else:
+            checks.append(Check("Keepalived VIP ownership", "ERROR", f"split brain: owned by {', '.join(vip_owners)}", "Reconcile Keepalived with unique priorities and unicast VRRP peers; only one node may own the VIP."))
     return checks
 
 
@@ -343,6 +360,7 @@ def endpoint_checks(args: argparse.Namespace, nodes: list[str], aliases: dict[st
     endpoints: list[tuple[str, int, str]] = []
     if args.cluster_vip:
         endpoints.append((args.cluster_vip, args.api_port, "cluster VIP API"))
+        endpoints.append((args.cluster_vip, 80, "cluster VIP HTTP ingress"))
     for node in nodes:
         endpoints.append((node, 6443, "node API"))
         endpoints.append((node, 9345, "node RKE2 registration"))
@@ -354,10 +372,11 @@ def endpoint_checks(args: argparse.Namespace, nodes: list[str], aliases: dict[st
         seen.add((host, port))
         visible = aliases.get(host, "cluster-vip" if host == args.cluster_vip else host)
         ok = tcp_check(host, port, args.tcp_timeout)
+        required = label != "cluster VIP HTTP ingress"
         checks.append(
             Check(
                 f"{visible} {label} TCP {port}",
-                "OK" if ok else "WARN",
+                "OK" if ok else ("ERROR" if required else "WARN"),
                 "reachable" if ok else "not reachable from operator",
                 "Check firewall, HAProxy listener, Keepalived VIP ownership, or node reachability." if not ok else "",
             )
@@ -442,6 +461,7 @@ def run_repair(args: argparse.Namespace) -> CommandResult:
             "MIGRATION_CLUSTER_VIP": args.cluster_vip,
             "MIGRATION_KUBERNETES_API_VIP_PORT": str(args.api_port),
             "MIGRATION_AUTO_REPAIR_CLUSTER": "true",
+            "OPERATOR_KUBECONFIG_FORCE_REPAIR": "true",
         }
     )
     script = ROOT / "scripts/tools/ensure-kubeconfig.sh"
@@ -478,6 +498,7 @@ def main() -> int:
     checks.extend(remote_checks(args, args.nodes, aliases))
 
     repair_result = run_repair(args) if args.repair else None
+    post_repair_checks: list[Check] = []
     if repair_result is not None:
         post_repair_readyz = local_kubectl(args, ["get", "--raw=/readyz", "--request-timeout=10s"], timeout=15) if shutil.which("kubectl") else CommandResult(127, "", "kubectl missing", 0)
         checks.append(
@@ -488,6 +509,16 @@ def main() -> int:
                 "Review the repair attempt output and private node journals." if post_repair_readyz.code != 0 else "",
             )
         )
+        for check in endpoint_checks(args, args.nodes, aliases) + remote_checks(args, args.nodes, aliases):
+            post_repair_checks.append(
+                Check(
+                    f"post-repair {check.name}",
+                    check.status,
+                    check.detail,
+                    check.recommendation,
+                )
+            )
+        checks.extend(post_repair_checks)
 
     output = ROOT / args.output
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -495,6 +526,8 @@ def main() -> int:
     print(f"Cluster doctor report written: {args.output}")
     if repair_result is not None and repair_result.code != 0:
         return repair_result.code
+    if args.repair and any(check.status == "ERROR" for check in post_repair_checks):
+        return 1
     return 0
 
 
