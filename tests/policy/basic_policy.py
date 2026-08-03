@@ -19,6 +19,7 @@ low_resource_lab_profile = any(
     and doc.get('spec', {}).get('hard', {}).get('limits.memory') == '10Gi'
     for doc in documents
 )
+production_render = not low_resource_lab_profile
 
 errors = []
 network_policies = set()
@@ -76,11 +77,13 @@ for doc in documents:
             if not c.get('ports'):
                 # worker services may have no ports, but this stack expects them from docker ps.
                 pass
-        if name.startswith('app-'):
+        if production_render or name.startswith('app-'):
             pod_security_context = podspec.get('securityContext', {})
             seccomp = pod_security_context.get('seccompProfile', {})
             if seccomp.get('type') != 'RuntimeDefault':
                 errors.append(f'{kind}/{name}: application pods must use RuntimeDefault seccomp')
+            if pod_security_context.get('runAsNonRoot') is not True:
+                errors.append(f'{kind}/{name}: application pods must run as non-root')
             for c in containers:
                 security_context = c.get('securityContext', {})
                 dropped = set(security_context.get('capabilities', {}).get('drop', []))
@@ -95,6 +98,9 @@ for doc in documents:
             if low_resource_lab_profile:
                 if replicas < 1:
                     errors.append(f'{kind}/{name}: replicas should be >= 1 for the low-resource lab profile')
+            elif production_render and kind == 'StatefulSet':
+                if replicas < 3:
+                    errors.append(f'{kind}/{name}: production stateful workloads require at least 3 replicas')
             elif replicas < 2:
                 errors.append(f'{kind}/{name}: replicas should be >= 2 for HA')
 

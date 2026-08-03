@@ -29,6 +29,7 @@ env:
   VALUES_FILE: helm/urban-platform-infra/values.yaml
   DIST_DIR: dist
   RENDERED_MANIFEST: dist/rendered.yaml
+  PRODUCTION_RENDERED_MANIFEST: dist/production-rendered.yaml
   SBOM_FILE: dist/urban-platform-infra.spdx.json
   RELEASE_MANIFEST: dist/release-evidence.json
   CHECKSUM_FILE: dist/SHA256SUMS
@@ -37,13 +38,13 @@ jobs:
   package:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - uses: azure/setup-helm@v5
+      - uses: azure/setup-helm@59b1c81c6280f5abebb1fb1bc585696daa7dfb42 # v5
 
       - name: Validate release tag matches chart version
         shell: bash
@@ -76,6 +77,10 @@ jobs:
           helm lint "${HELM_CHART}"
           helm package "${HELM_CHART}" -d "${DIST_DIR}"
 
+      - name: Validate production profile contract
+        shell: bash
+        run: python3 scripts/validate_production_profile.py
+
       - name: Render release manifest
         shell: bash
         run: |
@@ -84,6 +89,21 @@ jobs:
             --namespace "${NAMESPACE}" \
             -f "${VALUES_FILE}" \
             > "${RENDERED_MANIFEST}"
+
+      - name: Render and enforce production manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          helm template "${RELEASE_NAME}" "${HELM_CHART}" \
+            --namespace "${NAMESPACE}" \
+            -f "${VALUES_FILE}" \
+            -f "${HELM_CHART}/values-production.yaml" \
+            --api-versions kafka.strimzi.io/v1/Kafka \
+            --api-versions kafka.strimzi.io/v1/KafkaNodePool \
+            --api-versions cert-manager.io/v1/Certificate \
+            --api-versions cert-manager.io/v1/ClusterIssuer \
+            > "${PRODUCTION_RENDERED_MANIFEST}"
+          python3 tests/policy/basic_policy.py "${PRODUCTION_RENDERED_MANIFEST}"
 
       - name: Generate SBOM and checksums
         shell: bash
@@ -98,23 +118,24 @@ jobs:
             --checksums "${CHECKSUM_FILE}"
 
       - name: Attest release artifact provenance
-        uses: actions/attest@v4.2.0
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
         with:
           subject-checksums: ${{ env.CHECKSUM_FILE }}
 
       - name: Attest release SBOM
-        uses: actions/attest@v4.2.0
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
         with:
           subject-path: ${{ env.DIST_DIR }}/*.tgz
           sbom-path: ${{ env.SBOM_FILE }}
 
       - name: Upload release evidence
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: urban-platform-infra-release-evidence
           path: |
             ${{ env.DIST_DIR }}/*.tgz
             ${{ env.RENDERED_MANIFEST }}
+            ${{ env.PRODUCTION_RENDERED_MANIFEST }}
             ${{ env.SBOM_FILE }}
             ${{ env.RELEASE_MANIFEST }}
             ${{ env.CHECKSUM_FILE }}

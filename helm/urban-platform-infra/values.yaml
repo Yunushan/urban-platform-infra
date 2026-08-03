@@ -813,6 +813,12 @@ messaging:
         kafkaVersion: 4.2.0
         operatorChart: strimzi-kafka-operator
         enterpriseLicenseRequired: false
+      apache-4.3-strimzi:
+        provider: strimzi
+        mode: operator
+        kafkaVersion: 4.3.0
+        operatorChart: strimzi-kafka-operator
+        enterpriseLicenseRequired: false
     compatibilitySecurityContext: true
     replicas: 1
     image:

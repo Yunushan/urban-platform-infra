@@ -278,6 +278,8 @@ REQUIRED = [
     'scripts/database_migration_controller.py',
     'scripts/edge_migration_plan.py',
     'scripts/environment_profile_plan.py',
+    'scripts/production_readiness_score.py',
+    'scripts/validate_production_profile.py',
     'scripts/import_project.py',
     'scripts/migrate_project.py',
     'scripts/tools/install-helm.sh', 'scripts/tools/install-helmfile.sh',
@@ -929,7 +931,7 @@ for release_token in [
     'id-token: write',
     'attestations: write',
     'artifact-metadata: write',
-    'actions/attest@v4',
+    'actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6',
     'subject-checksums',
     'sbom-path',
     'RELEASE_MANIFEST',
@@ -938,13 +940,17 @@ for release_token in [
     'release-evidence.json',
     'spdx.json',
     'Validate release tag matches chart version',
+    'scripts/validate_production_profile.py',
+    'PRODUCTION_RENDERED_MANIFEST',
+    'values-production.yaml',
+    'python3 tests/policy/basic_policy.py "${PRODUCTION_RENDERED_MANIFEST}"',
 ]:
     if release_token not in release_workflow_text:
         errors.append(f'Release workflow missing supply-chain control: {release_token}')
 
 ci_workflow_text = (ROOT / '.github/workflows/ci.yml').read_text(encoding='utf-8')
-if 'actions/dependency-review-action@v5' not in ci_workflow_text:
-    errors.append('CI must review dependency changes with dependency-review-action@v5')
+if 'actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294' not in ci_workflow_text:
+    errors.append('CI must review dependency changes with the pinned dependency-review action')
 for ci_token in [
     'ansible-2.14-py311',
     'ansible-2.20-py312',
@@ -959,6 +965,11 @@ for ci_token in [
     'scripts/tools/validate_ci_contract.py',
     'Audit private data guardrails',
     'scripts/tools/private_data_audit.py',
+    'scripts/validate_production_profile.py',
+    'scripts/production_readiness_score.py',
+    'production-contract',
+    'production_readiness_score.py',
+    "exit-code: '1'",
 ]:
     if ci_token not in ci_workflow_text:
         errors.append(f'CI missing Python/Ansible compatibility lane token: {ci_token}')

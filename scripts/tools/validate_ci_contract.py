@@ -73,11 +73,14 @@ GITHUB_REQUIRED_TOKENS = {
     "python3 scripts/tools/validate_ci_contract.py": "Validate jobs must run the CI contract gate before the broader validator.",
     "python3 scripts/validate.py": "Validate jobs must run repository validation.",
     "python3 scripts/images/validate-images.py": "Validate jobs must run image policy validation.",
-    "actions/dependency-review-action@v5": "Pull requests must keep dependency review coverage.",
-    "vars.ENABLE_DEPENDENCY_REVIEW != 'true'": "Dependency review must remain optional for repos without Dependency Graph.",
+    "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294": "Pull requests must keep blocking dependency review coverage.",
+    "python3 scripts/validate_production_profile.py": "CI must validate the production profile contract.",
+    "python3 scripts/production_readiness_score.py": "CI must enforce the repository production readiness score.",
+    "--api-versions kafka.strimzi.io/v1/Kafka": "Production rendering must model the Strimzi Kafka CRD API.",
+    "exit-code: '1'": "High and critical filesystem findings must fail CI.",
     "needs: static": "Downstream jobs must depend on static checks.",
     "needs: validate": "Render must wait for validate checks.",
-    "aquasecurity/trivy-action@v0.36.0": "Security scan action must stay pinned.",
+    "aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8": "Security scan action must stay pinned to a full commit SHA.",
 }
 
 GITLAB_REQUIRED_TOKENS = {
@@ -138,10 +141,10 @@ def check_action_refs(text: str) -> list[Finding]:
     for action, ref in action_refs:
         if ref in {"main", "master"}:
             findings.append(Finding("ERROR", "GitHub Actions", f"Action `{action}` uses floating ref `{ref}`."))
-        elif not re.match(r"^v?\d+(\.\d+){0,2}$", ref):
-            findings.append(Finding("ERROR", "GitHub Actions", f"Action `{action}` uses non-version ref `{ref}`."))
+        elif not re.fullmatch(r"[0-9a-f]{40}", ref):
+            findings.append(Finding("ERROR", "GitHub Actions", f"Action `{action}` must use a full commit SHA, got `{ref}`."))
         else:
-            findings.append(Finding("OK", "GitHub Actions", f"Action `{action}` is version-pinned as `{ref}`."))
+            findings.append(Finding("OK", "GitHub Actions", f"Action `{action}` is pinned to commit `{ref}`."))
     return findings
 
 

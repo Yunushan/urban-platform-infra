@@ -1,0 +1,453 @@
+# Public-safe production contract overlay.
+#
+# Supply deployment-specific registry, issuer, storage, and secret values in a
+# private values file or via --set. This file deliberately contains no private
+# addresses, credentials, or customer identifiers.
+global:
+  environment: production
+  defaultReplicas: 3
+  replicaOverride: null
+  skipPlaceholderWorkloads: true
+  imagePullPolicy: IfNotPresent
+  scheduling:
+    topologySpread: true
+    antiAffinity: required
+  security:
+    runAsNonRoot: true
+    readOnlyRootFilesystem: false
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+  podSecurityContext:
+    enabled: true
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+
+imagePromotionController:
+  enabled: true
+  profile: enterprise-signed
+  executionMode: enforce
+  imageMode: registry
+  requireDigestPins: true
+  requireVulnerabilityScan: true
+  requireSbom: true
+  requireSignatureOrAttestation: true
+  requirePromotionRecord: true
+
+runtimeHardening:
+  enabled: true
+  profile: production-restricted
+  enforcementMode: enforce
+  policyEngine: native-psa
+  podSecurity:
+    targetEnforce: restricted
+    targetAudit: restricted
+    targetWarn: restricted
+    requirePinnedVersion: true
+  workloadSecurity:
+    requireRunAsNonRoot: true
+    requireReadOnlyRootFilesystem: false
+    requireRuntimeDefaultSeccomp: true
+    requireDropAllCapabilities: true
+    disallowPrivilegeEscalation: true
+    disallowHostNamespaces: true
+  images:
+    requireDigestPins: true
+    requireSignatureVerification: true
+    deniedTags:
+      - latest
+      - latest-pg16
+      - latest-pg17
+      - latest-pg18
+
+gitOpsDelivery:
+  enabled: true
+  profile: production-argocd
+  controller: argocd
+  reconciliation: automated
+  driftDetection: enforce
+  prune: true
+  selfHeal: true
+
+progressiveDelivery:
+  enabled: true
+  profile: production-canary
+  strategy: canary
+  controller: argo-rollouts
+  trafficProvider: traefik
+  rollback:
+    automatic: true
+    requireSmokeTests: true
+    requireRollbackDrill: true
+
+scalingPolicy:
+  enabled: true
+  profile: production-hpa
+  mode: hpa
+  metricsSource: metrics-server
+  hpa:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 12
+    targetCPUUtilizationPercentage: 70
+
+networkConnectivity:
+  enabled: true
+  profile: production-restricted
+  mode: restricted-networkpolicy
+  networkPolicy:
+    enabled: true
+    profile: production-default-deny
+    defaultDeny: true
+    dnsEgress: true
+    kubernetesApiEgress: true
+    externalWebEgress: false
+  egress:
+    mode: explicit-cidrs
+    requireExplicitCidrs: true
+  tls:
+    mode: trusted-issuer
+    requireTrustedIssuer: true
+
+accessGovernance:
+  enabled: true
+  profile: oidc-sso
+  mode: oidc
+  rbac:
+    enabled: true
+    strategy: least-privilege
+    requireLeastPrivilege: true
+    serviceAccountTokenAutomount: false
+  identity:
+    enabled: true
+    provider: external-oidc
+    requireMfa: true
+    requireGroupMapping: true
+  audit:
+    enabled: true
+    mode: centralized
+    requireAuditPolicy: true
+
+complianceEvidence:
+  enabled: true
+  profile: production-audit-pack
+  mode: audit-pack
+  evidence:
+    collectReports: true
+    requirePrivateIndex: true
+    requireReleaseTag: true
+    requireControlMap: true
+    requireRestoreDrill: true
+    requireAccessReview: true
+    requireIncidentDrill: true
+  retention:
+    enabled: true
+    days: 365
+    storageTier: cold
+  packaging:
+    enabled: true
+    format: audit-pack
+    includeChecksums: true
+    includeAttestations: true
+
+incidentResponse:
+  enabled: true
+  profile: production-oncall
+  mode: oncall
+  severityModel: sev1-sev4
+  alerting:
+    enabled: true
+    requireAlertRoutes: true
+    requirePaging: true
+    requireQuietHours: true
+  runbooks:
+    enabled: true
+    requireRunbookIndex: true
+    requireServiceOwnership: true
+    requireRollbackSteps: true
+  drills:
+    enabled: true
+    requireIncidentDrill: true
+    requirePostIncidentReview: true
+
+changeManagement:
+  enabled: true
+  profile: production-cab
+  mode: cab
+  approvalModel: cab
+  changeControl:
+    enabled: true
+    requireChangeTicket: true
+    requireApprovals: true
+    requireRiskAssessment: true
+    requireImpactAssessment: true
+  maintenanceWindow:
+    enabled: true
+    requireWindow: true
+    requireFreezeCheck: true
+  rollout:
+    enabled: true
+    requireRollbackPlan: true
+
+cutoverGates:
+  enabled: true
+  profile: production-cutover
+  mode: production
+  trafficSwitch:
+    enabled: true
+    method: ingress-dns
+    requireIngressHost: true
+    requireDnsTlsEvidence: true
+  preCutover:
+    requireImportPreflight: true
+    requireCapacityReport: true
+    requireReleaseEvidence: true
+    requireRegistryEvidence: true
+    requireBackupRestoreEvidence: true
+    requireDatabaseRestoreEvidence: true
+    requireChangeTicket: true
+    requireApprovalEvidence: true
+  smokeTests:
+    enabled: true
+    requireSmokeTestPlan: true
+    requirePostMigrationCheck: true
+    requireSyntheticChecks: true
+  rollback:
+    enabled: true
+    requireRollbackPlan: true
+    requireRecoveryPlan: true
+    requireRestorePoint: true
+  postCutover:
+    enabled: true
+    requireObservationWindow: true
+    requireOwnerHandoff: true
+
+smokeTesting:
+  enabled: true
+  profile: production-smoke
+  mode: production
+  execution:
+    enabled: true
+    runner: kubernetes-job
+    namespace: urban-platform
+  probes:
+    kubernetesRollout: true
+    httpRoutes: true
+    tcpServices: true
+    databaseConnections: true
+    messagingConnections: true
+    externalSynthetic: true
+  evidence:
+    requirePlan: true
+    requireResults: true
+    requireOwnerReview: true
+
+releaseRunbook:
+  enabled: true
+  profile: production-release
+  mode: production
+  gates:
+    requireReleaseTag: true
+    requireCleanWorktree: true
+    requireArtifactEvidence: true
+    requireSbom: true
+    requireChecksums: true
+    requireAttestation: true
+    requireChangeApproval: true
+    requireSmokeTestPlan: true
+    requireCutoverGate: true
+    requireRollbackPlan: true
+  evidence:
+    requirePublicBundle: true
+    requirePrivateApprovalIndex: true
+    requireOwnerReview: true
+
+clusterUpgrade:
+  enabled: true
+  profile: production-upgrade
+  mode: production
+  orchestration:
+    enabled: true
+    strategy: manual-plan
+    drainNodes: true
+    restartServices: true
+  gates:
+    requirePinnedVersion: true
+    requireSupportedSkew: true
+    requireEtcdSnapshot: true
+    requireBackupRestore: true
+    requireMaintenanceWindow: true
+    requireCapacityHeadroom: true
+    requireNodeHealth: true
+    requireRollbackPlan: true
+    requireAddOnCompatibility: true
+    requirePostUpgradeSmokeTest: true
+  evidence:
+    requireClusterDoctor: true
+    requireInventoryReview: true
+    requireReleaseNotesReview: true
+    requireOwnerApproval: true
+
+disasterRecovery:
+  enabled: true
+  profile: production-dr
+  mode: production
+  tier: critical
+  failoverModel: active-passive
+  recoveryObjectives:
+    enabled: true
+    requireRtoRpo: true
+    requireDependencyMap: true
+    requireCriticalityMap: true
+  replication:
+    enabled: true
+    requireBackupReplication: true
+    requireDataReplication: true
+    requireCrossZonePlacement: true
+  restoreDrills:
+    enabled: true
+    requireDatabaseRestore: true
+    requireEtcdRestore: true
+    requireNamespaceRestore: true
+    requireApplicationSmokeTest: true
+  continuity:
+    enabled: true
+    requireRunbook: true
+    requireCommsPlan: true
+    requireManualWorkaround: true
+    requireSupplierContacts: true
+  evidence:
+    enabled: true
+    requireDrillEvidence: true
+    requireRtoEvidence: true
+    requirePostDrillReview: true
+
+namespace:
+  podSecurity:
+    enforce: restricted
+    audit: restricted
+    warn: restricted
+    version: latest
+  resourceQuota:
+    enabled: true
+    hard:
+      requests.cpu: '12'
+      requests.memory: 32Gi
+      limits.cpu: '20'
+      limits.memory: 40Gi
+      requests.storage: 500Gi
+      persistentvolumeclaims: '100'
+      pods: '300'
+
+storageTiers:
+  hot:
+    enabled: true
+    storageClassName: production-durable
+  cold:
+    enabled: true
+    objectStore:
+      enabled: true
+      provider: s3-compatible
+      bucket: urban-platform-production-backups
+      prefix: urban-platform
+      secretRef:
+        name: production-backup-credentials
+        namespace: urban-platform
+
+backup:
+  enabled: true
+  profile: production
+  velero:
+    enabled: true
+    installOperator: false
+    provider: aws
+    bucket: urban-platform-production-backups
+    prefix: urban-platform
+    secretRef:
+      name: production-backup-credentials
+      namespace: velero
+    snapshotsEnabled: true
+    nodeAgentEnabled: true
+    schedule:
+      enabled: true
+      name: daily-platform-backup
+      cron: "0 */6 * * *"
+      ttl: 2160h0m0s
+  rke2Etcd:
+    enabled: true
+    schedule: "0 */6 * * *"
+    retention: 30
+  imageArchives:
+    enabled: true
+    retention: 30d
+
+ingress:
+  tls:
+    enabled: true
+    createSecret: false
+    certManager:
+      enabled: true
+      issuerName: production-issuer
+      issuerKind: ClusterIssuer
+    selfSigned:
+      enabled: false
+
+secretManagement:
+  enabled: true
+  provider: external-secrets
+  providerAdapters:
+    kubernetesDirect:
+      enabled: false
+    externalSecrets:
+      enabled: true
+    vault:
+      enabled: true
+  externalSecrets:
+    registryCredentials:
+      enabled: true
+    ingressTls:
+      enabled: true
+
+autoscaling:
+  enabled: true
+
+messaging:
+  kafka:
+    enabled: true
+    provider: strimzi
+    mode: operator
+    versionProfile: apache-4.3-strimzi
+    compatibilitySecurityContext: false
+    replicas: 3
+    storage:
+      className: production-durable
+      size: 100Gi
+    image:
+      repository: quay.io/strimzi/kafka
+      tag: 1.0.0-kafka-4.3.0
+    strimzi:
+      apiVersion: kafka.strimzi.io/v1
+      kafkaVersion: 4.3.0
+      deleteClaim: false
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: 2
+          memory: 2Gi
+    ui:
+      enabled: false
+  redis:
+    compatibilitySecurityContext: false
+    replicas: 3
+    storage:
+      className: production-durable
+      size: 20Gi
+    sentinel:
+      enabled: true
+
+databases:
+  defaultInstances: 3

@@ -44,8 +44,7 @@ security:
   stage: security
   image: aquasec/trivy:0.70.0
   script:
-    - trivy fs --ignore-unfixed --severity HIGH,CRITICAL --exit-code 0 .
-  allow_failure: true
+    - trivy fs --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 .
 
 release-evidence:
   stage: release

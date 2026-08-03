@@ -62,8 +62,8 @@ profiles:
       autoscaling:
         enabled: false
       backup:
-        enabled: false
-        profile: disabled
+        enabled: true
+        profile: production
       gitOpsDelivery:
         enabled: false
         profile: operator-managed
@@ -216,6 +216,30 @@ profiles:
         scheduling:
           topologySpread: true
           antiAffinity: preferred
+        security:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+        podSecurityContext:
+          enabled: true
+          seccompProfile:
+            type: RuntimeDefault
+      runtimeHardening:
+        enabled: true
+        profile: production-restricted
+        enforcementMode: enforce
+        policyEngine: native-psa
+      imagePromotionController:
+        enabled: true
+        profile: enterprise-signed
+        executionMode: enforce
+        requireDigestPins: true
+        requireVulnerabilityScan: true
+        requireSbom: true
+        requireSignatureOrAttestation: true
+        requirePromotionRecord: true
       autoscaling:
         enabled: true
       backup:
@@ -395,70 +419,106 @@ profiles:
         controller: argocd
         reconciliation: automated
         driftDetection: enforce
-        prune: false
+        prune: true
         selfHeal: true
       progressiveDelivery:
-        enabled: false
+        enabled: true
         profile: production-canary
         strategy: canary
         controller: argo-rollouts
         trafficProvider: traefik
       scalingPolicy:
-        enabled: false
+        enabled: true
         profile: production-hpa
         mode: hpa
         metricsSource: prometheus-adapter
       networkConnectivity:
-        enabled: false
+        enabled: true
         profile: production-restricted
         mode: restricted-networkpolicy
         ingressClassName: traefik
       accessGovernance:
-        enabled: false
+        enabled: true
         profile: oidc-sso
         mode: oidc
       complianceEvidence:
-        enabled: false
+        enabled: true
         profile: production-audit-pack
         mode: audit-pack
       incidentResponse:
-        enabled: false
+        enabled: true
         profile: production-oncall
         mode: oncall
       changeManagement:
-        enabled: false
+        enabled: true
         profile: production-cab
         mode: cab
       cutoverGates:
-        enabled: false
+        enabled: true
         profile: production-cutover
         mode: production
       smokeTesting:
-        enabled: false
+        enabled: true
         profile: production-smoke
         mode: production
       releaseRunbook:
-        enabled: false
+        enabled: true
         profile: production-release
         mode: production
       clusterUpgrade:
-        enabled: false
+        enabled: true
         profile: production-upgrade
         mode: production
       disasterRecovery:
-        enabled: false
+        enabled: true
         profile: production-dr
         mode: production
       observability:
         profile: production
+        prometheus:
+          enabled: true
+        grafana:
+          enabled: true
+      secretManagement:
+        enabled: true
+        provider: external-secrets
+        providerAdapters:
+          kubernetesDirect:
+            enabled: false
+          externalSecrets:
+            enabled: true
+          vault:
+            enabled: true
+      ingress:
+        tls:
+          enabled: true
+          createSecret: false
+          certManager:
+            enabled: true
+            issuerKind: ClusterIssuer
+          selfSigned:
+            enabled: false
+      namespace:
+        podSecurity:
+          enforce: restricted
+          audit: restricted
+          warn: restricted
       platformCapabilities:
         enabled: false
       messaging:
         kafka:
+          provider: strimzi
+          mode: operator
+          versionProfile: apache-4.3-strimzi
+          compatibilitySecurityContext: false
           replicas: 3
           ui:
             enabled: false
+          strimzi:
+            apiVersion: kafka.strimzi.io/v1
+            kafkaVersion: 4.3.0
         redis:
+          compatibilitySecurityContext: false
           replicas: 3
           sentinel:
             enabled: true

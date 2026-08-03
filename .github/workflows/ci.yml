@@ -47,8 +47,8 @@ jobs:
             requirements-file: requirements-ci-modern.txt
             ansible-requirements-file: ansible/requirements-modern.yml
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -85,16 +85,9 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - name: Skip dependency review when Dependency Graph is disabled
-        if: ${{ vars.ENABLE_DEPENDENCY_REVIEW != 'true' }}
-        run: |
-          echo "Dependency Review is disabled for this repository."
-          echo "Enable GitHub Dependency Graph and set ENABLE_DEPENDENCY_REVIEW=true to activate it."
-      - uses: actions/checkout@v7
-        if: ${{ vars.ENABLE_DEPENDENCY_REVIEW == 'true' }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Review dependency changes
-        if: ${{ vars.ENABLE_DEPENDENCY_REVIEW == 'true' }}
-        uses: actions/dependency-review-action@v5
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
 
@@ -119,8 +112,8 @@ jobs:
             python-version: '3.14'
             requirements-file: requirements-ci-modern.txt
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -140,8 +133,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
@@ -149,7 +142,7 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements-ci.txt
       - name: Helm lint
-        uses: azure/setup-helm@v5
+        uses: azure/setup-helm@59b1c81c6280f5abebb1fb1bc585696daa7dfb42 # v5
       - name: Run helm lint
         run: helm lint "${HELM_CHART}"
       - name: Render chart
@@ -162,21 +155,54 @@ jobs:
       - name: Basic policy checks
         run: python3 tests/policy/basic_policy.py "${RENDERED_MANIFEST}"
       - name: Upload rendered manifest
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: rendered-manifest
           path: ${{ env.RENDERED_MANIFEST }}
+
+  production-contract:
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+      - name: Install Python dependencies
+        run: pip install -r requirements-ci.txt
+      - name: Validate production profile contract
+        run: python3 scripts/validate_production_profile.py
+      - name: Install Helm
+        uses: azure/setup-helm@59b1c81c6280f5abebb1fb1bc585696daa7dfb42 # v5
+      - name: Render production chart
+        run: |
+          mkdir -p reports
+          helm template "${RELEASE_NAME}" "${HELM_CHART}" \
+            --namespace "${NAMESPACE}" \
+            -f "${VALUES_FILE}" \
+            -f "${HELM_CHART}/values-production.yaml" \
+            --api-versions kafka.strimzi.io/v1/Kafka \
+            --api-versions kafka.strimzi.io/v1/KafkaNodePool \
+            --api-versions cert-manager.io/v1/Certificate \
+            --api-versions cert-manager.io/v1/ClusterIssuer \
+            > reports/production-rendered.yaml
+      - name: Enforce production manifest policy
+        run: python3 tests/policy/basic_policy.py reports/production-rendered.yaml
+      - name: Score repository production readiness
+        run: python3 scripts/production_readiness_score.py
 
   security:
     runs-on: ubuntu-latest
     needs: static
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
           scan-type: fs
           ignore-unfixed: true
           format: table
-          exit-code: '0'
+          exit-code: '1'
           severity: CRITICAL,HIGH

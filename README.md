@@ -381,23 +381,24 @@ Supported database profiles are defined in [`config/databases.catalog.yaml`](con
 7. Review `config/secrets.contract.yaml` and put secret values in SOPS, External Secrets, Sealed Secrets, or Vault.
 8. Choose storage classes for CloudNativePG, Kafka, Redis, Elasticsearch, and ClickHouse/OpenSearch if enabled; keep the low-resource lab storage overrides for 4-core/4 GiB nodes.
 9. Run `make lint`, `make validate`, `make policy`, `make deploy-dry-run`, and Ansible check targets before production deploy.
-10. Run `make image-policy` and use private-registry digest pins for production image overrides.
-11. Run `make cluster-doctor` before `import-auto` or `deploy` if the API, VIP, HAProxy, Keepalived, or kubeconfig path is uncertain.
-12. Run `make environment-profile-plan ENV_PROFILE=lab` or the matching staging/production profile before large deploy/import work; review `reports/environment-profile-values.yaml` before applying it.
-13. Run `make lab-deploy-plan` before using a 4 GiB/node lab; apply `reports/lab-deploy-values.yaml` only after reviewing the progressive deploy plan.
-14. Run `make observability-plan` and review `config/slo.yaml`; heavy observability is disabled by default for labs. Enable kube-prometheus-stack/Grafana, OpenTelemetry, Elasticsearch/Kibana, Loki, or ClickHouse only after the nodes have enough capacity, and set chart `monitoring.enabled=true` only after Prometheus Operator CRDs exist.
-15. Review `config/backup-policy.yaml` and [`docs/backup-restore.md`](docs/backup-restore.md). Backups are disabled by default; enable CNPG, Velero, and external adapter layers such as UrBackup/restic/Kopia/Borg only after storage, secret references, and restore drills are ready.
-16. Review `config/platform-capabilities.yaml` and [`docs/platform-capabilities.md`](docs/platform-capabilities.md). Optional capabilities are disabled by default; enable MinIO, MQTT, RabbitMQ, Keycloak, Vault, Kyverno, workflow engines, or service mesh only after capacity and ownership are clear.
-17. Run `make gitops-delivery-plan` before enabling Argo CD or Flux automation. Keep private repo URLs, kubeconfigs, deploy keys, and environment overlays outside public reports; production GitOps should require protected branches and signed/evidenced releases.
-18. Run `make progressive-delivery-plan` before enabling canary, blue-green, Argo Rollouts, Flagger, or service-mesh traffic shifting. Keep `autoPromotion=false` until SLO analysis, rollback drills, and GitOps ownership are reviewed.
-19. Run `make scaling-policy-plan` before enabling HPA, VPA, KEDA, or cluster autoscaler automation. Keep runtime autoscaling disabled until metrics, SLO alerts, capacity reports, and load-test evidence are reviewed.
-20. Run `make network-connectivity-plan` before tightening egress, removing shared lab web access, or enabling Linkerd/Istio. Keep service mesh disabled until DNS, TLS, health probes, capacity, and rollback ownership are reviewed.
-21. Run `make access-governance-plan` before enabling OIDC/SSO, broad RBAC changes, tenant namespaces, or break-glass procedures. Keep user/group mappings and identity URLs outside public reports.
-22. Run `make smoke-test-plan` before production cutover. Keep private endpoints, database DSNs, synthetic monitors, and result evidence outside public reports.
-23. Run `make cutover-gate-plan` before production traffic switch. Keep DNS, TLS, smoke-test endpoints, tickets, approvals, and rollback evidence in private systems; the public report is a readiness gate, not a traffic switch.
-24. Run `make release-runbook-plan RELEASE_RUNBOOK_PROFILE=production-release IMPORT_REDACT=true` before production promotion. Keep private approval indexes, change records, rollback owners, and evidence attachments outside public reports.
-25. Run `make cluster-upgrade-plan CLUSTER_UPGRADE_PROFILE=production-upgrade IMPORT_REDACT=true` before changing RKE2 or Kubernetes versions. Keep node health, etcd snapshot, release notes, and owner approvals in private systems.
-26. Release only signed/evidenced chart artifacts with `make release-evidence`, SHA-256 checksums, SBOM metadata, and GitHub artifact attestations.
+10. Run `python3 scripts/validate_production_profile.py` and render with `helm/urban-platform-infra/values-production.yaml`; this overlay is the production control baseline, not a substitute for private image, storage, identity, and backup settings.
+11. Run `make image-policy` and use private-registry digest pins for production image overrides.
+12. Run `make cluster-doctor` before `import-auto` or `deploy` if the API, VIP, HAProxy, Keepalived, or kubeconfig path is uncertain.
+13. Run `make environment-profile-plan ENV_PROFILE=lab` or the matching staging/production profile before large deploy/import work; review `reports/environment-profile-values.yaml` before applying it.
+14. Run `make lab-deploy-plan` before using a 4 GiB/node lab; apply `reports/lab-deploy-values.yaml` only after reviewing the progressive deploy plan.
+15. Run `make observability-plan` and review `config/slo.yaml`; heavy observability is disabled by default for labs. Enable kube-prometheus-stack/Grafana, OpenTelemetry, Elasticsearch/Kibana, Loki, or ClickHouse only after the nodes have enough capacity, and set chart `monitoring.enabled=true` only after Prometheus Operator CRDs exist.
+16. Review `config/backup-policy.yaml` and [`docs/backup-restore.md`](docs/backup-restore.md). Backups are disabled by default; enable CNPG, Velero, and external adapter layers such as UrBackup/restic/Kopia/Borg only after storage, secret references, and restore drills are ready.
+17. Review `config/platform-capabilities.yaml` and [`docs/platform-capabilities.md`](docs/platform-capabilities.md). Optional capabilities are disabled by default; enable MinIO, MQTT, RabbitMQ, Keycloak, Vault, Kyverno, workflow engines, or service mesh only after capacity and ownership are clear.
+18. Run `make gitops-delivery-plan` before enabling Argo CD or Flux automation. Keep private repo URLs, kubeconfigs, deploy keys, and environment overlays outside public reports; production GitOps should require protected branches and signed/evidenced releases.
+19. Run `make progressive-delivery-plan` before enabling canary, blue-green, Argo Rollouts, Flagger, or service-mesh traffic shifting. Keep `autoPromotion=false` until SLO analysis, rollback drills, and GitOps ownership are reviewed.
+20. Run `make scaling-policy-plan` before enabling HPA, VPA, KEDA, or cluster autoscaler automation. Keep runtime autoscaling disabled until metrics, SLO alerts, capacity reports, and load-test evidence are reviewed.
+21. Run `make network-connectivity-plan` before tightening egress, removing shared lab web access, or enabling Linkerd/Istio. Keep service mesh disabled until DNS, TLS, health probes, capacity, and rollback ownership are reviewed.
+22. Run `make access-governance-plan` before enabling OIDC/SSO, broad RBAC changes, tenant namespaces, or break-glass procedures. Keep user/group mappings and identity URLs outside public reports.
+23. Run `make smoke-test-plan` before production cutover. Keep private endpoints, database DSNs, synthetic monitors, and result evidence outside public reports.
+24. Run `make cutover-gate-plan` before production traffic switch. Keep DNS, TLS, smoke-test endpoints, tickets, approvals, and rollback evidence in private systems; the public report is a readiness gate, not a traffic switch.
+25. Run `make release-runbook-plan RELEASE_RUNBOOK_PROFILE=production-release IMPORT_REDACT=true` before production promotion. Keep private approval indexes, change records, rollback owners, and evidence attachments outside public reports.
+26. Run `make cluster-upgrade-plan CLUSTER_UPGRADE_PROFILE=production-upgrade IMPORT_REDACT=true` before changing RKE2 or Kubernetes versions. Keep node health, etcd snapshot, release notes, and owner approvals in private systems.
+27. Release only signed/evidenced chart artifacts with `make release-evidence`, SHA-256 checksums, SBOM metadata, and GitHub artifact attestations.
 
 ## License
 

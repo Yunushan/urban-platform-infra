@@ -17,19 +17,21 @@ The gate is implemented in `scripts/tools/validate_ci_contract.py` and uses only
 - GitHub validate matrix keeps Python 3.11 through 3.14 coverage.
 - Pip cache keys follow each matrix requirements file.
 - Ansible collection installs follow each matrix collection file.
-- GitHub Actions refs are version-pinned and never use `main` or `master`.
-- Dependency review stays optional unless the repository enables Dependency Graph.
+- GitHub Actions refs are pinned to reviewed commit SHAs and never use `main` or `master`.
+- Dependency review is required on pull requests.
 - GitLab validation uses pinned requirements rather than ad hoc package installs.
+- Production intent is validated against the public production overlay before rendering.
 
 The optional report is written to `reports/ci-contract.md` and is safe to share.
 
 ## GitHub Jobs
 
 - `static`: yamllint, Ansible syntax checks, and shellcheck across the legacy and modern Ansible lanes.
-- `dependency-review`: pull-request dependency review when repository settings allow it.
+- `dependency-review`: required pull-request dependency review.
 - `validate`: CI contract, private-data audit, repository validation, and image-policy validation across Python 3.11 through 3.14.
 - `render`: Helm lint, Helm template rendering, rendered-manifest policy checks, and rendered manifest artifact upload.
-- `security`: Trivy filesystem scan with non-blocking findings by default.
+- `production-contract`: production overlay validation, strict production rendering, and rendered-manifest policy checks.
+- `security`: Trivy filesystem scan that fails on unresolved HIGH or CRITICAL findings.
 
 ## Local Equivalent
 
@@ -42,6 +44,12 @@ make ci-contract
 make private-data-audit
 make validate
 make lint
+python3 scripts/validate_production_profile.py
+python3 scripts/production_readiness_score.py
+helm template urban-platform-infra helm/urban-platform-infra \
+  --namespace urban-platform \
+  -f helm/urban-platform-infra/values.yaml \
+  -f helm/urban-platform-infra/values-production.yaml
 ```
 
 `make validate` also runs the CI contract gate before the repository validator. `make lint` uses the repository virtualenv tools when they exist, so local results match CI more closely.
@@ -53,4 +61,16 @@ make lint
 - If `private-data-audit` fails, remove the private material from the working tree and rotate exposed values if they were real.
 - If `validate` fails, read the exact token message from `scripts/validate.py`; those messages are intended to name the missing repository contract.
 - If `render` fails, run `helm lint` and `helm template` with the same chart and values file.
-- If `security` reports findings, triage the Trivy output and decide whether to fix, suppress with documented rationale, or keep as advisory.
+- If `security` reports findings, fix them or document a narrowly scoped, time-bound exception before merging; unresolved HIGH or CRITICAL findings fail the gate.
+
+## Production Contract
+
+`helm/urban-platform-infra/values-production.yaml` is a public-safe baseline
+that expresses the required production controls without customer addresses,
+credentials, or private registry names. The production contract validator
+checks HA replicas, restricted Pod Security, RuntimeDefault seccomp, default
+deny networking, external secret management, backup and restore drills,
+Strimzi-managed Apache Kafka, Redis Sentinel, smoke probes, and release
+evidence requirements. Real production deployments must layer a private
+environment overlay containing promoted image digests, real StorageClasses,
+trusted issuer references, registry credentials, and tested backup targets.
