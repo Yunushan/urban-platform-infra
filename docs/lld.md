@@ -679,6 +679,114 @@ should use stricter settings when incomplete migration is unacceptable.
 
 ## Public-Safe Review Checklist
 
+## Canonical Implementation Topology
+
+Use [Urban Platform Topology](topology.md) for the diagrams. This section
+defines the low-level contracts that make those diagrams executable.
+
+### Kubernetes object boundaries
+
+| Boundary | Resource owner | Naming contract | Readiness signal |
+|---|---|---|---|
+| Namespace | Helm chart or pre-created environment | `namespace` value | Namespace labels and quota/limits applied |
+| Ingress edge | Traefik plus generated Ingress/Middleware | Stable generated resource names per gateway | Ingress has the expected class, entrypoints, and backend |
+| Web gateway | Helm chart or imported NGINX workload | Service name plus gateway Deployment | Deployment available and HTTP smoke test passes |
+| Application | Import generator or chart workload | Compose-derived stable name | Deployment available, endpoints present, probes pass |
+| PostgreSQL family | CloudNativePG operator | Cluster name plus `-rw`/`-ro` Services | CNPG `Ready` and client query succeeds |
+| Kafka | Strimzi operator | `Kafka` plus `KafkaNodePool` | Kafka `Ready`, broker pod ready, bootstrap probe succeeds |
+| Cache | Helm chart or approved operator | Service and StatefulSet/replica contract | Pod ready and cache command succeeds |
+
+### Three-node request and control path
+
+```mermaid
+flowchart LR
+    client["Client"] --> vip["cluster-vip"]
+    vip --> edge["HAProxy / Keepalived"]
+    edge --> traefik["Traefik"]
+    traefik --> service["ClusterIP Service"]
+    service --> pod["Ready workload pod"]
+    operator["Operator machine"] --> api["Kubernetes API"]
+    api --> helm["Helm / Helmfile"]
+    helm --> chart["Platform chart"]
+    chart --> service
+    chart --> state["CNPG / Strimzi / Redis"]
+```
+
+### Storage and scheduling contract
+
+1. `local-path` is a lab/default provisioner and binds a PVC to a selected
+   node. It must not be described as replicated storage.
+2. Stateful workloads must declare the intended StorageClass, capacity,
+   access mode, retention policy, and node-affinity behavior.
+3. A PVC migration or storage-class change is a data operation. Helm cannot
+   mutate immutable StatefulSet storage fields safely; use an explicit backup,
+   replacement, and restore procedure.
+4. Stateless imported workloads may use topology spread and replica counts,
+   but those controls do not repair missing image archives, bad secrets, or
+   unreachable database endpoints.
+
+### Ingress and TLS contract
+
+| Input | FQDN mode | IP hostless mode | HTTP diagnostic mode |
+|---|---|---|---|
+| `ingress.host` | DNS name | IP or hostless rule generation | IP or hostless rule generation |
+| Host matching | Required | Avoided or explicitly configured | Avoided |
+| TLS | Existing Secret, cert-manager, or approved issuer | Certificate must include the IP; client trust is separate | Disabled |
+| Redirect | HTTP to HTTPS | Optional, only when HTTPS is usable | Disabled |
+| Browser trust | Public/internal CA distribution | Install lab CA or use a trusted internal certificate | No certificate warning, but no transport encryption |
+
+The generated rule must not leave stale canonical-host resources from a prior
+FQDN deployment when the selected mode is hostless IP or HTTP. Mode changes are
+verified by inspecting Ingress and Middleware objects and by testing both the
+VIP and the configured Host header.
+
+### Import automation contract
+
+The import state file records a scope, stage, selected services, and completed
+work. The implementation must preserve these properties:
+
+- `prepare` is planning and private report generation;
+- `secrets` requires explicit approval for literal source material;
+- `images` verifies every selected image on every intended RKE2 node in preload
+  mode or verifies registry pullability in registry mode;
+- `databases` uses logical dump/restore and a private target map;
+- `manifests` applies only the selected and generated resources;
+- `validate` reports rollout, Service, ingress, database, messaging, and image
+  blockers without silently declaring a broken workload healthy.
+
+Retries must be idempotent. Cleanup must distinguish active images and mounted
+  snapshots from stale imported aliases, and must never delete an image still
+  required by a running pod.
+
+### Runtime validation matrix
+
+| Check | Command family | Pass condition | Typical blocker |
+|---|---|---|---|
+| API access | `kubectl get --raw=/readyz` | API reachable and ready | Wrong VIP route, firewall, or kubeconfig |
+| Workload rollout | `kubectl rollout status` | Desired replicas available | Bad image, config, probe, or dependency |
+| Service endpoints | `kubectl get endpointslice` | Ready endpoint exists | Pod not ready or selector mismatch |
+| Ingress | `curl` with correct scheme/Host | Expected 2xx/3xx and backend headers | TLS trust, stale route, or VIP path |
+| PostgreSQL | `psql`/client probe | Login and simple query succeed | Wrong target map, secret, DNS, or PVC |
+| Kafka | Strimzi status plus producer/consumer probe | `Ready`, bootstrap reachable, message round trip | Operator, node pool, storage, or listener |
+| Storage | PVC and operator status | Bound, mounted, retained as designed | Local-node affinity or missing class |
+
+## Low-Level Failure and Rollback Matrix
+
+| Failure point | First diagnostic | Safe first action | Escalation |
+|---|---|---|---|
+| API/VIP | `cluster-doctor` and node listener checks | Repair kubeconfig or HA edge, do not reapply workloads blindly | Network/HA runbook |
+| Helm/Helmfile | Release status and rendered diff | Wait for CRDs/API, retry boundedly, recover pending release | Operator install runbook |
+| Imported image | Pod events plus node runtime image list | Re-run selected image stage or use approved registry | Image preload/registry runbook |
+| Deployment crash | Current and previous container logs | Compare env/secret/target map and dependency DNS | Application owner and import diagnostics |
+| Database not ready | CNPG status, PVC, events | Stop dependent rollout and repair stateful dependency | Restore or database migration runbook |
+| Kafka not ready | Kafka and KafkaNodePool conditions | Check operator, listener, storage immutability, and node pool | Messaging recovery runbook |
+| Ingress wrong route | Ingress/Middleware and curl Host tests | Remove stale mode-specific route and reapply selected mode | Edge/TLS runbook |
+
+The detailed runbooks remain in the repository, but the topology decision must
+be made before selecting a recovery action. A failed local PVC, an unreachable
+VIP, and a missing image are different failure domains and should not be fixed
+with the same retry.
+
 Before committing documentation or generated files:
 
 - Replace real node addresses with `node-01`, `node-02`, `node-03`.
@@ -692,6 +800,7 @@ Before committing documentation or generated files:
 ## Related Documents
 
 - [High-Level Design](hld.md)
+- [Canonical Topology](topology.md)
 - [Architecture](architecture.md)
 - [Project Import Compatibility](project-import.md)
 - [Backup And Restore](backup-restore.md)

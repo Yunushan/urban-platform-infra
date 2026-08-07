@@ -13,6 +13,10 @@ The project supports multiple deployment sizes, but the default remains `three-n
 
 The contract is stored in `config/deployment-topologies.yaml`.
 
+See the [Canonical Topology](topology.md) for the logical flowcharts, physical
+three-node HA diagram, traffic/data flows, and failure-domain model behind
+these profiles.
+
 ## Helm Usage
 
 Render or deploy with a topology override:

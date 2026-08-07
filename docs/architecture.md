@@ -21,3 +21,9 @@ DNS -> VIP -> HAProxy/Keepalived -> RKE2 API / Ingress / Webserver
 - Operator-backed data services where practical.
 - Private-repository safe: no real secrets committed.
 - Multi-profile deployment: RKE2, K3s, MicroK8s, Docker, and raw installation scaffolding.
+
+For the detailed logical and physical diagrams, request flows, stateful-service
+boundaries, failure domains, and topology review checklist, see the
+[Canonical Topology](topology.md). The [HLD](hld.md) explains the architectural
+decisions; the [LLD](lld.md) maps them to repository paths and Kubernetes
+contracts.

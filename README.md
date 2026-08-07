@@ -31,6 +31,7 @@
   <a href="docs/helm-hardening.md">Helm Hardening</a> •
   <a href="docs/kubernetes-security-posture.md">Kubernetes Security</a> •
   <a href="docs/deployment-topologies.md">Topologies</a> •
+  <a href="docs/topology.md">Topology diagrams</a> •
   <a href="docs/environment-profiles.md">Environment Profiles</a> •
   <a href="docs/storage-tiers.md">Storage Tiers</a> •
   <a href="docs/platform-capabilities.md">Capabilities</a> •
@@ -74,7 +75,7 @@ A desktop/operator-first and production-ready deployment workspace for the **urb
 
 The project is designed so defaults can be changed from configuration instead of editing templates: cluster engine, web server, database family, observability backend, registry, replica counts, hostnames, storage class, hot/warm/cold storage tiers, optional platform capabilities, backup/restore profile, TLS, image tags, and platform profile all live under `config/` and `helm/urban-platform-infra/values.yaml`.
 
-Start with the public-safe [High-Level Design](docs/hld.md) and [Low-Level Design](docs/lld.md) when reviewing the architecture, migration flow, or operator responsibilities. Keep real inventories, node addresses, private reports, and secret material outside Git.
+Start with the public-safe [High-Level Design](docs/hld.md), [Low-Level Design](docs/lld.md), and [Canonical Topology](docs/topology.md) when reviewing the architecture, migration flow, topology, or operator responsibilities. Keep real inventories, node addresses, private reports, and secret material outside Git.
 
 Control-node automation is tested in two lanes: a legacy enterprise lane with Python 3.11 and ansible-core 2.14.18, and a modern lane with Python 3.12/3.13/3.14 and ansible-core 2.20.5.
 

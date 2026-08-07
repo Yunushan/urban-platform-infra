@@ -346,6 +346,49 @@ The platform favors guarded automation:
 - optional access governance planning before OIDC, RBAC, or tenant isolation is enabled
 - runbooks for deployment, stateful workload, and observability failures
 
+## Canonical Topology and Design Decisions
+
+The visual source of truth for the platform is
+[Urban Platform Topology](topology.md). It contains the logical context
+diagram, the physical three-node HA layout, ingress request flow, application
+data and messaging flow, delivery lifecycle, and failure-domain model.
+
+The HLD-level decisions represented by that topology are:
+
+- **Control plane:** RKE2 servers use an odd embedded-etcd membership, normally
+  three nodes for the production baseline.
+- **Edge:** Keepalived and HAProxy provide a stable VIP; Traefik owns ingress
+  routing; NGINX is the web gateway workload where the imported project needs
+  static content or reverse-proxy behavior.
+- **Workloads:** application services are Kubernetes Deployments and Services,
+  with replicas, readiness, security context, and policy controlled by the
+  platform chart or import automation.
+- **State:** CloudNativePG owns PostgreSQL-family clusters, Strimzi owns
+  Apache Kafka resources, and Redis remains a separate cache/messaging
+  boundary. Stateful data requires an explicit storage and recovery design.
+- **Delivery:** CI validates source and rendered contracts; the operator or
+  GitOps controller applies approved Helm/Helmfile output; runtime smoke tests
+  produce release evidence.
+- **Trust boundary:** real DNS, VIPs, registries, credentials, certificates,
+  database endpoints, and import reports stay in private environment state.
+
+The topology profile must be selected consistently across
+`config/deployment-topologies.yaml`, the Ansible inventory, Helm topology
+values, storage classes, and operational runbooks. A three-node label does not
+provide HA if the nodes share one failure domain or if the VIP is not reachable
+from the intended clients.
+
+## HLD Quality Attributes
+
+| Attribute | Baseline design | Production proof |
+|---|---|---|
+| Availability | Three RKE2 servers, VIP edge, replicated stateless workloads | Node-failure and VIP-failover drill |
+| Recoverability | Database-native backups, etcd snapshots, image and release evidence | Restore and replacement-node drill |
+| Security | Private secret boundary, pinned images, PSA-compatible templates | CI policy, access review, secret-rotation evidence |
+| Operability | Make targets, Ansible, Helmfile, retry/repair helpers, staged import | Operator runbook and failure-injection evidence |
+| Portability | Profile overlays for RKE2 and supported lab/standalone modes | Render and validation per selected profile |
+| Traceability | Commit, rendered manifests, image digest, migration scope, reports | Release evidence bundle and retention policy |
+
 ## Public-Safe Boundaries
 
 Safe to commit:
@@ -369,6 +412,7 @@ Do not commit:
 ## Related Documents
 
 - [Low-Level Design](lld.md)
+- [Canonical Topology](topology.md)
 - [Architecture](architecture.md)
 - [Deployment Topologies](deployment-topologies.md)
 - [Optional Platform Capabilities](platform-capabilities.md)
