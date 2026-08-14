@@ -25,6 +25,11 @@ Database families are cataloged in `config/databases.catalog.yaml` and are inten
 
 Do not assume a container replica count alone creates database HA. Use a proper operator, replication topology, or managed service.
 
+For PostgreSQL-family physical layout choices, see
+[Database Topologies](database-topologies.md). The default remains
+`per-service`; use `hybrid` to consolidate standard PostgreSQL while keeping
+PostGIS and TimescaleDB separate.
+
 ## Import Automation Levels
 
 | Engine family | Import detection | Target map | Automated dump/restore |

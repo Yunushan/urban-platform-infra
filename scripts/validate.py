@@ -220,6 +220,7 @@ REQUIRED = [
     'ansible/roles/rke2/templates/traefik-config.yaml.j2',
     'ansible/roles/rke2/templates/traefik-helmchart.yaml.j2',
     'helm/urban-platform-infra/Chart.yaml', 'helm/urban-platform-infra/values.yaml',
+    'helm/urban-platform-infra/templates/databases-cnpg-consolidated.yaml',
     'helm/urban-platform-infra/templates/databases-cnpg-imagecatalogs.yaml',
     'helm/urban-platform-infra/templates/messaging-kafka-strimzi-preflight.yaml',
     'config/services.catalog.yaml', 'config/cluster-profiles.yaml',
@@ -377,8 +378,16 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = [
     ]
 ]
 PRIVATE_LOOKING_IP_PATTERN = re.compile(
-    r'\b(10\.10\.10\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3})\b'
+    r'\b(?:10\.(?:\d{1,3}\.){2}\d{1,3}|192\.168\.(?:\d{1,3}\.){1}\d{1,3}|172\.(?:1[6-9]|2[0-9]|3[0-1])\.(?:\d{1,3}\.)\d{1,3}|127\.0\.0\.1|169\.254\.(?:\d{1,3}\.)\d{1,3})\b'
 )
+PUBLIC_SAFE_IP_EXAMPLES = {
+    '127.0.0.1',
+    '10.0.0.1',
+    '10.42.0.0',
+    '10.42.0.1',
+    '10.43.0.0',
+    '10.43.0.1',
+}
 DISCLOSURE_IDENTIFIER_PATTERN = re.compile(
     r'(istanbulkart|iett|vms|tsc2a9|smartflow|scm-|tsc-|camera-ttu|taxi-stand|car-park|'
     r'bicycle-road|pedestrian-button|tsd-junction|program-archive|camera-manager|ops-scm-log|'
@@ -826,6 +835,38 @@ if timescaledb_values.get('postgresUID') != 70 or timescaledb_values.get('postgr
 database_values = values.get('databases', {})
 if database_values.get('postgresUID') != 999 or database_values.get('postgresGID') != 999:
     errors.append('CNPG database defaults must run Docker Hub Postgres-family images as UID/GID 999')
+database_topology = database_values.get('topology', {})
+database_topology_mode = str(database_topology.get('mode', 'per-service')).strip().lower() if isinstance(database_topology, dict) else ''
+if database_topology_mode not in {'per-service', 'consolidated', 'hybrid'}:
+    errors.append('Database topology mode must be per-service, consolidated, or hybrid')
+else:
+    consolidated_topology = database_topology.get('consolidated', {}) if isinstance(database_topology, dict) else {}
+    hybrid_topology = database_topology.get('hybrid', {}) if isinstance(database_topology, dict) else {}
+    if not isinstance(consolidated_topology, dict):
+        errors.append('databases.topology.consolidated must be a mapping')
+        consolidated_topology = {}
+    if not isinstance(hybrid_topology, dict):
+        errors.append('databases.topology.hybrid must be a mapping')
+        hybrid_topology = {}
+    selected_topology = hybrid_topology if database_topology_mode == 'hybrid' else consolidated_topology
+    include_engines = selected_topology.get('includeEngines', ['postgresql'])
+    if not isinstance(include_engines, list) or not include_engines:
+        errors.append('Selected database topology must define a non-empty includeEngines list')
+        include_engines = []
+    if {str(engine).strip().lower() for engine in include_engines} != {'postgresql'}:
+        errors.append('Consolidated database topology currently supports only the standard postgresql engine; keep PostGIS and TimescaleDB separate')
+    if database_topology_mode != 'per-service':
+        if consolidated_topology.get('enabled') is not True:
+            errors.append('Consolidated/hybrid database topology must enable databases.topology.consolidated')
+        consolidated_name = str(consolidated_topology.get('name', ''))
+        if not re.fullmatch(r'[a-z0-9]([-a-z0-9]*[a-z0-9])?', consolidated_name):
+            errors.append('Consolidated database topology name must be a DNS-compatible Kubernetes name')
+        for key in ['database', 'owner']:
+            if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', str(consolidated_topology.get(key, ''))):
+                errors.append(f'Consolidated database topology {key} must be a safe SQL identifier')
+        image = consolidated_topology.get('image', {})
+        if not isinstance(image, dict) or not image.get('repository') or not image.get('tag') and not image.get('digest'):
+            errors.append('Consolidated database topology must define an image repository with a tag or digest')
 database_backup_values = database_values.get('backup', {})
 if database_backup_values.get('enabled') is not False:
     errors.append('CloudNativePG backup rendering must be disabled by default')
@@ -4415,7 +4456,10 @@ for path in text_files():
         if pattern.search(content):
             errors.append(f'High-confidence secret pattern found in {relative_name(path)}')
             break
-    if PRIVATE_LOOKING_IP_PATTERN.search(content):
+    if any(
+        match.group(0) not in PUBLIC_SAFE_IP_EXAMPLES
+        for match in PRIVATE_LOOKING_IP_PATTERN.finditer(content)
+    ):
         errors.append(f'Private-looking infrastructure IP found in {relative_name(path)}')
     if DISCLOSURE_IDENTIFIER_PATTERN.search(content):
         errors.append(f'Original disclosure-prone service identifier found in {relative_name(path)}')

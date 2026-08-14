@@ -334,7 +334,29 @@ def expected_webserver_image(values: dict[str, Any], provider: str) -> str | Non
 def database_target_images(values: dict[str, Any]) -> list[str]:
     targets: set[str] = set()
     database_values = values.get("databases", {})
+    topology = database_values.get("topology", {}) if isinstance(database_values, dict) else {}
+    topology_mode = str(topology.get("mode", "per-service")).strip().lower() if isinstance(topology, dict) else "per-service"
+    consolidated_engines: set[str] = set()
+    if topology_mode in {"consolidated", "hybrid"} and isinstance(topology, dict):
+        selected_topology = topology.get("hybrid", {}) if topology_mode == "hybrid" else topology.get("consolidated", {})
+        selected_topology = selected_topology if isinstance(selected_topology, dict) else {}
+        configured_engines = selected_topology.get("includeEngines", ["postgresql"])
+        if isinstance(configured_engines, list):
+            consolidated_engines = {str(engine).strip().lower() for engine in configured_engines}
+        consolidated = topology.get("consolidated", {})
+        if isinstance(consolidated, dict):
+            image = consolidated.get("image", {})
+            repository = image.get("repository") if isinstance(image, dict) else None
+            tag = image.get("tag") if isinstance(image, dict) else None
+            if repository and tag:
+                targets.add(f"{repository}:{tag}")
     for instance in database_values.get("instances", {}).values():
+        if (
+            consolidated_engines
+            and isinstance(instance, dict)
+            and str(instance.get("engine", "postgresql")).strip().lower() in consolidated_engines
+        ):
+            continue
         image = instance.get("image", {}) if isinstance(instance, dict) else {}
         repository = image.get("repository")
         tag = image.get("tag")

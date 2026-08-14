@@ -1,0 +1,5 @@
+# Public-safe example overlay.
+# Consolidates standard PostgreSQL logical databases into one 3-instance CNPG cluster.
+databases:
+  topology:
+    mode: consolidated

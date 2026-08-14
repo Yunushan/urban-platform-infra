@@ -193,6 +193,25 @@ def enabled(mapping: Any) -> bool:
     return isinstance(mapping, dict) and mapping.get("enabled") is True
 
 
+def database_topology_settings(values: dict[str, Any]) -> tuple[str, set[str], dict[str, Any]]:
+    databases = values.get("databases", {}) if isinstance(values.get("databases"), dict) else {}
+    topology = databases.get("topology", {}) if isinstance(databases.get("topology"), dict) else {}
+    mode = str(topology.get("mode", "per-service")).strip().lower()
+    consolidated = topology.get("consolidated", {})
+    consolidated = consolidated if isinstance(consolidated, dict) else {}
+    selected = topology.get("hybrid", {}) if mode == "hybrid" else consolidated
+    selected = selected if isinstance(selected, dict) else {}
+    configured = selected.get("includeEngines", ["postgresql"])
+    engines = {str(engine).strip().lower() for engine in configured} if isinstance(configured, list) else {"postgresql"}
+    return mode, engines or {"postgresql"}, consolidated
+
+
+def logical_database_names(values: dict[str, Any]) -> list[str]:
+    databases = values.get("databases", {}) if isinstance(values.get("databases"), dict) else {}
+    instances = databases.get("instances", {}) if isinstance(databases.get("instances"), dict) else {}
+    return [str(name) for name, db in sorted(instances.items()) if enabled(db)]
+
+
 def collect_components(values: dict[str, Any]) -> tuple[list[Component], list[str], list[str]]:
     components: list[Component] = []
     warnings: list[str] = []
@@ -218,8 +237,27 @@ def collect_components(values: dict[str, Any]) -> tuple[list[Component], list[st
     db_resources = databases.get("resources", {}) if isinstance(databases.get("resources"), dict) else {}
     db_cpu_m, db_memory_mi = resource_pair(db_resources)
     storage_override = databases.get("storageOverride", {}) if isinstance(databases.get("storageOverride"), dict) else {}
+    topology_mode, consolidated_engines, consolidated_config = database_topology_settings(values)
+    if topology_mode != "per-service" and consolidated_config.get("enabled", True) is not False:
+        consolidated_storage = consolidated_config.get("storage", {}) if isinstance(consolidated_config.get("storage"), dict) else {}
+        storage = storage_override.get("size") or consolidated_storage.get("size")
+        consolidated_resources = consolidated_config.get("resources") if isinstance(consolidated_config.get("resources"), dict) else db_resources
+        cpu_m, memory_mi = resource_pair(consolidated_resources)
+        components.append(
+            Component(
+                name=str(consolidated_config.get("name", "platform-postgres")),
+                category="database",
+                replicas=effective_replicas(values, consolidated_config.get("instances"), databases.get("defaultInstances", 1)),
+                cpu_m=cpu_m,
+                memory_mi=memory_mi,
+                storage_gi=parse_storage_gi(storage),
+                note=f"consolidated {topology_mode}",
+            )
+        )
     for name, db in sorted((databases.get("instances", {}) or {}).items()):
         if not enabled(db):
+            continue
+        if topology_mode != "per-service" and str(db.get("engine", "postgresql")).strip().lower() in consolidated_engines:
             continue
         db_storage = db.get("storage", {}) if isinstance(db.get("storage"), dict) else {}
         storage = storage_override.get("size") or db_storage.get("size")
@@ -433,7 +471,9 @@ def main() -> int:
     cpu_m, memory_mi, storage_gi, pods = total(components)
     usable_cpu_m = int(node_count * node_cpu_m * utilization)
     usable_memory_mi = int(node_count * node_memory_mi * utilization)
-    db_names = database_names(components)
+    db_cluster_names = database_names(components)
+    db_names = logical_database_names(values)
+    topology_mode, _topology_engines, _topology_config = database_topology_settings(values)
 
     findings: list[tuple[str, str]] = []
     if cpu_m > usable_cpu_m:
@@ -442,8 +482,8 @@ def main() -> int:
         findings.append(("ERROR", f"Memory requests exceed lab budget: {memory_mi}Mi > {usable_memory_mi}Mi."))
     if pods > max_pods:
         findings.append(("ERROR", f"Estimated pod count exceeds lab guardrail: {pods} > {max_pods}."))
-    if len(db_names) > max_databases:
-        findings.append(("WARN", f"Enabled database count is high for this lab: {len(db_names)} > first-wave limit {max_databases}."))
+    if len(db_cluster_names) > max_databases:
+        findings.append(("WARN", f"Enabled database cluster count is high for this lab: {len(db_cluster_names)} > first-wave limit {max_databases}."))
     for warning in warnings:
         findings.append(("WARN", warning))
 
@@ -469,7 +509,9 @@ def main() -> int:
         f"- Estimated memory requests: `{memory_mi}Mi`",
         f"- Estimated PVC storage: `{storage_gi:.1f}Gi`",
         f"- Estimated pods: `{pods}`",
-        f"- Enabled databases: `{len(db_names)}`",
+        f"- Database topology: `{topology_mode}`",
+        f"- Enabled database clusters: `{len(db_cluster_names)}`",
+        f"- Logical database entries: `{len(db_names)}`",
         f"- Generated lab override: `{args.overrides}`",
         f"- Result: `{'FAIL' if any(level == 'ERROR' for level, _ in findings) else ('WARN' if findings else 'PASS')}`",
         "",

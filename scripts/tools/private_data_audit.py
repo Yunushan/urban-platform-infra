@@ -66,8 +66,16 @@ SECRET_PATTERNS = {
     "private-key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
 }
 PRIVATE_LOOKING_IP_PATTERN = re.compile(
-    r"\b(10\.10\.10\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3})\b"
+    r"\b(?:10\.(?:\d{1,3}\.){2}\d{1,3}|192\.168\.(?:\d{1,3}\.){1}\d{1,3}|172\.(?:1[6-9]|2[0-9]|3[0-1])\.(?:\d{1,3}\.)\d{1,3}|127\.0\.0\.1|169\.254\.(?:\d{1,3}\.)\d{1,3})\b"
 )
+PUBLIC_SAFE_IP_EXAMPLES = {
+    "127.0.0.1",
+    "10.0.0.1",
+    "10.42.0.0",
+    "10.42.0.1",
+    "10.43.0.0",
+    "10.43.0.1",
+}
 DISCLOSURE_IDENTIFIER_PATTERN = re.compile(
     r"(istanbulkart|iett|vms|tsc2a9|smartflow|scm-|tsc-|camera-ttu|taxi-stand|car-park|"
     r"bicycle-road|pedestrian-button|tsd-junction|program-archive|camera-manager|ops-scm-log|"
@@ -181,7 +189,14 @@ def audit_file(path: Path) -> list[Finding]:
             findings.append(
                 Finding("ERROR", category, rel, line_number_for(text, match), "High-confidence secret token pattern.")
             )
-    private_match = PRIVATE_LOOKING_IP_PATTERN.search(text)
+    private_match = next(
+        (
+            match
+            for match in PRIVATE_LOOKING_IP_PATTERN.finditer(text)
+            if match.group(0) not in PUBLIC_SAFE_IP_EXAMPLES
+        ),
+        None,
+    )
     if private_match:
         findings.append(
             Finding(

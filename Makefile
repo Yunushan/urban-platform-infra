@@ -5,6 +5,7 @@ ENGINE ?= rke2
 INGRESS ?= traefik
 WEB ?= nginx
 DB ?= postgresql
+DATABASE_TOPOLOGY ?= per-service
 OBS ?= disabled
 NAMESPACE ?= urban-platform
 VALUES ?= helm/urban-platform-infra/values.yaml
@@ -196,6 +197,8 @@ MIGRATION_SERVICE_FILTER ?=
 MIGRATION_RUNTIME_VALIDATION_TIMEOUT ?= $(if $(filter production,$(MIGRATION_PROFILE)),900,600)
 MIGRATION_RUNTIME_VALIDATION_INTERVAL ?= 10
 MIGRATION_KAFKA_BOOTSTRAP_SERVERS ?= kafka:9092
+MIGRATION_DATABASE_TOPOLOGY ?= $(DATABASE_TOPOLOGY)
+export MIGRATION_DATABASE_TOPOLOGY
 MIGRATION_DOTNET_TARGET_VERSION ?=
 MIGRATION_DOTNET_VERSION_MODE ?= $(if $(strip $(MIGRATION_DOTNET_TARGET_VERSION)),rewrite,disabled)
 MIGRATION_DOTNET_IMAGE_REGISTRY ?= mcr.microsoft.com/dotnet
@@ -471,6 +474,7 @@ DISASTER_RECOVERY_VALUES ?= reports/disaster-recovery-values.yaml
 
 HELM_DEPLOY_SET_ARGS = \
 	--set namespace.create=false \
+	--set databases.topology.mode=$(DATABASE_TOPOLOGY) \
 	$(if $(DEPLOY_INGRESS_HOST),--set ingress.host=$(DEPLOY_INGRESS_HOST),) \
 	$(if $(DEPLOY_CLUSTER_DOMAIN),--set global.cluster.domain=$(DEPLOY_CLUSTER_DOMAIN),) \
 	$(if $(DEPLOY_CLUSTER_VIP),--set global.cluster.vip=$(DEPLOY_CLUSTER_VIP),) \

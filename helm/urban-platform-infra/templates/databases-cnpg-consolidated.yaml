@@ -1,24 +1,49 @@
 {{- if and .Values.databases.enabled (eq .Values.databases.provider "cloudnative-pg") }}
 {{- $databaseTopology := .Values.databases.topology | default dict }}
 {{- $databaseTopologyMode := $databaseTopology.mode | default "per-service" }}
-{{- $databaseTopologyConfig := $databaseTopology.consolidated | default dict }}
+{{- $consolidated := $databaseTopology.consolidated | default dict }}
+{{- $hybrid := $databaseTopology.hybrid | default dict }}
+{{- $includeConfig := $consolidated }}
 {{- if eq $databaseTopologyMode "hybrid" }}
-{{- $databaseTopologyConfig = $databaseTopology.hybrid | default dict }}
+{{- $includeConfig = $hybrid }}
 {{- end }}
-{{- $consolidatedEngines := $databaseTopologyConfig.includeEngines | default (list "postgresql") }}
-{{- range $name, $db := .Values.databases.instances }}
-{{- $dbEngine := lower ($db.engine | default "postgresql") }}
-{{- $skipForTopology := and (ne $databaseTopologyMode "per-service") (has $dbEngine $consolidatedEngines) }}
-{{- if and $db.enabled (not $skipForTopology) }}
+{{- $consolidatedEngines := $includeConfig.includeEngines | default (list "postgresql") }}
+{{- if and (ne $databaseTopologyMode "per-service") ($consolidated.enabled | default true) }}
+{{- $name := required "databases.topology.consolidated.name is required when database topology is consolidated or hybrid" $consolidated.name }}
+{{- $engine := lower ($consolidated.engine | default "postgresql") }}
+{{- $database := required "databases.topology.consolidated.database is required" $consolidated.database }}
+{{- $owner := required "databases.topology.consolidated.owner is required" $consolidated.owner }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $name) }}
+{{- fail (printf "databases.topology.consolidated.name must be a DNS-compatible Kubernetes name: %s" $name) }}
+{{- end }}
+{{- if or (not (regexMatch "^[A-Za-z_][A-Za-z0-9_]*$" $database)) (not (regexMatch "^[A-Za-z_][A-Za-z0-9_]*$" $owner)) }}
+{{- fail "databases.topology.consolidated.database and owner must contain only letters, numbers, and underscores and start with a letter or underscore" }}
+{{- end }}
+{{- $postInitSQL := list }}
+{{- range $sourceName, $source := .Values.databases.instances }}
+{{- if and $source $source.enabled }}
+{{- $sourceEngine := lower ($source.engine | default "postgresql") }}
+{{- if has $sourceEngine $consolidatedEngines }}
+{{- $sourceDatabase := $source.database | default $sourceName }}
+{{- if ne $sourceDatabase $database }}
+{{- if not (regexMatch "^[A-Za-z_][A-Za-z0-9_]*$" $sourceDatabase) }}
+{{- fail (printf "databases.instances.%s.database cannot be created by consolidated topology because it is not a safe SQL identifier" $sourceName) }}
+{{- end }}
+{{- $postInitSQL = append $postInitSQL (printf "CREATE DATABASE \"%s\" OWNER \"%s\";" $sourceDatabase $owner) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- $storageOverride := $.Values.databases.storageOverride | default dict }}
-{{- $storageSize := $storageOverride.size | default $db.storage.size | default "20Gi" }}
-{{- $explicitStorageClass := $storageOverride.className | default $db.storage.className | default "" }}
+{{- $consolidatedStorage := $consolidated.storage | default dict }}
+{{- $storageSize := $storageOverride.size | default $consolidatedStorage.size | default "20Gi" }}
+{{- $explicitStorageClass := $storageOverride.className | default $consolidatedStorage.className | default "" }}
 {{- $storageClass := include "cip.storageClassName" (list $ $explicitStorageClass "hot") }}
-{{- $postgresUID := $db.postgresUID | default $.Values.databases.postgresUID }}
-{{- $postgresGID := $db.postgresGID | default $.Values.databases.postgresGID }}
-{{- $resources := $db.resources | default $.Values.databases.resources }}
+{{- $postgresUID := $consolidated.postgresUID | default $.Values.databases.postgresUID }}
+{{- $postgresGID := $consolidated.postgresGID | default $.Values.databases.postgresGID }}
+{{- $resources := $consolidated.resources | default $.Values.databases.resources }}
 {{- $globalBackup := $.Values.databases.backup | default dict }}
-{{- $dbBackup := $db.backup | default dict }}
+{{- $dbBackup := $consolidated.backup | default dict }}
 {{- $globalObjectStore := $globalBackup.objectStore | default dict }}
 {{- $dbObjectStore := $dbBackup.objectStore | default dict }}
 {{- $storageTiers := $.Values.storageTiers | default dict }}
@@ -38,9 +63,9 @@
 {{- $backupBucket := coalesce $dbObjectStore.bucket $globalObjectStore.bucket $coldObjectStore.bucket "" }}
 {{- $backupPrefix := coalesce $dbObjectStore.prefix $globalObjectStore.prefix $coldObjectStore.prefix "urban-platform/databases" }}
 {{- $backupSafePrefix := trimAll "/" $backupPrefix }}
-{{- $backupDestinationPath := coalesce $dbObjectStore.destinationPath $globalObjectStore.destinationPath "" }}
-{{- $backupEndpointURL := coalesce $dbObjectStore.endpointURL $globalObjectStore.endpointURL "" }}
-{{- $backupCompression := coalesce $dbObjectStore.compression $globalObjectStore.compression "gzip" }}
+{{- $backupDestinationPath := coalesce $dbObjectStore.destinationPath $globalObjectStore.destinationPath $coldObjectStore.destinationPath "" }}
+{{- $backupEndpointURL := coalesce $dbObjectStore.endpointURL $globalObjectStore.endpointURL $coldObjectStore.endpointURL "" }}
+{{- $backupCompression := coalesce $dbObjectStore.compression $globalBackup.compression "gzip" }}
 {{- $backupReady := and $backupEnabled $backupObjectStoreEnabled $backupSecretName (or $backupDestinationPath $backupBucket) (or (eq $backupProvider "s3-compatible") (eq $backupProvider "aws-s3")) }}
 {{- $globalBackupSchedule := $globalBackup.schedule | default dict }}
 {{- $dbBackupSchedule := $dbBackup.schedule | default dict }}
@@ -55,9 +80,10 @@ metadata:
   labels:
     {{- include "cip.labels" $ | nindent 4 }}
     app.kubernetes.io/name: {{ $name }}
-    urban-platform.io/database-engine: {{ $db.engine | quote }}
+    urban-platform.io/database-engine: {{ $engine | quote }}
+    urban-platform.io/database-topology: {{ $databaseTopologyMode | quote }}
 spec:
-  instances: {{ include "cip.replicaCount" (list $ ($db.instances | default $.Values.databases.defaultInstances)) }}
+  instances: {{ include "cip.replicaCount" (list $ ($consolidated.instances | default $.Values.databases.defaultInstances)) }}
   {{- with $resources }}
   resources:
     {{- toYaml . | nindent 4 }}
@@ -68,20 +94,16 @@ spec:
   {{- if $postgresGID }}
   postgresGID: {{ $postgresGID }}
   {{- end }}
-  {{- if $db.imageCatalogRef }}
-  imageCatalogRef:
-    apiGroup: {{ $db.imageCatalogRef.apiGroup | default "postgresql.cnpg.io" | quote }}
-    kind: {{ $db.imageCatalogRef.kind | default "ImageCatalog" | quote }}
-    name: {{ $db.imageCatalogRef.name | quote }}
-    major: {{ required (printf "databases.instances.%s.imageCatalogRef.major is required" $name) $db.imageCatalogRef.major }}
-  {{- else }}
-  imageName: {{ include "cip.image" (list $ $db.image) | quote }}
-  {{- end }}
+  imageName: {{ include "cip.image" (list $ $consolidated.image) | quote }}
   primaryUpdateStrategy: unsupervised
   bootstrap:
     initdb:
-      database: {{ $db.database | quote }}
-      owner: {{ $db.owner | quote }}
+      database: {{ $database | quote }}
+      owner: {{ $owner | quote }}
+      {{- if $postInitSQL }}
+      postInitSQL:
+        {{- toYaml $postInitSQL | nindent 8 }}
+      {{- end }}
   storage:
     size: {{ $storageSize }}
     {{- if $storageClass }}
@@ -128,13 +150,13 @@ metadata:
   labels:
     {{- include "cip.labels" $ | nindent 4 }}
     app.kubernetes.io/name: {{ printf "%s-backup" $name | trunc 63 | trimSuffix "-" }}
-    urban-platform.io/database-engine: {{ $db.engine | quote }}
+    urban-platform.io/database-engine: {{ $engine | quote }}
+    urban-platform.io/database-topology: {{ $databaseTopologyMode | quote }}
 spec:
   schedule: {{ $backupScheduleCron | quote }}
   backupOwnerReference: self
   cluster:
     name: {{ $name }}
-{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

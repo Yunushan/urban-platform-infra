@@ -1042,6 +1042,32 @@ databases:
   storageOverride:
     size: 1Gi
     className: ''
+  # Logical database names remain unchanged when the physical topology changes.
+  # Keep the current per-service layout as the default; other modes are opt-in.
+  topology:
+    mode: per-service
+    consolidated:
+      enabled: true
+      name: platform-postgres
+      engine: postgresql
+      image:
+        repository: postgres
+        tag: '18.3'
+      database: platform
+      owner: app
+      instances: 3
+      postgresPort: 5432
+      includeEngines:
+      - postgresql
+      storage:
+        size: 20Gi
+        className: ''
+      backup:
+        enabled: false
+    hybrid:
+      # Hybrid consolidates only these engines and preserves the others.
+      includeEngines:
+      - postgresql
   monitoring:
     enableDeprecatedPodMonitor: false
   backup:

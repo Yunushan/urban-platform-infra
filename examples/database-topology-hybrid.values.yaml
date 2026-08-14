@@ -1,0 +1,5 @@
+# Public-safe example overlay.
+# Consolidates standard PostgreSQL and keeps PostGIS/TimescaleDB as separate clusters.
+databases:
+  topology:
+    mode: hybrid

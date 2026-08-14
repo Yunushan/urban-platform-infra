@@ -32,6 +32,7 @@
   <a href="docs/kubernetes-security-posture.md">Kubernetes Security</a> •
   <a href="docs/deployment-topologies.md">Topologies</a> •
   <a href="docs/topology.md">Topology diagrams</a> •
+  <a href="docs/database-topologies.md">Database topologies</a> •
   <a href="docs/environment-profiles.md">Environment Profiles</a> •
   <a href="docs/storage-tiers.md">Storage Tiers</a> •
   <a href="docs/platform-capabilities.md">Capabilities</a> •
