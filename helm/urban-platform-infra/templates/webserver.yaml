@@ -3,6 +3,8 @@
 {{- $ingressHost := include "cip.ingressHost" . -}}
 {{- $ingressTlsSecretName := include "cip.ingressTlsSecretName" . -}}
 {{- $webserverIngressEnabled := ne (toString .Values.webserver.ingress.enabled) "false" -}}
+{{- $webserverReplicas := int (include "cip.replicaCount" (list . ($provider.replicas | default 3))) -}}
+{{- $webserverAutoscaling := $provider.autoscaling | default dict -}}
 {{- if $provider }}
 ---
 apiVersion: apps/v1
@@ -15,7 +17,7 @@ metadata:
     app.kubernetes.io/name: webserver-{{ $providerName }}
     urban-platform.io/component: webserver
 spec:
-  replicas: {{ include "cip.replicaCount" (list . ($provider.replicas | default 3)) }}
+  replicas: {{ $webserverReplicas }}
   selector:
     matchLabels:
       app.kubernetes.io/name: webserver-{{ $providerName }}
@@ -37,6 +39,11 @@ spec:
       {{- if .Values.global.scheduling.topologySpread }}
       topologySpreadConstraints:
         {{- include "cip.topologySpreadConstraints" (list . (printf "webserver-%s" $providerName)) | nindent 8 }}
+      {{- end }}
+      {{- if ne (.Values.global.scheduling.antiAffinity | default "preferred") "disabled" }}
+      affinity:
+        podAntiAffinity:
+          {{- include "cip.podAntiAffinity" (list . (printf "webserver-%s" $providerName)) | nindent 10 }}
       {{- end }}
       {{- with $provider.podSecurityContext }}
       securityContext:
@@ -95,6 +102,47 @@ spec:
       port: {{ $p.servicePort }}
       targetPort: {{ $p.containerPort }}
     {{- end }}
+{{- if and .Values.autoscaling.enabled ($webserverAutoscaling.enabled | default false) }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: webserver-{{ $providerName }}
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+    app.kubernetes.io/name: webserver-{{ $providerName }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: webserver-{{ $providerName }}
+  minReplicas: {{ .Values.autoscaling.default.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.default.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.default.targetCPUUtilizationPercentage }}
+{{- end }}
+{{- if and (eq (.Values.global.environment | default "") "production") (gt $webserverReplicas 1) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: webserver-{{ $providerName }}
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+    app.kubernetes.io/name: webserver-{{ $providerName }}
+spec:
+  minAvailable: {{ max 1 (sub $webserverReplicas 1) }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: webserver-{{ $providerName }}
+{{- end }}
 {{- if and .Values.ingress.enabled $webserverIngressEnabled }}
 ---
 apiVersion: networking.k8s.io/v1

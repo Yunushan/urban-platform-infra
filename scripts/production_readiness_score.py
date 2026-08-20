@@ -70,7 +70,12 @@ def helm_render_check() -> Check:
             detail = completed.stderr.strip().splitlines()[-1] if completed.stderr.strip() else "helm template failed"
             return Check("Strict Helm render and workload policy", 20, False, detail)
         passed, detail = command_result([PYTHON, "tests/policy/basic_policy.py", str(rendered)])
-        return Check("Strict Helm render and workload policy", 20, passed, detail)
+        if not passed:
+            return Check("Strict Helm render and workload policy", 20, False, detail)
+        rendered_passed, rendered_detail = command_result([PYTHON, "tests/policy/production_render.py", str(rendered)])
+        if not rendered_passed:
+            return Check("Strict Helm render and workload policy", 20, False, rendered_detail)
+        return Check("Strict Helm render and workload policy", 20, True, rendered_detail)
 
 
 def documentation_check() -> Check:
@@ -84,17 +89,26 @@ def documentation_check() -> Check:
         "docs/tool-inventory.md",
         "docs/load-testing.md",
         "docs/version-management.md",
+        "docs/production-readiness.md",
         ".github/workflows/ci.yml",
         ".github/workflows/release.yml",
         ".github/workflows/version-update.yml",
         "config/image-policy.yaml",
         "config/version-policy.yaml",
+        "config/production-evidence.example.yaml",
+        "scripts/production_evidence_gate.py",
+        "tests/policy/production_render.py",
+        "tests/policy/production_evidence_gate_test.py",
     ]
     missing = [path for path in required if not (ROOT / path).is_file()]
     if missing:
         return Check("Operations and release evidence coverage", 10, False, f"missing {', '.join(missing)}")
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-    if "scripts/validate_production_profile.py" not in workflow or "values-production.yaml" not in workflow:
+    if (
+        "scripts/validate_production_profile.py" not in workflow
+        or "tests/policy/production_render.py" not in workflow
+        or "values-production.yaml" not in workflow
+    ):
         return Check("Operations and release evidence coverage", 10, False, "release workflow does not enforce the production contract")
     return Check("Operations and release evidence coverage", 10, True, "runbooks and production release gates are present")
 

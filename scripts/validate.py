@@ -1801,7 +1801,7 @@ for makefile_helm_token in [
     '--import-security-context "$(MIGRATION_IMPORT_SECURITY_CONTEXT)"',
     'Deploying/upgrading the platform chart before import',
     'Skipping platform Helm deploy because MIGRATION_DEPLOY_PLATFORM=',
-    '$(MAKE) deploy-auto VALUES="$(VALUES)" NAMESPACE="$(MIGRATION_NAMESPACE)"',
+    '$(MAKE) deploy-auto DEPLOY_PROFILE=lab VALUES=helm/urban-platform-infra/values.yaml NAMESPACE="$(MIGRATION_NAMESPACE)"',
     'DEPLOY_NAMESPACE_RESOURCE_QUOTA="$(if $(filter true,$(MIGRATION_RELAX_RESOURCE_QUOTA)),false,$(DEPLOY_NAMESPACE_RESOURCE_QUOTA))"',
     '--set namespace.resourceQuota.enabled=$(DEPLOY_NAMESPACE_RESOURCE_QUOTA)',
     'install-helm:',

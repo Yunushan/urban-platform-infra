@@ -79,7 +79,10 @@ jobs:
 
       - name: Validate production profile contract
         shell: bash
-        run: python3 scripts/validate_production_profile.py
+        run: |
+          python3 scripts/validate_production_profile.py
+          python3 -m py_compile scripts/production_evidence_gate.py scripts/images/registry_promotion_controller.py
+          python3 tests/policy/production_evidence_gate_test.py
 
       - name: Render release manifest
         shell: bash
@@ -104,6 +107,7 @@ jobs:
             --api-versions cert-manager.io/v1/ClusterIssuer \
             > "${PRODUCTION_RENDERED_MANIFEST}"
           python3 tests/policy/basic_policy.py "${PRODUCTION_RENDERED_MANIFEST}"
+          python3 tests/policy/production_render.py "${PRODUCTION_RENDERED_MANIFEST}"
 
       - name: Generate SBOM and checksums
         shell: bash

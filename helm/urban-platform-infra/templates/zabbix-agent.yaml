@@ -1,4 +1,5 @@
 {{- if .Values.zabbixAgent.enabled }}
+{{- $zabbixReplicas := int (include "cip.replicaCount" (list . (.Values.zabbixAgent.replicas | default 3))) -}}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -9,7 +10,7 @@ metadata:
     {{- include "cip.labels" . | nindent 4 }}
     app.kubernetes.io/name: zabbix-agent2
 spec:
-  replicas: {{ include "cip.replicaCount" (list . (.Values.zabbixAgent.replicas | default 3)) }}
+  replicas: {{ $zabbixReplicas }}
   selector:
     matchLabels:
       app.kubernetes.io/name: zabbix-agent2
@@ -28,6 +29,15 @@ spec:
       securityContext:
         {{- include "cip.podSecurityContext" . | nindent 8 }}
       {{- end }}
+      {{- end }}
+      {{- if .Values.global.scheduling.topologySpread }}
+      topologySpreadConstraints:
+        {{- include "cip.topologySpreadConstraints" (list . "zabbix-agent2") | nindent 8 }}
+      {{- end }}
+      {{- if ne (.Values.global.scheduling.antiAffinity | default "preferred") "disabled" }}
+      affinity:
+        podAntiAffinity:
+          {{- include "cip.podAntiAffinity" (list . "zabbix-agent2") | nindent 10 }}
       {{- end }}
       containers:
         - name: zabbix-agent2
@@ -62,4 +72,20 @@ spec:
       port: {{ .servicePort }}
       targetPort: {{ .containerPort }}
     {{- end }}
+{{- if and (eq (.Values.global.environment | default "") "production") (gt $zabbixReplicas 1) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: zabbix-agent2
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+    app.kubernetes.io/name: zabbix-agent2
+spec:
+  minAvailable: {{ max 1 (sub $zabbixReplicas 1) }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zabbix-agent2
+{{- end }}
 {{- end }}

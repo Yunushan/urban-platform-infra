@@ -33,6 +33,7 @@ global:
   scheduling:
     topologySpread: false
     antiAffinity: preferred
+    topologySpreadWhenUnsatisfiable: ScheduleAnyway
   # Applied when a workload does not define an explicit resources block.
   # CPU and memory are Kubernetes-enforced; I/O budgets are measured and
   # reported because Kubernetes does not expose a portable IOPS limit.

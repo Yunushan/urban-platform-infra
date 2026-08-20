@@ -205,17 +205,39 @@ capabilities:
 {{- $root := index . 0 -}}
 {{- $appName := index . 1 -}}
 {{- if $root.Values.global.scheduling.topologySpread }}
+{{- $whenUnsatisfiable := $root.Values.global.scheduling.topologySpreadWhenUnsatisfiable | default "ScheduleAnyway" -}}
 - maxSkew: 1
   topologyKey: topology.kubernetes.io/zone
-  whenUnsatisfiable: ScheduleAnyway
+  whenUnsatisfiable: {{ $whenUnsatisfiable }}
   labelSelector:
     matchLabels:
       app.kubernetes.io/name: {{ $appName }}
 - maxSkew: 1
   topologyKey: kubernetes.io/hostname
-  whenUnsatisfiable: ScheduleAnyway
+  whenUnsatisfiable: {{ $whenUnsatisfiable }}
   labelSelector:
     matchLabels:
       app.kubernetes.io/name: {{ $appName }}
 {{- end }}
+{{- end -}}
+
+{{- define "cip.podAntiAffinity" -}}
+{{- $root := index . 0 -}}
+{{- $appName := index . 1 -}}
+{{- $mode := $root.Values.global.scheduling.antiAffinity | default "preferred" -}}
+{{- if eq $mode "required" }}
+requiredDuringSchedulingIgnoredDuringExecution:
+  - labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: {{ $appName }}
+    topologyKey: kubernetes.io/hostname
+{{- else if eq $mode "preferred" }}
+preferredDuringSchedulingIgnoredDuringExecution:
+  - weight: 100
+    podAffinityTerm:
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: {{ $appName }}
+      topologyKey: kubernetes.io/hostname
+{{- end -}}
 {{- end -}}

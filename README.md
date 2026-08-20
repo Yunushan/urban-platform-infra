@@ -66,6 +66,7 @@
   <a href="docs/release-runbook.md">Release Runbook</a> •
   <a href="docs/cluster-upgrade.md">Cluster Upgrade</a> •
   <a href="docs/disaster-recovery.md">Disaster Recovery</a> •
+  <a href="docs/production-readiness.md">Production Readiness</a> •
   <a href="docs/observability-slo.md">SLOs</a> •
   <a href="docs/platform-support.md">Platform Support</a> •
   <a href="docs/repository-setup.md">GitHub/GitLab</a> •
@@ -104,6 +105,14 @@ make install-operators
 make deploy ENV=prod
 make status
 ```
+
+`ENV=prod` selects the public production overlay automatically. Before using
+it for a real environment, add a private overlay with promoted digest-pinned
+images, real durable StorageClasses, External Secrets backend references,
+trusted TLS/issuer settings, and tested backup and disaster-recovery evidence.
+Run `make production-readiness-gate` from a private operator or release runner
+before calling the environment production-ready; the public repository score
+does not replace that gate.
 
 For deploying a previously packaged application archive onto three local RKE2 nodes, use the sanitized runbook in [`docs/three-node-rke2-tarball-deploy.md`](docs/three-node-rke2-tarball-deploy.md). It covers image build/preload, private inventory setup, RKE2 bootstrap, Helm deployment, and verification without committing real node addresses or credentials.
 

@@ -108,13 +108,7 @@ spec:
           {{- end }}
       affinity:
         podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 50
-              podAffinityTerm:
-                labelSelector:
-                  matchLabels:
-                    app.kubernetes.io/name: {{ $name }}
-                topologyKey: kubernetes.io/hostname
+          {{- include "cip.podAntiAffinity" (list $ $name) | nindent 10 }}
 {{- if and (eq $kind "StatefulSet") $svc.storage }}
   volumeClaimTemplates:
     - metadata:

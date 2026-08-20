@@ -42,6 +42,16 @@ def load_yaml(path: Path) -> Any:
     return yaml.safe_load(text) or {}
 
 
+def merge_values(base: Any, override: Any) -> Any:
+    """Merge Helm-style mappings while letting overlays replace lists/scalars."""
+    if isinstance(base, dict) and isinstance(override, dict):
+        merged = dict(base)
+        for key, value in override.items():
+            merged[key] = merge_values(merged[key], value) if key in merged else value
+        return merged
+    return override
+
+
 def strip_quotes(value: str) -> str:
     return value.strip().strip("'\"")
 
@@ -226,6 +236,7 @@ def compact_rows(images: list[ImageObject], registry: str, limit: int = 80) -> l
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate a public-safe image promotion plan for production readiness.")
     parser.add_argument("--values", default="helm/urban-platform-infra/values.yaml")
+    parser.add_argument("--base-values", default="", help="Base values file to merge before the selected overlay.")
     parser.add_argument("--policy", default="config/image-policy.yaml")
     parser.add_argument("--registry", default="private-registry.example.invalid/platform")
     parser.add_argument("--profile", choices=["lab", "production"], default="production")
@@ -242,7 +253,15 @@ def main() -> int:
         if isinstance(item, dict)
     }
     values_path = ROOT / args.values
-    images = images_from_file(values_path)
+    base_values = args.base_values
+    if not base_values and args.profile == "production" and args.values != "helm/urban-platform-infra/values.yaml":
+        base_values = "helm/urban-platform-infra/values.yaml"
+    base_path = ROOT / base_values if base_values else None
+    if base_path and base_path.is_file() and yaml is not None:
+        merged_values = merge_values(load_yaml(base_path), load_yaml(values_path))
+        images = images_from_loaded_yaml(args.values, merged_values)
+    else:
+        images = images_from_file(values_path)
     unique_images = sorted({(image.source, image.path, image.reference): image for image in images}.values(), key=lambda item: (item.source, item.path))
 
     mutable = [image for image in unique_images if is_mutable_tag(image.tag, blocked)]
@@ -285,6 +304,8 @@ def main() -> int:
         *compact_rows(missing_digest, args.registry),
         "",
     ]
+    if base_values:
+        lines.insert(7, f"- Base values file: `{base_values}`")
     if mutable or invalid_digest or unapproved_runtime:
         lines.extend(["## Policy Findings", ""])
         for image in mutable:

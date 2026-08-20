@@ -253,14 +253,21 @@
             "topologySpread": {
               "type": "boolean"
             },
-            "antiAffinity": {
-              "type": "string",
-              "enum": [
-                "preferred",
-                "required",
-                "disabled"
-              ]
-            }
+                "antiAffinity": {
+                  "type": "string",
+                  "enum": [
+                    "preferred",
+                    "required",
+                    "disabled"
+                  ]
+                },
+                "topologySpreadWhenUnsatisfiable": {
+                  "type": "string",
+                  "enum": [
+                    "ScheduleAnyway",
+                    "DoNotSchedule"
+                  ]
+                }
           },
           "required": [
             "topologySpread",
@@ -3796,9 +3803,12 @@
         "enabled": {
           "type": "boolean"
         },
-        "targetName": {
-          "$ref": "#/$defs/kubernetesName"
-        },
+                "targetName": {
+                  "$ref": "#/$defs/kubernetesName"
+                },
+                "namespace": {
+                  "$ref": "#/$defs/kubernetesName"
+                },
         "type": {
           "type": "string",
           "minLength": 1

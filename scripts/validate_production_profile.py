@@ -52,6 +52,8 @@ def validate_values(values: dict[str, Any]) -> list[str]:
     require(errors, get(values, "global", "defaultReplicas", default=0) >= 3, "global.defaultReplicas must be at least 3")
     require(errors, get(values, "global", "replicaOverride", default=None) is None, "global.replicaOverride must remain null so per-service HA replicas are preserved")
     require(errors, get(values, "global", "scheduling", "topologySpread") is True, "topology spread must be enabled")
+    require(errors, get(values, "global", "scheduling", "topologySpreadWhenUnsatisfiable") == "DoNotSchedule", "production topology spread must use DoNotSchedule")
+    require(errors, get(values, "global", "scheduling", "antiAffinity") == "required", "production anti-affinity must be required")
     require(errors, get(values, "global", "security", "runAsNonRoot") is True, "global security must require non-root workloads")
     require(errors, get(values, "global", "security", "allowPrivilegeEscalation") is False, "privilege escalation must be disabled")
     require(errors, set(get(values, "global", "security", "capabilities", "drop", default=[])) >= {"ALL"}, "all Linux capabilities must be dropped")
@@ -81,14 +83,39 @@ def validate_values(values: dict[str, Any]) -> list[str]:
     require(errors, get(values, "namespace", "podSecurity", "audit") == "restricted", "namespace PSA audit level must be restricted")
     require(errors, get(values, "namespace", "podSecurity", "warn") == "restricted", "namespace PSA warn level must be restricted")
     require(errors, get(values, "storageTiers", "hot", "enabled") is True, "durable hot storage tier must be enabled")
-    require(errors, bool(get(values, "storageTiers", "hot", "storageClassName")), "production must name a durable hot StorageClass")
+    hot_storage_class = get(values, "storageTiers", "hot", "storageClassName")
+    require(errors, bool(hot_storage_class), "production must name a durable hot StorageClass")
 
     require(errors, get(values, "backup", "enabled") is True, "backup automation must be enabled")
     require(errors, get(values, "backup", "profile") == "production", "backup profile must be production")
     require(errors, get(values, "backup", "velero", "enabled") is True, "Velero backup integration must be enabled")
+    require(errors, get(values, "backup", "velero", "installOperator") is True, "Velero operator installation must be enabled")
     require(errors, get(values, "backup", "velero", "snapshotsEnabled") is True, "volume snapshots must be enabled")
     require(errors, get(values, "backup", "rke2Etcd", "enabled") is True, "RKE2 etcd backups must be enabled")
     require(errors, get(values, "backup", "imageArchives", "enabled") is True, "image archive retention must be enabled")
+
+    require(errors, get(values, "databases", "storageOverride", "className") == hot_storage_class, "database storage must use the durable hot StorageClass")
+    database_size = str(get(values, "databases", "storageOverride", "size", default="0Gi"))
+    require(errors, database_size not in {"", "0Gi", "1Gi"}, "database storage must be larger than the lab default")
+    require(errors, get(values, "databases", "backup", "enabled") is True, "CNPG database backups must be enabled")
+    require(errors, get(values, "databases", "backup", "objectStore", "enabled") is True, "CNPG backups must use an object store")
+    require(errors, bool(get(values, "databases", "backup", "objectStore", "bucket")), "CNPG backups must name an object-store bucket")
+    require(errors, get(values, "databases", "backup", "objectStore", "secretRef", "name") == "production-backup-credentials", "CNPG backups must use the production backup credential target")
+    require(errors, get(values, "databases", "backup", "schedule", "enabled") is True, "CNPG scheduled backups must be enabled")
+
+    external_secrets = get(values, "secretManagement", "externalSecrets", default={})
+    require(errors, isinstance(external_secrets, dict), "production must define ExternalSecret resources")
+    for name in ("databaseBackupCredentials", "veleroBackupCredentials"):
+        secret = external_secrets.get(name, {}) if isinstance(external_secrets, dict) else {}
+        require(errors, secret.get("enabled") is True, f"ExternalSecret/{name} must be enabled")
+        require(errors, secret.get("targetName") == "production-backup-credentials", f"ExternalSecret/{name} must target production-backup-credentials")
+        require(errors, bool(secret.get("namespace")), f"ExternalSecret/{name} must declare its namespace")
+        require(errors, bool(secret.get("data")), f"ExternalSecret/{name} must declare remote data mappings")
+
+    require(errors, get(values, "observability", "prometheus", "enabled") is True, "Prometheus must be enabled for production")
+    require(errors, get(values, "monitoring", "enabled") is True, "monitoring must be enabled for production")
+    require(errors, get(values, "monitoring", "prometheusRules", "enabled") is True, "PrometheusRule generation must be enabled")
+    require(errors, get(values, "webserver", "providers", "nginx", "autoscaling", "enabled") is True, "webserver autoscaling must be enabled")
 
     for section in ("accessGovernance", "complianceEvidence", "incidentResponse", "changeManagement", "cutoverGates", "smokeTesting", "releaseRunbook", "clusterUpgrade", "disasterRecovery"):
         require(errors, get(values, section, "enabled") is True, f"{section} must be enabled for production")

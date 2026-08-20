@@ -118,8 +118,16 @@ def select_profile(config: dict[str, Any], profile_name: str) -> dict[str, Any]:
     return profile
 
 
-def unique_images(values_path: Path) -> list[promotion_plan.ImageObject]:
-    images = promotion_plan.images_from_file(values_path)
+def unique_images(values_path: Path, base_values_path: Path | None = None) -> list[promotion_plan.ImageObject]:
+    if base_values_path is not None and base_values_path.is_file() and promotion_plan.yaml is not None:
+        base_values = promotion_plan.load_yaml(base_values_path)
+        overlay_values = promotion_plan.load_yaml(values_path)
+        images = promotion_plan.images_from_loaded_yaml(
+            values_path.relative_to(ROOT).as_posix() if values_path.is_relative_to(ROOT) else values_path.as_posix(),
+            promotion_plan.merge_values(base_values, overlay_values),
+        )
+    else:
+        images = promotion_plan.images_from_file(values_path)
     return sorted({(image.source, image.path, image.reference): image for image in images}.values(), key=lambda item: (item.source, item.path))
 
 
@@ -239,6 +247,7 @@ def generate_report(
         f"- Credential source: `{args.credential_source}`",
         f"- Image pull secret: `{args.image_pull_secret or controller.get('pullSecretName', 'registry-credentials')}`",
         f"- Values file: `{args.values}`",
+        f"- Base values file: `{args.base_values or '-'}`",
         f"- Policy file: `{args.policy}`",
         f"- Images discovered: `{counts['images']}`",
         f"- Missing digest pins: `{counts['missing_digest']}`",
@@ -312,6 +321,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate a public-safe registry promotion controller plan.")
     parser.add_argument("--config", default="config/registry-promotion.yaml")
     parser.add_argument("--values", default="helm/urban-platform-infra/values.yaml")
+    parser.add_argument("--base-values", default="")
     parser.add_argument("--policy", default="config/image-policy.yaml")
     parser.add_argument("--profile", default="")
     parser.add_argument("--registry", default="")
@@ -325,22 +335,28 @@ def main(argv: list[str] | None = None) -> int:
 
     config_path = Path(args.config)
     values_path = Path(args.values)
+    base_values_path = Path(args.base_values) if args.base_values else None
     policy_path = Path(args.policy)
     output_path = Path(args.output)
     overrides_path = Path(args.overrides)
     for name, path in {
         "config": config_path,
         "values": values_path,
+        "base_values": base_values_path,
         "policy": policy_path,
         "output": output_path,
         "overrides": overrides_path,
     }.items():
+        if path is None:
+            continue
         if not path.is_absolute():
             resolved = (ROOT / path).resolve()
             if name == "config":
                 config_path = resolved
             elif name == "values":
                 values_path = resolved
+            elif name == "base_values":
+                base_values_path = resolved
             elif name == "policy":
                 policy_path = resolved
             elif name == "output":
@@ -352,12 +368,19 @@ def main(argv: list[str] | None = None) -> int:
     profile_name = args.profile or str(config.get("defaultProfile", "disabled"))
     args.profile = profile_name
     profile = select_profile(config, profile_name)
+    if (
+        base_values_path is None
+        and profile_name in {"production", "production-registry", "enterprise-signed"}
+        and values_path != (ROOT / "helm/urban-platform-infra/values.yaml").resolve()
+    ):
+        base_values_path = (ROOT / "helm/urban-platform-infra/values.yaml").resolve()
+    args.base_values = base_values_path.as_posix() if base_values_path is not None else ""
     controller = config.get("controller", {}) if isinstance(config.get("controller", {}), dict) else {}
     args.credential_source = args.credential_source or str(profile.get("credentialSource", "none"))
     args.image_pull_secret = args.image_pull_secret or str(controller.get("pullSecretName", "registry-credentials"))
 
     policy, blocked, approved, default_tag = policy_sets(policy_path)
-    images = unique_images(values_path)
+    images = unique_images(values_path, base_values_path)
     mutable = [image for image in images if promotion_plan.is_mutable_tag(image.tag, blocked)]
     missing_digest = [image for image in images if not image.digest]
     placeholders = [image for image in images if image.repository.startswith("example-app-") and image.tag == default_tag]

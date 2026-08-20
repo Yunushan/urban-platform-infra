@@ -12,6 +12,7 @@ global:
   scheduling:
     topologySpread: true
     antiAffinity: required
+    topologySpreadWhenUnsatisfiable: DoNotSchedule
   resourceDefaults:
     requests:
       cpu: 100m
@@ -364,7 +365,7 @@ namespace:
       requests.memory: 32Gi
       limits.cpu: '20'
       limits.memory: 40Gi
-      requests.storage: 500Gi
+      requests.storage: 2Ti
       persistentvolumeclaims: '100'
       pods: '300'
 
@@ -388,7 +389,7 @@ backup:
   profile: production
   velero:
     enabled: true
-    installOperator: false
+    installOperator: true
     provider: aws
     bucket: urban-platform-production-backups
     prefix: urban-platform
@@ -434,11 +435,56 @@ secretManagement:
   externalSecrets:
     registryCredentials:
       enabled: true
+    databaseBackupCredentials:
+      enabled: true
+      targetName: production-backup-credentials
+      namespace: urban-platform
+      type: Opaque
+      creationPolicy: Owner
+      immutable: false
+      data:
+        - secretKey: accessKeyId
+          remoteRef:
+            key: example/urban-platform/backup/access-key-id
+        - secretKey: secretAccessKey
+          remoteRef:
+            key: example/urban-platform/backup/secret-access-key
+    veleroBackupCredentials:
+      enabled: true
+      targetName: production-backup-credentials
+      namespace: velero
+      type: Opaque
+      creationPolicy: Owner
+      immutable: false
+      data:
+        - secretKey: cloud
+          remoteRef:
+            key: example/urban-platform/backup/velero-cloud
     ingressTls:
       enabled: true
 
 autoscaling:
   enabled: true
+
+observability:
+  profile: production
+  prometheus:
+    enabled: true
+  grafana:
+    enabled: true
+
+monitoring:
+  enabled: true
+  prometheusRules:
+    enabled: true
+  serviceMonitors:
+    enabled: false
+
+webserver:
+  providers:
+    nginx:
+      autoscaling:
+        enabled: true
 
 messaging:
   kafka:
@@ -478,3 +524,23 @@ messaging:
 
 databases:
   defaultInstances: 3
+  storageOverride:
+    size: 20Gi
+    className: production-durable
+  backup:
+    enabled: true
+    retentionPolicy: 30d
+    compression: gzip
+    objectStore:
+      enabled: true
+      provider: s3-compatible
+      bucket: urban-platform-production-backups
+      prefix: urban-platform/databases
+      secretRef:
+        name: production-backup-credentials
+        namespace: urban-platform
+        accessKeyIdKey: accessKeyId
+        secretAccessKeyKey: secretAccessKey
+    schedule:
+      enabled: true
+      cron: "0 0 */6 * * *"

@@ -79,6 +79,15 @@ spec:
         {{- end }}
       {{- end }}
       {{- end }}
+      {{- if .Values.global.scheduling.topologySpread }}
+      topologySpreadConstraints:
+        {{- include "cip.topologySpreadConstraints" (list . "redis") | nindent 8 }}
+      {{- end }}
+      {{- if ne (.Values.global.scheduling.antiAffinity | default "preferred") "disabled" }}
+      affinity:
+        podAntiAffinity:
+          {{- include "cip.podAntiAffinity" (list . "redis") | nindent 10 }}
+      {{- end }}
       containers:
         - name: redis
           image: {{ include "cip.image" (list . .Values.messaging.redis.image) | quote }}
@@ -154,6 +163,22 @@ spec:
         resources:
           requests:
             storage: {{ .Values.messaging.redis.storage.size | default "10Gi" }}
+{{- if and (eq (.Values.global.environment | default "") "production") (gt $redisReplicas 1) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+    app.kubernetes.io/name: redis
+spec:
+  minAvailable: {{ max 1 (sub $redisReplicas 1) }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+{{- end }}
 ---
 apiVersion: v1
 kind: Service

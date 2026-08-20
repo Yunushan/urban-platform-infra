@@ -23,6 +23,16 @@ api_version_timeout="${HELMFILE_API_VERSION_TIMEOUT:-15s}"
 api_openapi_timeout="${HELMFILE_API_OPENAPI_TIMEOUT:-60s}"
 migration_cluster_vip="${MIGRATION_CLUSTER_VIP:-${DEPLOY_CLUSTER_VIP:-}}"
 
+# Production installs must reconcile External Secrets unless the caller explicitly
+# disables it. This keeps `make deploy ENV=prod` aligned with the production values
+# without requiring operators to remember an extra Helmfile environment flag.
+if [ -z "${INSTALL_EXTERNAL_SECRETS+x}" ]; then
+  case "${ENV:-}" in
+    prod|production) export INSTALL_EXTERNAL_SECRETS=true ;;
+    *) export INSTALL_EXTERNAL_SECRETS=false ;;
+  esac
+fi
+
 if ! command -v "${helmfile_bin}" >/dev/null 2>&1; then
   echo "helmfile is required to install operators." >&2
   exit 1
