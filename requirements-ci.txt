@@ -1,4 +1,4 @@
 # Legacy CI lane: Python 3.11 with ansible-core 2.14.x.
 ansible-core==2.14.18
-PyYAML==6.0.2
-yamllint==1.35.1
+PyYAML==6.0.3
+yamllint==1.38.0
