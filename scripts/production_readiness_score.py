@@ -80,9 +80,15 @@ def documentation_check() -> Check:
         "docs/disaster-recovery.md",
         "docs/release-runbook.md",
         "docs/kafka-profiles.md",
+        "docs/database-topologies.md",
+        "docs/tool-inventory.md",
+        "docs/load-testing.md",
+        "docs/version-management.md",
         ".github/workflows/ci.yml",
         ".github/workflows/release.yml",
+        ".github/workflows/version-update.yml",
         "config/image-policy.yaml",
+        "config/version-policy.yaml",
     ]
     missing = [path for path in required if not (ROOT / path).is_file()]
     if missing:

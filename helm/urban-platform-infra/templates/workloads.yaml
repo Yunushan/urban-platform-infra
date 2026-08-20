@@ -6,6 +6,11 @@
 {{- $statefulStorageClass := include "cip.storageClassName" (list $ (dig "storage" "className" "" $svc) "hot") }}
 {{- $ingressHost := include "cip.ingressHost" $ }}
 {{- $ingressTlsSecretName := include "cip.ingressTlsSecretName" $ }}
+{{- $workloadResources := $.Values.global.resourceDefaults | default dict }}
+{{- if $svc.resources }}
+{{- $workloadResources = mergeOverwrite (deepCopy $workloadResources) $svc.resources }}
+{{- end }}
+{{- $ioCost := $.Values.global.ioCost | default dict }}
 ---
 apiVersion: apps/v1
 kind: {{ $kind }}
@@ -31,6 +36,13 @@ spec:
         app.kubernetes.io/name: {{ $name }}
         app.kubernetes.io/part-of: urban-platform-infra
         urban-platform.io/category: {{ $svc.category | default "application" | quote }}
+      annotations:
+        urban-platform.io/io-cost-enabled: {{ $ioCost.enabled | default false | quote }}
+        urban-platform.io/io-cost-measurement: {{ $ioCost.measurement | default "disabled" | quote }}
+        urban-platform.io/io-read-bps-budget: {{ $ioCost.maxReadBytesPerSecond | default 0 | quote }}
+        urban-platform.io/io-write-bps-budget: {{ $ioCost.maxWriteBytesPerSecond | default 0 | quote }}
+        urban-platform.io/io-read-iops-budget: {{ $ioCost.maxReadIops | default 0 | quote }}
+        urban-platform.io/io-write-iops-budget: {{ $ioCost.maxWriteIops | default 0 | quote }}
     spec:
       serviceAccountName: {{ include "cip.serviceAccountName" $ }}
       automountServiceAccountToken: {{ $.Values.global.serviceAccount.automountServiceAccountToken | default false }}
@@ -90,9 +102,9 @@ spec:
             initialDelaySeconds: 45
             periodSeconds: 20
           {{- end }}
-          {{- if $svc.resources }}
+          {{- if $workloadResources }}
           resources:
-            {{- toYaml $svc.resources | nindent 12 }}
+            {{- toYaml $workloadResources | nindent 12 }}
           {{- end }}
       affinity:
         podAntiAffinity:

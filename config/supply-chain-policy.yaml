@@ -1,5 +1,17 @@
 policy:
   nodeLtsMajor: 24
+  versionUpdates:
+    policyFile: config/version-policy.yaml
+    workflow: .github/workflows/version-update.yml
+    mode: approval-only
+    autoPatch: false
+    autoMinor: false
+    autoMajor: false
+    requireManualRequest: true
+    requireApprovalForApply: true
+    requirePullRequest: true
+    allowDirectProductionMutation: false
+    noAutomerge: true
   releaseIntegrity:
     requireChartVersionMatchesTag: true
     requireChecksums: true

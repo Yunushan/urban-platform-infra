@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 GITHUB_CI = ROOT / ".github/workflows/ci.yml"
 GITLAB_CI = ROOT / ".gitlab-ci.yml"
+VERSION_UPDATE_WORKFLOW = ROOT / ".github/workflows/version-update.yml"
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,7 @@ GITHUB_REQUIRED_TOKENS = {
     "python3 scripts/tools/validate_ci_contract.py": "Validate jobs must run the CI contract gate before the broader validator.",
     "python3 scripts/validate.py": "Validate jobs must run repository validation.",
     "python3 scripts/images/validate-images.py": "Validate jobs must run image policy validation.",
+    "python3 scripts/version_policy.py check --config config/version-policy.yaml": "Validate jobs must enforce the approval-only version policy.",
     "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294": "Pull requests must keep blocking dependency review coverage.",
     "python3 scripts/validate_production_profile.py": "CI must validate the production profile contract.",
     "python3 scripts/production_readiness_score.py": "CI must enforce the repository production readiness score.",
@@ -88,8 +90,16 @@ GITLAB_REQUIRED_TOKENS = {
     "python3 scripts/tools/validate_ci_contract.py": "GitLab validation must run the CI contract gate.",
     "python3 scripts/validate.py": "GitLab validation must run repository validation.",
     "python3 scripts/images/validate-images.py": "GitLab validation must run image policy validation.",
+    "python3 scripts/version_policy.py check --config config/version-policy.yaml": "GitLab validation must enforce the approval-only version policy.",
     "alpine/helm:3.19.0": "GitLab render and release jobs must use a pinned Helm image.",
     "aquasec/trivy:0.70.0": "GitLab security job must use a pinned Trivy image.",
+}
+
+VERSION_UPDATE_REQUIRED_TOKENS = {
+    "workflow_dispatch:": "Version updates must require an explicit manual workflow request.",
+    "python3 scripts/version_policy.py check --config config/version-policy.yaml": "Version workflow must validate the committed policy.",
+    "python3 scripts/version_policy.py request": "Version workflow must generate a request instead of deploying directly.",
+    "contents: read": "Version workflow must not receive repository write access.",
 }
 
 
@@ -151,11 +161,18 @@ def check_action_refs(text: str) -> list[Finding]:
 def collect_findings() -> list[Finding]:
     github_text = read_text(GITHUB_CI)
     gitlab_text = read_text(GITLAB_CI)
+    version_update_text = read_text(VERSION_UPDATE_WORKFLOW)
     findings: list[Finding] = []
     findings.extend(check_tokens("GitHub CI", github_text, GITHUB_REQUIRED_TOKENS))
     findings.extend(check_lanes("GitHub static matrix", github_text, STATIC_LANES))
     findings.extend(check_lanes("GitHub validate matrix", github_text, VALIDATE_LANES))
     findings.extend(check_action_refs(github_text))
+    findings.extend(check_tokens("Version update workflow", version_update_text, VERSION_UPDATE_REQUIRED_TOKENS))
+    findings.extend(check_action_refs(version_update_text))
+    if "helm upgrade" in version_update_text or "kubectl apply" in version_update_text:
+        findings.append(Finding("ERROR", "Version update workflow", "Version request workflow must not deploy to a cluster."))
+    else:
+        findings.append(Finding("OK", "Version update workflow", "Manual workflow only generates review evidence."))
     findings.extend(check_tokens("GitLab CI", gitlab_text, GITLAB_REQUIRED_TOKENS))
     if "pip install pyyaml" in gitlab_text.lower():
         findings.append(

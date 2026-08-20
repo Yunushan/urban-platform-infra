@@ -209,7 +209,7 @@ YAML_SKIP = {
 }
 REQUIRED = [
     'README.md', 'LICENSE', '.github/workflows/ci.yml', '.gitlab-ci.yml',
-    '.github/workflows/release.yml', '.github/dependabot.yml', '.pre-commit-config.yaml',
+    '.github/workflows/release.yml', '.github/workflows/version-update.yml', '.github/dependabot.yml', '.pre-commit-config.yaml',
     'requirements-ci.txt', 'requirements-ci-modern.txt',
     '.env.standalone.example', 'compose/docker-compose.standalone.yml',
     'scripts/tools/setup_local.py', 'scripts/tools/doctor_local.py',
@@ -250,7 +250,8 @@ REQUIRED = [
     'config/database-migration.yaml',
     'config/edge-migration.yaml',
     'config/environment-profiles.yaml',
-    'config/supply-chain-policy.yaml', 'config/image-policy.yaml', 'config/slo.yaml',
+    'config/tooling.yaml', 'config/load-test.yaml',
+    'config/supply-chain-policy.yaml', 'config/version-policy.yaml', 'config/image-policy.yaml', 'config/slo.yaml',
     'scripts/images/validate-images.py', 'scripts/images/promotion_plan.py',
     'scripts/images/registry_promotion_controller.py',
     'scripts/runtime_hardening_plan.py',
@@ -279,6 +280,7 @@ REQUIRED = [
     'scripts/database_migration_controller.py',
     'scripts/edge_migration_plan.py',
     'scripts/environment_profile_plan.py',
+    'scripts/load_test.py', 'scripts/version_policy.py', 'scripts/tools/tool_inventory.py',
     'scripts/production_readiness_score.py',
     'scripts/validate_production_profile.py',
     'scripts/import_project.py',
@@ -290,7 +292,7 @@ REQUIRED = [
     'scripts/tools/install-local-path-storage.sh', 'scripts/tools/recover-helm-release.sh',
     'scripts/tools/ensure-kubeconfig.sh', 'scripts/tools/standalone-docker-config.sh',
     'tests/policy/basic_policy.py', 'docs/hld.md', 'docs/lld.md',
-    'docs/local-toolchain.md', 'docs/ci-validation.md',
+    'docs/local-toolchain.md', 'docs/tool-inventory.md', 'docs/load-testing.md', 'docs/version-management.md', 'docs/database-topologies.md', 'docs/ci-validation.md',
     'docs/operator-workflows.md',
     'docs/bootstrap-safety.md', 'docs/secrets-management.md',
     'docs/secret-provider-adapters.md',
@@ -874,6 +876,75 @@ if database_backup_values.get('objectStore', {}).get('enabled') is not False:
     errors.append('CloudNativePG object-store backups must be disabled by default')
 if database_backup_values.get('schedule', {}).get('enabled') is not False:
     errors.append('CloudNativePG scheduled backups must be disabled by default')
+
+resource_defaults = values.get('global', {}).get('resourceDefaults', {})
+if not isinstance(resource_defaults, dict):
+    errors.append('global.resourceDefaults must be a mapping')
+else:
+    for resource_group in ['requests', 'limits']:
+        group = resource_defaults.get(resource_group, {})
+        if not isinstance(group, dict):
+            errors.append(f'global.resourceDefaults.{resource_group} must be a mapping')
+            continue
+        for resource_name in ['cpu', 'memory', 'ephemeral-storage']:
+            if not str(group.get(resource_name, '')).strip():
+                errors.append(f'global.resourceDefaults.{resource_group}.{resource_name} must be set')
+
+io_cost = values.get('global', {}).get('ioCost', {})
+if not isinstance(io_cost, dict):
+    errors.append('global.ioCost must be a mapping')
+else:
+    if io_cost.get('measurement') not in {'cgroup-v2', 'procfs', 'disabled'}:
+        errors.append('global.ioCost.measurement must be cgroup-v2, procfs, or disabled')
+    try:
+        sample_interval = int(io_cost.get('sampleIntervalSeconds', 0) or 0)
+    except (TypeError, ValueError):
+        sample_interval = 0
+    if sample_interval < 1:
+        errors.append('global.ioCost.sampleIntervalSeconds must be at least one')
+    for io_budget_name in ['maxReadBytesPerSecond', 'maxWriteBytesPerSecond', 'maxReadIops', 'maxWriteIops']:
+        try:
+            if int(io_cost.get(io_budget_name, 0) or 0) < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            errors.append(f'global.ioCost.{io_budget_name} must be a non-negative integer')
+
+tooling_contract = safe_load((ROOT / 'config/tooling.yaml').read_text(encoding='utf-8'))
+tooling_scopes = tooling_contract.get('scopes', {})
+tooling_tools = tooling_contract.get('tools', {})
+if not isinstance(tooling_scopes, dict) or not isinstance(tooling_tools, dict):
+    errors.append('Tooling contract must define scopes and tools mappings')
+else:
+    for scope_name, scope in tooling_scopes.items():
+        if scope_name == 'all' or not isinstance(scope, dict):
+            continue
+        for requirement_type in ['mandatory', 'optional']:
+            for tool_name in scope.get(requirement_type, []) or []:
+                if tool_name not in tooling_tools:
+                    errors.append(f'Tooling scope {scope_name} references unknown tool: {tool_name}')
+    for tool_name, tool in tooling_tools.items():
+        if not isinstance(tool, dict) or not tool.get('commands') and not tool.get('alternatives'):
+            errors.append(f'Tooling contract tool must define commands or alternatives: {tool_name}')
+
+load_test_contract = safe_load((ROOT / 'config/load-test.yaml').read_text(encoding='utf-8'))
+load_test_profiles = load_test_contract.get('profiles', {})
+if not isinstance(load_test_profiles, dict) or not {'smoke', 'baseline', 'stress'}.issubset(load_test_profiles):
+    errors.append('Load-test contract must define smoke, baseline, and stress profiles')
+load_test_defaults = load_test_contract.get('defaults', {})
+if not isinstance(load_test_defaults, dict):
+    errors.append('Load-test contract defaults must be a mapping')
+else:
+    for load_test_key in ['durationSeconds', 'concurrency', 'maxRequests', 'timeoutSeconds', 'sampleIntervalSeconds']:
+        try:
+            if int(load_test_defaults.get(load_test_key, 0) or 0) < 1:
+                raise ValueError
+        except (TypeError, ValueError):
+            errors.append(f'Load-test default must define a positive {load_test_key}')
+    if load_test_defaults.get('method') not in {'GET', 'HEAD', 'OPTIONS'}:
+        errors.append('Load-test default method must be GET, HEAD, or OPTIONS')
+    load_test_io = load_test_defaults.get('io', {})
+    if not isinstance(load_test_io, dict) or load_test_io.get('enabled') is not True:
+        errors.append('Load-test I/O measurement must be enabled by default')
 platform_capability_values = values.get('platformCapabilities', {})
 if platform_capability_values.get('enabled') is not False:
     errors.append('Optional platform capabilities must be disabled by default')
@@ -1052,6 +1123,7 @@ for dependabot_token in [
     'dependency-name: "ansible-core"',
     'version-update:semver-major',
     'version-update:semver-minor',
+    'version-update:approval-required',
     'requirements-ci.txt intentionally backs the legacy Python 3.11',
 ]:
     if dependabot_token not in dependabot_text:
@@ -1445,6 +1517,15 @@ for makefile_helm_token in [
     'MIGRATION_SERVICE_FILTER ?=',
     'MIGRATION_RUNTIME_VALIDATION_TIMEOUT ?=',
     'MIGRATION_RUNTIME_VALIDATION_INTERVAL ?=',
+    'DEPLOY_CPU_REQUEST ?',
+    'DEPLOY_MEMORY_LIMIT ?',
+    'DEPLOY_IO_READ_BPS ?',
+    'LOAD_TEST_EXECUTE ?',
+    'load-test-plan:',
+    'tool-inventory:',
+    '$(MAKE) tool-inventory TOOL_INVENTORY_SCOPE=validation',
+    'global.resourceDefaults.requests.cpu',
+    'global.ioCost.measurement',
     'MIGRATION_STATE_FILE ?=',
     'MIGRATION_RESUME ?= true',
     'MIGRATION_FORCE_RERUN ?= false',
@@ -4095,6 +4176,71 @@ supply_chain_policy = safe_load((ROOT / 'config/supply-chain-policy.yaml').read_
 policy = supply_chain_policy.get('policy', {})
 if policy.get('nodeLtsMajor') != 24:
     errors.append('Supply-chain policy must require Node 24 LTS for Node-based workflow tooling')
+version_policy = safe_load((ROOT / 'config/version-policy.yaml').read_text(encoding='utf-8'))
+version_update_policy = version_policy.get('updatePolicy', {})
+for version_policy_flag in ['autoPatch', 'autoMinor', 'autoMajor', 'allowDirectProductionMutation']:
+    if version_update_policy.get(version_policy_flag) is not False:
+        errors.append(f'Version policy must keep {version_policy_flag}=false')
+for version_policy_flag in [
+    'requireManualRequest', 'requireApprovalForApply', 'requirePullRequest',
+    'requireCi', 'requireChangeTicket', 'requireRollbackPlan',
+    'requirePinnedVersion', 'rejectEol', 'rejectObsolete', 'productionApproval',
+]:
+    if version_update_policy.get(version_policy_flag) is not True:
+        errors.append(f'Version policy must require {version_policy_flag}=true')
+if version_update_policy.get('mode') != 'approval-only':
+    errors.append('Version policy must use approval-only mode')
+version_channels = version_policy.get('channels', {})
+for required_channel in ['lts', 'stable', 'mainline', 'edge']:
+    if required_channel not in version_channels:
+        errors.append(f'Version policy missing lifecycle channel: {required_channel}')
+version_components = version_policy.get('components', {})
+if not isinstance(version_components, dict) or not version_components:
+    errors.append('Version policy must define versioned components')
+else:
+    valid_lifecycle_statuses = {'supported', 'maintenance', 'externally-managed', 'obsolete', 'eol', 'unknown'}
+    for component_name, component in version_components.items():
+        if not isinstance(component, dict):
+            errors.append(f'Version policy component must be a mapping: {component_name}')
+            continue
+        lifecycle = component.get('lifecycle', {})
+        status = lifecycle.get('status') if isinstance(lifecycle, dict) else None
+        if status not in valid_lifecycle_statuses:
+            errors.append(f'Version policy component has invalid lifecycle status: {component_name}')
+        if component_name != 'rke2' and not component.get('currentVersion'):
+            errors.append(f'Version policy component must have a pinned version: {component_name}')
+        if not component.get('source') or not component.get('sourceFiles'):
+            errors.append(f'Version policy component must declare source and sourceFiles: {component_name}')
+version_updates = policy.get('versionUpdates', {})
+for version_update_key, expected_value in {
+    'policyFile': 'config/version-policy.yaml',
+    'workflow': '.github/workflows/version-update.yml',
+    'mode': 'approval-only',
+}.items():
+    if version_updates.get(version_update_key) != expected_value:
+        errors.append(f'Supply-chain version update control must set {version_update_key}={expected_value}')
+for version_update_key, expected_value in {
+    'autoPatch': False,
+    'autoMinor': False,
+    'autoMajor': False,
+    'allowDirectProductionMutation': False,
+    'noAutomerge': True,
+}.items():
+    if version_updates.get(version_update_key) != expected_value:
+        errors.append(f'Supply-chain version update control has unsafe {version_update_key}')
+renovate_text = (ROOT / 'renovate.json').read_text(encoding='utf-8')
+for renovate_token in ['"automerge": false', '"platformAutomerge": false', '"rangeStrategy": "pin"']:
+    if renovate_token not in renovate_text:
+        errors.append(f'Renovate must keep approval-only update control: {renovate_token}')
+version_workflow_text = (ROOT / '.github/workflows/version-update.yml').read_text(encoding='utf-8')
+for version_workflow_token in [
+    'workflow_dispatch:',
+    'python3 scripts/version_policy.py check --config config/version-policy.yaml',
+    'python3 scripts/version_policy.py request',
+    'contents: read',
+]:
+    if version_workflow_token not in version_workflow_text:
+        errors.append(f'Version update workflow missing manual-only control: {version_workflow_token}')
 release_integrity = policy.get('releaseIntegrity', {})
 for control in [
     'requireChartVersionMatchesTag',

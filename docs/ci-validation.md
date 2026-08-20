@@ -32,6 +32,7 @@ The optional report is written to `reports/ci-contract.md` and is safe to share.
 - `render`: Helm lint, Helm template rendering, rendered-manifest policy checks, and rendered manifest artifact upload.
 - `production-contract`: production overlay validation, strict production rendering, and rendered-manifest policy checks.
 - `security`: Trivy filesystem scan that fails on unresolved HIGH or CRITICAL findings.
+- `version-update-request`: manually dispatched, read-only version request evidence; it has no repository write or cluster deployment permission.
 
 ## Local Equivalent
 
@@ -53,6 +54,11 @@ helm template urban-platform-infra helm/urban-platform-infra \
 ```
 
 `make validate` also runs the CI contract gate before the repository validator. `make lint` uses the repository virtualenv tools when they exist, so local results match CI more closely.
+
+The version lifecycle gate is intentionally fail-closed: `autoPatch`,
+`autoMinor`, and `autoMajor` must remain false. Review
+[`version-management.md`](version-management.md) for the manual request and
+approval workflow.
 
 ## When A Lane Fails
 

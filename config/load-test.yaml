@@ -1,0 +1,55 @@
+version: 1
+description: Public-safe controlled HTTP load-test profiles and resource/I/O measurement defaults.
+defaults:
+  targetUrl: https://platform.example.invalid
+  path: /healthz
+  method: GET
+  durationSeconds: 60
+  concurrency: 10
+  ratePerSecond: 10
+  maxRequests: 10000
+  timeoutSeconds: 10
+  expectedStatus:
+  - 200
+  - 204
+  sampleIntervalSeconds: 5
+  io:
+    enabled: true
+    measurement: cgroup-v2
+    maxReadBytesPerSecond: 0
+    maxWriteBytesPerSecond: 0
+    maxReadIops: 0
+    maxWriteIops: 0
+  resourceBudget:
+    cpuLimit: 500m
+    memoryLimit: 512Mi
+profiles:
+  smoke:
+    description: Short low-rate endpoint check for deployment validation.
+    durationSeconds: 30
+    concurrency: 5
+    ratePerSecond: 2
+    maxRequests: 500
+  baseline:
+    description: Sustained representative traffic profile for capacity evidence.
+    durationSeconds: 300
+    concurrency: 25
+    ratePerSecond: 25
+    maxRequests: 10000
+  stress:
+    description: Explicitly approved saturation profile; review capacity and rollback first.
+    durationSeconds: 600
+    concurrency: 100
+    ratePerSecond: 100
+    maxRequests: 60000
+tools:
+  nativePython:
+    enabled: true
+    name: python-stdlib
+  k6:
+    enabled: false
+    command: k6
+notes:
+- The native runner is intentionally dependency-light and records HTTP latency, status, CPU, memory, and cgroup I/O counters when Kubernetes access permits.
+- A zero I/O budget means measure only; it does not mean unlimited storage capacity.
+- Run stress profiles only against an approved test environment or maintenance window.

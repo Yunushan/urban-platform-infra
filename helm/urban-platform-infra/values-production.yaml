@@ -12,6 +12,24 @@ global:
   scheduling:
     topologySpread: true
     antiAffinity: required
+  resourceDefaults:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+      ephemeral-storage: 512Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
+      ephemeral-storage: 2Gi
+  ioCost:
+    enabled: true
+    measurement: cgroup-v2
+    sampleIntervalSeconds: 5
+    maxReadBytesPerSecond: 0
+    maxWriteBytesPerSecond: 0
+    maxReadIops: 0
+    maxWriteIops: 0
+
   security:
     runAsNonRoot: true
     readOnlyRootFilesystem: false
@@ -325,6 +343,15 @@ disasterRecovery:
     requirePostDrillReview: true
 
 namespace:
+  limitRange:
+    default:
+      cpu: 1
+      memory: 1Gi
+      ephemeral-storage: 2Gi
+    defaultRequest:
+      cpu: 100m
+      memory: 256Mi
+      ephemeral-storage: 512Mi
   podSecurity:
     enforce: restricted
     audit: restricted

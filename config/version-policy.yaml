@@ -1,0 +1,139 @@
+version: 1
+description: Public-safe lifecycle and version-update policy for platform dependencies and runtime images.
+updatePolicy:
+  channel: stable
+  mode: approval-only
+  autoPatch: false
+  autoMinor: false
+  autoMajor: false
+  requireManualRequest: true
+  requireApprovalForApply: true
+  requirePullRequest: true
+  requireCi: true
+  requireChangeTicket: true
+  requireRollbackPlan: true
+  requirePinnedVersion: true
+  rejectEol: true
+  rejectObsolete: true
+  productionApproval: true
+  allowDirectProductionMutation: false
+channels:
+  lts:
+    description: Long-term-support line; approved patch updates only.
+    allowedUpdateTypes:
+      - patch
+  stable:
+    description: Supported stable line; approved patch or minor updates.
+    allowedUpdateTypes:
+      - patch
+      - minor
+  mainline:
+    description: Current upstream line; every update requires an approved request.
+    allowedUpdateTypes:
+      - patch
+      - minor
+      - major
+  edge:
+    description: Preview line for explicitly approved evaluation environments.
+    allowedUpdateTypes:
+      - patch
+      - minor
+      - major
+components:
+  helm:
+    currentVersion: 4.2.1
+    channel: stable
+    lifecycle:
+      status: supported
+      lastReviewed: '2026-08-20'
+    source: https://github.com/helm/helm/releases
+    sourceFiles:
+      - scripts/tools/install-helm.sh
+  helmfile:
+    currentVersion: 1.5.3
+    channel: stable
+    lifecycle:
+      status: supported
+      lastReviewed: '2026-08-20'
+    source: https://github.com/helmfile/helmfile/releases
+    sourceFiles:
+      - scripts/tools/install-helmfile.sh
+  nginx:
+    currentVersion: 1.30.2
+    channel: stable
+    lifecycle:
+      status: supported
+      lastReviewed: '2026-08-20'
+    source: https://hub.docker.com/r/nginxinc/nginx-unprivileged/tags
+    sourceFiles:
+      - helm/urban-platform-infra/values.yaml
+      - config/image-policy.yaml
+  postgresql:
+    currentVersion: 18.3
+    channel: stable
+    lifecycle:
+      status: supported
+      lastReviewed: '2026-08-20'
+    source: https://hub.docker.com/_/postgres/tags
+    sourceFiles:
+      - helm/urban-platform-infra/values.yaml
+      - config/databases.catalog.yaml
+      - config/image-policy.yaml
+  apache-kafka:
+    currentVersion: 4.2.0
+    channel: stable
+    lifecycle:
+      status: supported
+      lastReviewed: '2026-08-20'
+    source: https://kafka.apache.org/downloads
+    sourceFiles:
+      - helm/urban-platform-infra/values.yaml
+      - config/image-policy.yaml
+  strimzi-operator:
+    currentVersion: 1.0.0
+    channel: stable
+    lifecycle:
+      status: supported
+      lastReviewed: '2026-08-20'
+    source: https://github.com/strimzi/strimzi-kafka-operator/releases
+    sourceFiles:
+      - scripts/tools/install-strimzi.sh
+      - Makefile
+  dotnet:
+    currentVersion: 10.0.9
+    channel: lts
+    lifecycle:
+      status: supported
+      lastReviewed: '2026-08-20'
+    source: https://dotnet.microsoft.com/platform/support/policy/dotnet-core
+    sourceFiles:
+      - scripts/migrate_project.py
+      - Makefile
+  rke2:
+    currentVersion: ''
+    channel: stable
+    source: https://docs.rke2.io/release_notes/
+    lifecycle:
+      status: externally-managed
+      lastReviewed: '2026-08-20'
+      source: https://docs.rke2.io/release_notes/
+    sourceFilesOptional: true
+    sourceFiles:
+      - inventories/prod/hosts.yml
+lifecycle:
+  statuses:
+    - supported
+    - maintenance
+    - externally-managed
+    - obsolete
+    - eol
+    - unknown
+  defaultStatus: unknown
+  reviewSource: https://endoflife.date/
+  reviewCadence: monthly
+  policy:
+    eolOrObsoleteBlocksApply: true
+    unknownLifecycleWarns: true
+    missingLifecycleBlocksApply: true
+    requireFreshReview: true
+    reviewMaxAgeDays: 31

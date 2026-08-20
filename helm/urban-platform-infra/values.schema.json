@@ -172,6 +172,80 @@
             "enabled"
           ]
         },
+        "resourceDefaults": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requests": {
+              "$ref": "#/$defs/resourceList"
+            },
+            "limits": {
+              "$ref": "#/$defs/resourceList"
+            }
+          },
+          "required": [
+            "requests",
+            "limits"
+          ]
+        },
+        "ioCost": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "measurement": {
+              "type": "string",
+              "enum": [
+                "cgroup-v2",
+                "procfs",
+                "disabled"
+              ]
+            },
+            "sampleIntervalSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxReadBytesPerSecond": {
+              "type": [
+                "string",
+                "integer",
+                "number"
+              ],
+              "pattern": "^[0-9]+$"
+            },
+            "maxWriteBytesPerSecond": {
+              "type": [
+                "string",
+                "integer",
+                "number"
+              ],
+              "pattern": "^[0-9]+$"
+            },
+            "maxReadIops": {
+              "type": [
+                "string",
+                "integer",
+                "number"
+              ],
+              "pattern": "^[0-9]+$"
+            },
+            "maxWriteIops": {
+              "type": [
+                "string",
+                "integer",
+                "number"
+              ],
+              "pattern": "^[0-9]+$"
+            }
+          },
+          "required": [
+            "enabled",
+            "measurement",
+            "sampleIntervalSeconds"
+          ]
+        },
         "scheduling": {
           "type": "object",
           "additionalProperties": false,
@@ -201,6 +275,8 @@
         "defaultReplicas",
         "serviceAccount",
         "security",
+        "resourceDefaults",
+        "ioCost",
         "scheduling"
       ]
     },

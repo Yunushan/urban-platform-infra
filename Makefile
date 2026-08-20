@@ -6,6 +6,18 @@ INGRESS ?= traefik
 WEB ?= nginx
 DB ?= postgresql
 DATABASE_TOPOLOGY ?= per-service
+DEPLOY_CPU_REQUEST ?= 50m
+DEPLOY_MEMORY_REQUEST ?= 128Mi
+DEPLOY_CPU_LIMIT ?= 500m
+DEPLOY_MEMORY_LIMIT ?= 512Mi
+DEPLOY_EPHEMERAL_STORAGE_REQUEST ?= 256Mi
+DEPLOY_EPHEMERAL_STORAGE_LIMIT ?= 1Gi
+DEPLOY_IO_COST_ENABLED ?= true
+DEPLOY_IO_MEASUREMENT ?= cgroup-v2
+DEPLOY_IO_READ_BPS ?= 0
+DEPLOY_IO_WRITE_BPS ?= 0
+DEPLOY_IO_READ_IOPS ?= 0
+DEPLOY_IO_WRITE_IOPS ?= 0
 OBS ?= disabled
 NAMESPACE ?= urban-platform
 VALUES ?= helm/urban-platform-infra/values.yaml
@@ -297,6 +309,46 @@ SMOKE_TEST_OUTPUT ?= reports/smoke-test-plan.md
 SMOKE_TEST_VALUES ?= reports/smoke-test-values.yaml
 SMOKE_TEST_EVIDENCE ?=
 SMOKE_TEST_EXECUTE ?= false
+LOAD_TEST_CONFIG ?= config/load-test.yaml
+LOAD_TEST_PROFILE ?= smoke
+LOAD_TEST_TARGET_URL ?=
+LOAD_TEST_NAMESPACE ?= $(MIGRATION_NAMESPACE)
+LOAD_TEST_SELECTOR ?= app.kubernetes.io/part-of=urban-platform-infra
+LOAD_TEST_METHOD ?=
+LOAD_TEST_PATH ?=
+LOAD_TEST_DURATION ?=
+LOAD_TEST_CONCURRENCY ?=
+LOAD_TEST_RATE ?=
+LOAD_TEST_MAX_REQUESTS ?=
+LOAD_TEST_TIMEOUT ?=
+LOAD_TEST_SAMPLE_INTERVAL ?=
+LOAD_TEST_RUNNER ?= auto
+LOAD_TEST_IO_ENABLED ?=
+LOAD_TEST_CPU_LIMIT ?=
+LOAD_TEST_MEMORY_LIMIT ?=
+LOAD_TEST_IO_READ_BPS ?=
+LOAD_TEST_IO_WRITE_BPS ?=
+LOAD_TEST_IO_READ_IOPS ?=
+LOAD_TEST_IO_WRITE_IOPS ?=
+LOAD_TEST_OUTPUT ?= reports/load-test.md
+LOAD_TEST_EVIDENCE ?=
+LOAD_TEST_EXECUTE ?= false
+TOOL_INVENTORY_CONFIG ?= config/tooling.yaml
+TOOL_INVENTORY_OUTPUT ?= reports/tool-inventory.md
+TOOL_INVENTORY_SCOPE ?= all
+VERSION_POLICY_CONFIG ?= config/version-policy.yaml
+VERSION_POLICY_OUTPUT ?= reports/version-policy.md
+VERSION_UPDATE_COMPONENT ?=
+VERSION_UPDATE_CURRENT ?=
+VERSION_UPDATE_TARGET ?=
+VERSION_UPDATE_CHANNEL ?=
+VERSION_UPDATE_MANUAL_REQUEST ?= false
+VERSION_UPDATE_APPROVAL_REFERENCE ?=
+VERSION_UPDATE_CHANGE_TICKET ?=
+VERSION_UPDATE_ROLLBACK_PLAN ?=
+VERSION_UPDATE_OUTPUT ?= reports/version-update-request.md
+VERSION_UPDATE_EXECUTE ?= false
+VERSION_UPDATE_APPROVED ?= false
 RELEASE_RUNBOOK_CONFIG ?= config/release-runbook.yaml
 RELEASE_RUNBOOK_PROFILE ?=
 RELEASE_RUNBOOK_TAG ?= $(RELEASE_TAG)
@@ -470,11 +522,29 @@ DISASTER_RECOVERY_POST_DRILL_REVIEW ?= false
 DISASTER_RECOVERY_OUTPUT ?= reports/disaster-recovery-plan.md
 DISASTER_RECOVERY_VALUES ?= reports/disaster-recovery-values.yaml
 
-.PHONY: help setup-local doctor-local ci-contract private-data-audit operator-ready validate production-readiness image-policy image-promotion-plan registry-promotion-plan runtime-hardening-plan gitops-delivery-plan progressive-delivery-plan scaling-policy-plan network-connectivity-plan access-governance-plan compliance-evidence-plan incident-response-plan change-management-plan cutover-gate-plan smoke-test-plan release-runbook-plan cluster-upgrade-plan disaster-recovery-plan lint configure backup-plan observability-plan cluster-doctor cluster-repair lab-deploy-plan capacity-preflight image-cache-plan database-migration-plan edge-migration-plan environment-profile-plan import-check import-plan import-preflight import-recovery-plan import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig configure-edge-ports install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace recover-helm-release deploy deploy-auto deploy-strimzi-kafka deploy-dry-run package-chart release-evidence verify-release-evidence status observability-status docker-up docker-down docker-status docker-standalone-config docker-standalone-up docker-standalone-down docker-standalone-status policy clean
+.PHONY: help setup-local doctor-local ci-contract private-data-audit operator-ready tool-inventory version-policy-check version-update-plan version-update-request version-update-apply validate production-readiness image-policy image-promotion-plan registry-promotion-plan runtime-hardening-plan gitops-delivery-plan progressive-delivery-plan scaling-policy-plan network-connectivity-plan access-governance-plan compliance-evidence-plan incident-response-plan change-management-plan cutover-gate-plan smoke-test-plan load-test-plan load-test release-runbook-plan cluster-upgrade-plan disaster-recovery-plan lint configure backup-plan observability-plan cluster-doctor cluster-repair lab-deploy-plan capacity-preflight image-cache-plan database-migration-plan edge-migration-plan environment-profile-plan import-check import-plan import-preflight import-recovery-plan import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig configure-edge-ports install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace recover-helm-release deploy deploy-auto deploy-strimzi-kafka deploy-dry-run package-chart release-evidence verify-release-evidence status observability-status docker-up docker-down docker-status docker-standalone-config docker-standalone-up docker-standalone-down docker-standalone-status policy clean
 
 HELM_DEPLOY_SET_ARGS = \
 	--set namespace.create=false \
 	--set databases.topology.mode=$(DATABASE_TOPOLOGY) \
+	--set-string global.resourceDefaults.requests.cpu=$(DEPLOY_CPU_REQUEST) \
+	--set-string global.resourceDefaults.requests.memory=$(DEPLOY_MEMORY_REQUEST) \
+	--set-string global.resourceDefaults.requests.ephemeral-storage=$(DEPLOY_EPHEMERAL_STORAGE_REQUEST) \
+	--set-string global.resourceDefaults.limits.cpu=$(DEPLOY_CPU_LIMIT) \
+	--set-string global.resourceDefaults.limits.memory=$(DEPLOY_MEMORY_LIMIT) \
+	--set-string global.resourceDefaults.limits.ephemeral-storage=$(DEPLOY_EPHEMERAL_STORAGE_LIMIT) \
+	--set global.ioCost.enabled=$(DEPLOY_IO_COST_ENABLED) \
+	--set-string global.ioCost.measurement=$(DEPLOY_IO_MEASUREMENT) \
+	--set-string global.ioCost.maxReadBytesPerSecond=$(DEPLOY_IO_READ_BPS) \
+	--set-string global.ioCost.maxWriteBytesPerSecond=$(DEPLOY_IO_WRITE_BPS) \
+	--set-string global.ioCost.maxReadIops=$(DEPLOY_IO_READ_IOPS) \
+	--set-string global.ioCost.maxWriteIops=$(DEPLOY_IO_WRITE_IOPS) \
+	--set-string namespace.limitRange.default.cpu=$(DEPLOY_CPU_LIMIT) \
+	--set-string namespace.limitRange.default.memory=$(DEPLOY_MEMORY_LIMIT) \
+	--set-string namespace.limitRange.default.ephemeral-storage=$(DEPLOY_EPHEMERAL_STORAGE_LIMIT) \
+	--set-string namespace.limitRange.defaultRequest.cpu=$(DEPLOY_CPU_REQUEST) \
+	--set-string namespace.limitRange.defaultRequest.memory=$(DEPLOY_MEMORY_REQUEST) \
+	--set-string namespace.limitRange.defaultRequest.ephemeral-storage=$(DEPLOY_EPHEMERAL_STORAGE_REQUEST) \
 	$(if $(DEPLOY_INGRESS_HOST),--set ingress.host=$(DEPLOY_INGRESS_HOST),) \
 	$(if $(DEPLOY_CLUSTER_DOMAIN),--set global.cluster.domain=$(DEPLOY_CLUSTER_DOMAIN),) \
 	$(if $(DEPLOY_CLUSTER_VIP),--set global.cluster.vip=$(DEPLOY_CLUSTER_VIP),) \
@@ -544,6 +614,7 @@ operator-ready: ## One-command local readiness check before cluster deploy, impo
 	$(MAKE) doctor-local
 	$(MAKE) ci-contract
 	$(MAKE) private-data-audit
+	$(MAKE) tool-inventory TOOL_INVENTORY_SCOPE=validation
 	$(MAKE) capacity-preflight
 	$(MAKE) validate
 	$(MAKE) lint
@@ -563,6 +634,7 @@ validate: python-deps ## Validate YAML, Helm chart structure, scripts, and confi
 	$(PYTHON) $(PRIVATE_DATA_AUDIT_SCRIPT)
 	$(PYTHON) scripts/validate.py
 	$(PYTHON) scripts/images/validate-images.py
+	$(PYTHON) scripts/version_policy.py check --config "$(VERSION_POLICY_CONFIG)" --output "$(VERSION_POLICY_OUTPUT)"
 
 image-policy: ## Validate image tag, digest, and approved runtime-image policy.
 	$(PYTHON) scripts/images/validate-images.py
@@ -618,6 +690,39 @@ cutover-gate-plan: ## Generate a public-safe production cutover and smoke-test g
 smoke-test-plan: ## Generate a public-safe post-migration smoke-test and health-probe plan.
 	mkdir -p reports
 	$(PYTHON) scripts/smoke_test_plan.py --config "$(SMOKE_TEST_CONFIG)" --profile "$(SMOKE_TEST_PROFILE)" --namespace "$(SMOKE_TEST_NAMESPACE)" --ingress-host "$(SMOKE_TEST_INGRESS_HOST)" --evidence "$(SMOKE_TEST_EVIDENCE)" --output "$(SMOKE_TEST_OUTPUT)" --overrides "$(SMOKE_TEST_VALUES)" $(if $(filter true,$(SMOKE_TEST_EXECUTE)),--execute,) $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
+load-test-plan: ## Generate a public-safe load-test plan without sending traffic.
+	mkdir -p reports
+	$(PYTHON) scripts/load_test.py --config "$(LOAD_TEST_CONFIG)" --profile "$(LOAD_TEST_PROFILE)" --target-url "$(LOAD_TEST_TARGET_URL)" --namespace "$(LOAD_TEST_NAMESPACE)" --selector "$(LOAD_TEST_SELECTOR)" --method "$(LOAD_TEST_METHOD)" --path "$(LOAD_TEST_PATH)" --duration "$(LOAD_TEST_DURATION)" --concurrency "$(LOAD_TEST_CONCURRENCY)" --rate "$(LOAD_TEST_RATE)" --max-requests "$(LOAD_TEST_MAX_REQUESTS)" --timeout "$(LOAD_TEST_TIMEOUT)" --sample-interval "$(LOAD_TEST_SAMPLE_INTERVAL)" --runner "$(LOAD_TEST_RUNNER)" --io-enabled "$(LOAD_TEST_IO_ENABLED)" --cpu-limit "$(LOAD_TEST_CPU_LIMIT)" --memory-limit "$(LOAD_TEST_MEMORY_LIMIT)" --max-read-bps "$(LOAD_TEST_IO_READ_BPS)" --max-write-bps "$(LOAD_TEST_IO_WRITE_BPS)" --max-read-iops "$(LOAD_TEST_IO_READ_IOPS)" --max-write-iops "$(LOAD_TEST_IO_WRITE_IOPS)" --evidence "$(LOAD_TEST_EVIDENCE)" --output "$(LOAD_TEST_OUTPUT)" $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
+load-test: ## Execute an explicitly requested load test and write measured evidence.
+	@if [ "$(LOAD_TEST_EXECUTE)" != "true" ]; then echo "Refusing to generate traffic. Set LOAD_TEST_EXECUTE=true, or use make load-test-plan."; exit 2; fi
+	mkdir -p reports
+	$(PYTHON) scripts/load_test.py --config "$(LOAD_TEST_CONFIG)" --profile "$(LOAD_TEST_PROFILE)" --target-url "$(LOAD_TEST_TARGET_URL)" --namespace "$(LOAD_TEST_NAMESPACE)" --selector "$(LOAD_TEST_SELECTOR)" --method "$(LOAD_TEST_METHOD)" --path "$(LOAD_TEST_PATH)" --duration "$(LOAD_TEST_DURATION)" --concurrency "$(LOAD_TEST_CONCURRENCY)" --rate "$(LOAD_TEST_RATE)" --max-requests "$(LOAD_TEST_MAX_REQUESTS)" --timeout "$(LOAD_TEST_TIMEOUT)" --sample-interval "$(LOAD_TEST_SAMPLE_INTERVAL)" --runner "$(LOAD_TEST_RUNNER)" --io-enabled "$(LOAD_TEST_IO_ENABLED)" --cpu-limit "$(LOAD_TEST_CPU_LIMIT)" --memory-limit "$(LOAD_TEST_MEMORY_LIMIT)" --max-read-bps "$(LOAD_TEST_IO_READ_BPS)" --max-write-bps "$(LOAD_TEST_IO_WRITE_BPS)" --max-read-iops "$(LOAD_TEST_IO_READ_IOPS)" --max-write-iops "$(LOAD_TEST_IO_WRITE_IOPS)" --evidence "$(LOAD_TEST_EVIDENCE)" --output "$(LOAD_TEST_OUTPUT)" --execute $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
+tool-inventory: ## Check mandatory and optional tools for the selected execution scope.
+	mkdir -p reports
+	$(PYTHON) scripts/tools/tool_inventory.py --config "$(TOOL_INVENTORY_CONFIG)" --scope "$(TOOL_INVENTORY_SCOPE)" --output "$(TOOL_INVENTORY_OUTPUT)"
+
+version-policy-check: ## Validate lifecycle channels and approval-only update controls.
+	mkdir -p reports
+	$(PYTHON) scripts/version_policy.py check --config "$(VERSION_POLICY_CONFIG)" --output "$(VERSION_POLICY_OUTPUT)"
+
+version-update-plan: ## Create a read-only plan for one explicitly selected version update.
+	mkdir -p reports
+	$(PYTHON) scripts/version_policy.py plan --config "$(VERSION_POLICY_CONFIG)" --component "$(VERSION_UPDATE_COMPONENT)" --current-version "$(VERSION_UPDATE_CURRENT)" --target-version "$(VERSION_UPDATE_TARGET)" --channel "$(VERSION_UPDATE_CHANNEL)" --output "$(VERSION_UPDATE_OUTPUT)"
+
+version-update-request: ## Create evidence for a manually requested update; never deploys or mutates files.
+	@if [ "$(VERSION_UPDATE_MANUAL_REQUEST)" != "true" ]; then echo "Refusing update request. Set VERSION_UPDATE_MANUAL_REQUEST=true explicitly."; exit 2; fi
+	mkdir -p reports
+	$(PYTHON) scripts/version_policy.py request --config "$(VERSION_POLICY_CONFIG)" --component "$(VERSION_UPDATE_COMPONENT)" --current-version "$(VERSION_UPDATE_CURRENT)" --target-version "$(VERSION_UPDATE_TARGET)" --channel "$(VERSION_UPDATE_CHANNEL)" --manual-request --approval-reference "$(VERSION_UPDATE_APPROVAL_REFERENCE)" --change-ticket "$(VERSION_UPDATE_CHANGE_TICKET)" --rollback-plan "$(VERSION_UPDATE_ROLLBACK_PLAN)" --output "$(VERSION_UPDATE_OUTPUT)"
+
+version-update-apply: ## Apply one approved policy-pin update after explicit request, evidence, and execute flags.
+	@if [ "$(VERSION_UPDATE_MANUAL_REQUEST)" != "true" ]; then echo "Refusing apply. Set VERSION_UPDATE_MANUAL_REQUEST=true explicitly."; exit 2; fi
+	@if [ "$(VERSION_UPDATE_APPROVED)" != "true" ]; then echo "Refusing apply. Set VERSION_UPDATE_APPROVED=true after review."; exit 2; fi
+	@if [ "$(VERSION_UPDATE_EXECUTE)" != "true" ]; then echo "Refusing apply. Set VERSION_UPDATE_EXECUTE=true explicitly."; exit 2; fi
+	mkdir -p reports
+	$(PYTHON) scripts/version_policy.py apply --config "$(VERSION_POLICY_CONFIG)" --component "$(VERSION_UPDATE_COMPONENT)" --current-version "$(VERSION_UPDATE_CURRENT)" --target-version "$(VERSION_UPDATE_TARGET)" --channel "$(VERSION_UPDATE_CHANNEL)" --manual-request --approval-reference "$(VERSION_UPDATE_APPROVAL_REFERENCE)" --change-ticket "$(VERSION_UPDATE_CHANGE_TICKET)" --rollback-plan "$(VERSION_UPDATE_ROLLBACK_PLAN)" --execute --output "$(VERSION_UPDATE_OUTPUT)"
 
 release-runbook-plan: ## Generate a public-safe release runbook and evidence gate plan.
 	mkdir -p reports

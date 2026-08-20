@@ -39,6 +39,9 @@
   <a href="docs/kafka-profiles.md">Kafka Profiles</a> •
   <a href="docs/backup-restore.md">Backup/Restore</a> •
   <a href="docs/local-toolchain.md">Local Toolchain</a> •
+  <a href="docs/tool-inventory.md">Tool Inventory</a> •
+  <a href="docs/load-testing.md">Load Testing</a> •
+  <a href="docs/version-management.md">Version Management</a> •
   <a href="docs/ci-validation.md">CI Validation</a> •
   <a href="docs/operator-workflows.md">Operator Workflows</a> •
   <a href="docs/project-import.md">Project Import</a> •
@@ -105,6 +108,8 @@ make status
 For deploying a previously packaged application archive onto three local RKE2 nodes, use the sanitized runbook in [`docs/three-node-rke2-tarball-deploy.md`](docs/three-node-rke2-tarball-deploy.md). It covers image build/preload, private inventory setup, RKE2 bootstrap, Helm deployment, and verification without committing real node addresses or credentials.
 
 For local workstation setup and validation, run `make operator-ready`. It prepares the local Python toolchain, writes public-safe readiness and capacity reports, checks CI workflow contracts, audits private-data exposure, and runs validation/lint without exposing private operator data. See [`docs/operator-workflows.md`](docs/operator-workflows.md) and [`docs/local-toolchain.md`](docs/local-toolchain.md).
+
+Before deployment or import, check the host contract with `make tool-inventory TOOL_INVENTORY_SCOPE=deployment`. For capacity evidence, generate a no-traffic plan with `make load-test-plan LOAD_TEST_PROFILE=smoke IMPORT_REDACT=true`, then run an explicitly approved bounded profile with `make load-test LOAD_TEST_EXECUTE=true`. See [`docs/tool-inventory.md`](docs/tool-inventory.md) and [`docs/load-testing.md`](docs/load-testing.md).
 
 Existing Compose project compatibility check:
 
@@ -394,13 +399,15 @@ Supported database profiles are defined in [`config/databases.catalog.yaml`](con
 18. Run `make gitops-delivery-plan` before enabling Argo CD or Flux automation. Keep private repo URLs, kubeconfigs, deploy keys, and environment overlays outside public reports; production GitOps should require protected branches and signed/evidenced releases.
 19. Run `make progressive-delivery-plan` before enabling canary, blue-green, Argo Rollouts, Flagger, or service-mesh traffic shifting. Keep `autoPromotion=false` until SLO analysis, rollback drills, and GitOps ownership are reviewed.
 20. Run `make scaling-policy-plan` before enabling HPA, VPA, KEDA, or cluster autoscaler automation. Keep runtime autoscaling disabled until metrics, SLO alerts, capacity reports, and load-test evidence are reviewed.
-21. Run `make network-connectivity-plan` before tightening egress, removing shared lab web access, or enabling Linkerd/Istio. Keep service mesh disabled until DNS, TLS, health probes, capacity, and rollback ownership are reviewed.
-22. Run `make access-governance-plan` before enabling OIDC/SSO, broad RBAC changes, tenant namespaces, or break-glass procedures. Keep user/group mappings and identity URLs outside public reports.
-23. Run `make smoke-test-plan` before production cutover. Keep private endpoints, database DSNs, synthetic monitors, and result evidence outside public reports.
-24. Run `make cutover-gate-plan` before production traffic switch. Keep DNS, TLS, smoke-test endpoints, tickets, approvals, and rollback evidence in private systems; the public report is a readiness gate, not a traffic switch.
-25. Run `make release-runbook-plan RELEASE_RUNBOOK_PROFILE=production-release IMPORT_REDACT=true` before production promotion. Keep private approval indexes, change records, rollback owners, and evidence attachments outside public reports.
-26. Run `make cluster-upgrade-plan CLUSTER_UPGRADE_PROFILE=production-upgrade IMPORT_REDACT=true` before changing RKE2 or Kubernetes versions. Keep node health, etcd snapshot, release notes, and owner approvals in private systems.
-27. Release only signed/evidenced chart artifacts with `make release-evidence`, SHA-256 checksums, SBOM metadata, and GitHub artifact attestations.
+21. Run `make load-test-plan LOAD_TEST_PROFILE=smoke IMPORT_REDACT=true` before enabling autoscaling or declaring capacity evidence complete. Execute only an approved bounded profile and keep private target URLs and result evidence outside Git.
+22. Run `make network-connectivity-plan` before tightening egress, removing shared lab web access, or enabling Linkerd/Istio. Keep service mesh disabled until DNS, TLS, health probes, capacity, and rollback ownership are reviewed.
+23. Run `make access-governance-plan` before enabling OIDC/SSO, broad RBAC changes, tenant namespaces, or break-glass procedures. Keep user/group mappings and identity URLs outside public reports.
+24. Run `make smoke-test-plan` before production cutover. Keep private endpoints, database DSNs, synthetic monitors, and result evidence outside public reports.
+25. Run `make cutover-gate-plan` before production traffic switch. Keep DNS, TLS, smoke-test endpoints, tickets, approvals, and rollback evidence in private systems; the public report is a readiness gate, not a traffic switch.
+26. Run `make release-runbook-plan RELEASE_RUNBOOK_PROFILE=production-release IMPORT_REDACT=true` before production promotion. Keep private approval indexes, change records, rollback owners, and evidence attachments outside public reports.
+27. Run `make cluster-upgrade-plan CLUSTER_UPGRADE_PROFILE=production-upgrade IMPORT_REDACT=true` before changing RKE2 or Kubernetes versions. Keep node health, etcd snapshot, release notes, and owner approvals in private systems.
+28. Release only signed/evidenced chart artifacts with `make release-evidence`, SHA-256 checksums, SBOM metadata, and GitHub artifact attestations.
+29. Keep automatic version updates disabled. Run `make version-policy-check`, create a manual `make version-update-request`, and apply only after approval, CI, rollback, and lifecycle evidence are complete.
 
 ## License
 

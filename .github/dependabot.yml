@@ -1,4 +1,6 @@
 version: 2
+# Dependabot may propose updates, but repository policy forbids automerge and
+# requires the version-policy, CI, lifecycle, and change-approval gates.
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -10,6 +12,7 @@ updates:
     labels:
       - "dependencies"
       - "github-actions"
+      - "version-update:approval-required"
     groups:
       github-actions:
         patterns:
@@ -24,6 +27,7 @@ updates:
     labels:
       - "dependencies"
       - "python"
+      - "version-update:approval-required"
     ignore:
       # requirements-ci.txt intentionally backs the legacy Python 3.11 /
       # ansible-core 2.14 lane. Modern Ansible updates live in

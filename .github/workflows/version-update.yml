@@ -1,0 +1,92 @@
+name: version-update-request
+
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: Versioned platform component to review.
+        required: true
+        type: choice
+        options:
+          - helm
+          - helmfile
+          - nginx
+          - postgresql
+          - apache-kafka
+          - strimzi-operator
+          - dotnet
+          - rke2
+      target_version:
+        description: Explicit target version, such as 10.0.10 or 4.2.1.
+        required: true
+        type: string
+      channel:
+        description: Lifecycle channel to validate.
+        required: true
+        default: stable
+        type: choice
+        options:
+          - lts
+          - stable
+          - mainline
+          - edge
+      current_version:
+        description: Optional current version override for externally managed components.
+        required: false
+        type: string
+      approval_reference:
+        description: Optional change approval or ticket reference for the review record.
+        required: false
+        type: string
+      change_ticket:
+        description: Optional change ticket reference.
+        required: false
+        type: string
+      rollback_plan:
+        description: Optional rollback-plan reference.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  request:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+      - name: Install policy dependencies
+        run: pip install -r requirements-ci.txt
+      - name: Validate version policy
+        run: python3 scripts/version_policy.py check --config config/version-policy.yaml --output reports/version-policy.md
+      - name: Generate manual update request
+        env:
+          COMPONENT: ${{ inputs.component }}
+          CURRENT_VERSION: ${{ inputs.current_version }}
+          TARGET_VERSION: ${{ inputs.target_version }}
+          CHANNEL: ${{ inputs.channel }}
+          APPROVAL_REFERENCE: ${{ inputs.approval_reference }}
+          CHANGE_TICKET: ${{ inputs.change_ticket }}
+          ROLLBACK_PLAN: ${{ inputs.rollback_plan }}
+        run: |
+          python3 scripts/version_policy.py request \
+            --config config/version-policy.yaml \
+            --component "${COMPONENT}" \
+            --current-version "${CURRENT_VERSION}" \
+            --target-version "${TARGET_VERSION}" \
+            --channel "${CHANNEL}" \
+            --manual-request \
+            --approval-reference "${APPROVAL_REFERENCE}" \
+            --change-ticket "${CHANGE_TICKET}" \
+            --rollback-plan "${ROLLBACK_PLAN}" \
+            --output reports/version-update-request.md
+      - name: Upload update evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: version-update-request-${{ github.run_id }}
+          path: reports/version-*.md

@@ -16,6 +16,8 @@ order.
 
 `make doctor-local` checks the workstation for the tools used by the static gates and operator workflows. The report is written to `reports/local-doctor.md`, which is safe to share because it contains only tool names, versions, and generic remediation guidance.
 
+For the complete execution-scope contract, run `make tool-inventory TOOL_INVENTORY_SCOPE=validation`, `deployment`, `import`, or `load-test`. See [`tool-inventory.md`](tool-inventory.md) for the mandatory/optional distinction and the Docker/Podman and native load-runner alternatives.
+
 ## Windows Notes
 
 Native Windows is useful for repository inspection, documentation, local Python validation, and planning reports. Cluster mutation should run from WSL or a Linux operator host because Ansible, SSH, RKE2, Helm, kubectl, and container tooling behave most predictably from a Linux control node.
@@ -50,5 +52,7 @@ Required for cluster deployment or project import execution:
 - Docker or Podman for image build, tag, save, push, or preload workflows
 - OpenSSH client and `scp` for RKE2 image preload and kubeconfig repair
 - OpenSSL for lab TLS fallback
+
+For bounded capacity evidence, the built-in Python load runner is the mandatory tool in the `load-test` scope. Kubernetes access, `kubectl`, and cgroup-v2 visibility are optional measurements: HTTP results remain available when CPU, memory, or I/O telemetry cannot be sampled. See [`load-testing.md`](load-testing.md).
 
 The doctor marks validation/lint prerequisites as blocking. Cluster tools are warnings until you run mutating targets such as `make bootstrap`, `make install-cluster`, `make deploy`, or `make import-auto`.

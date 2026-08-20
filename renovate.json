@@ -2,5 +2,18 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
   "labels": ["dependencies"],
-  "enabledManagers": ["github-actions", "dockerfile", "helm-values", "helmv3"]
+  "enabledManagers": ["github-actions", "dockerfile", "helm-values", "helmv3"],
+  "automerge": false,
+  "platformAutomerge": false,
+  "rangeStrategy": "pin",
+  "ignoreUnstable": true,
+  "packageRules": [
+    {
+      "description": "All dependency updates require a reviewed pull request",
+      "matchUpdateTypes": ["patch", "minor", "major", "pin", "pinDigest", "digest"],
+      "automerge": false,
+      "platformAutomerge": false,
+      "labels": ["dependencies", "version-update:approval-required"]
+    }
+  ]
 }

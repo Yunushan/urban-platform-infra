@@ -1,0 +1,205 @@
+version: 1
+description: Public-safe mandatory and optional tool contract by execution scope.
+scopes:
+  validation:
+    description: Repository syntax, policy, and disclosure validation.
+    mandatory:
+    - python
+    - git
+    - make
+    - bash
+    - yamllint
+    - shellcheck
+    optional:
+    - ansible
+    - helm
+    - helmfile
+  deployment:
+    description: Cluster bootstrap and Helm deployment from a Linux operator host.
+    mandatory:
+    - python
+    - git
+    - make
+    - bash
+    - ansible-playbook
+    - ansible-galaxy
+    - helm
+    - helmfile
+    - kubectl
+    - ssh
+    - scp
+    - openssl
+    optional:
+    - docker-or-podman
+    - shellcheck
+  import:
+    description: Compose import, image build, database migration, and RKE2 preload.
+    mandatory:
+    - python
+    - git
+    - make
+    - bash
+    - kubectl
+    - ssh
+    - scp
+    - openssl
+    optional:
+    - docker-or-podman
+    - pg-tools
+    - helm
+    - helmfile
+  load-test:
+    description: Controlled HTTP load generation with Kubernetes resource and I/O measurement.
+    mandatory:
+    - python
+    optional:
+    - kubectl
+    - k6
+    - vegeta
+    - hey
+    - fio
+    - iostat
+  all:
+    description: Union of validation, deployment, import, and load-test requirements.
+    mandatory: []
+    optional: []
+tools:
+  python:
+    displayName: Python 3.11+
+    commands:
+    - python3
+    - python
+    versionArgs:
+    - --version
+  git:
+    displayName: Git
+    commands:
+    - git
+    versionArgs:
+    - --version
+  make:
+    displayName: GNU Make
+    commands:
+    - make
+    versionArgs:
+    - --version
+  bash:
+    displayName: Bash
+    commands:
+    - bash
+    versionArgs:
+    - --version
+  yamllint:
+    displayName: yamllint
+    commands:
+    - yamllint
+    versionArgs:
+    - --version
+  shellcheck:
+    displayName: ShellCheck
+    commands:
+    - shellcheck
+    versionArgs:
+    - --version
+  ansible:
+    displayName: Ansible
+    commands:
+    - ansible
+    versionArgs:
+    - --version
+  ansible-playbook:
+    displayName: Ansible Playbook
+    commands:
+    - ansible-playbook
+    versionArgs:
+    - --version
+  ansible-galaxy:
+    displayName: Ansible Galaxy
+    commands:
+    - ansible-galaxy
+    versionArgs:
+    - --version
+  helm:
+    displayName: Helm 4.2.1+
+    expectedVersion: 4.2.1
+    commands:
+    - helm
+    versionArgs:
+    - version
+    - --short
+  helmfile:
+    displayName: Helmfile 1.5.3+
+    expectedVersion: 1.5.3
+    commands:
+    - helmfile
+    versionArgs:
+    - --version
+  kubectl:
+    displayName: kubectl
+    commands:
+    - kubectl
+    versionArgs:
+    - version
+    - --client=true
+  ssh:
+    displayName: OpenSSH client
+    commands:
+    - ssh
+    versionArgs:
+    - -V
+  scp:
+    displayName: OpenSSH scp
+    commands:
+    - scp
+    versionArgs:
+    - -V
+  openssl:
+    displayName: OpenSSL
+    commands:
+    - openssl
+    versionArgs:
+    - version
+  docker-or-podman:
+    displayName: Docker or Podman
+    alternatives:
+    - docker
+    - podman
+    versionArgs:
+    - --version
+  pg-tools:
+    displayName: PostgreSQL client tools
+    alternatives:
+    - pg_dump
+    - pg_restore
+    versionArgs:
+    - --version
+  k6:
+    displayName: k6 load-test runner
+    commands:
+    - k6
+    versionArgs:
+    - version
+  vegeta:
+    displayName: Vegeta load-test runner
+    commands:
+    - vegeta
+    versionArgs:
+    - -version
+  hey:
+    displayName: hey load-test runner
+    commands:
+    - hey
+    versionArgs:
+    - -version
+  fio:
+    displayName: fio I/O benchmark tool
+    commands:
+    - fio
+    versionArgs:
+    - --version
+  iostat:
+    displayName: iostat I/O telemetry tool
+    commands:
+    - iostat
+    versionArgs:
+    - -V

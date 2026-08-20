@@ -128,6 +128,12 @@ jobs:
         run: |
           python3 scripts/validate.py
           python3 scripts/images/validate-images.py
+      - name: Check validation tool inventory
+        run: python3 scripts/tools/tool_inventory.py --config config/tooling.yaml --scope validation --no-fail --output reports/tool-inventory.md
+      - name: Validate approval-only version policy
+        run: python3 scripts/version_policy.py check --config config/version-policy.yaml --output reports/version-policy.md
+      - name: Generate load-test plan without traffic
+        run: python3 scripts/load_test.py --config config/load-test.yaml --profile smoke --output reports/load-test-plan.md --redact-sensitive
 
   render:
     runs-on: ubuntu-latest
