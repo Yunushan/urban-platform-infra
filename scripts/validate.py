@@ -1043,7 +1043,7 @@ for release_token in [
     'id-token: write',
     'attestations: write',
     'artifact-metadata: write',
-    'actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6',
+    'actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6',
     'subject-checksums',
     'sbom-path',
     'RELEASE_MANIFEST',
