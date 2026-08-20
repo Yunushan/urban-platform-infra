@@ -26,7 +26,6 @@ updates:
       prefix: "ci"
     labels:
       - "dependencies"
-      - "python"
       - "version-update:approval-required"
     ignore:
       # requirements-ci.txt intentionally backs the legacy Python 3.11 /

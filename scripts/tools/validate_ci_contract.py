@@ -82,7 +82,7 @@ GITHUB_REQUIRED_TOKENS = {
     "exit-code: '1'": "High and critical filesystem findings must fail CI.",
     "needs: static": "Downstream jobs must depend on static checks.",
     "needs: validate": "Render must wait for validate checks.",
-    "aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8": "Security scan action must stay pinned to a full commit SHA.",
+    "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25": "Security scan action must stay pinned to a full commit SHA.",
 }
 
 GITLAB_REQUIRED_TOKENS = {
