@@ -148,7 +148,7 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements-ci.txt
       - name: Helm lint
-        uses: azure/setup-helm@59b1c81c6280f5abebb1fb1bc585696daa7dfb42 # v5
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
       - name: Run helm lint
         run: helm lint "${HELM_CHART}"
       - name: Render chart
@@ -181,7 +181,7 @@ jobs:
       - name: Validate production profile contract
         run: python3 scripts/validate_production_profile.py
       - name: Install Helm
-        uses: azure/setup-helm@59b1c81c6280f5abebb1fb1bc585696daa7dfb42 # v5
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
       - name: Render production chart
         run: |
           mkdir -p reports
@@ -205,7 +205,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           ignore-unfixed: true
