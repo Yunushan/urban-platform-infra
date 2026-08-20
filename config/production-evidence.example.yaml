@@ -1,0 +1,40 @@
+# Copy this file to a private operator directory and replace every value.
+# Never commit the copied file, evidence index, kubeconfig, or evidence bodies.
+version: 1
+
+release:
+  tag: v0.0.0
+  owner: platform-owner
+  valuesOverlay: /private/production/values-production-private.yaml
+
+registry:
+  privateRegistry: registry.example.invalid/platform
+  evidenceRoot: /private/production/image-evidence
+  imageEvidenceIndex: image-evidence-index.yaml
+
+disasterRecovery:
+  evidenceRoot: /private/production/dr-evidence
+  artifacts:
+    rtoRpo: rto-rpo.yaml
+    dependencyMap: dependency-map.yaml
+    criticalityMap: criticality-map.yaml
+    backupReplication: backup-replication.md
+    dataReplication: data-replication.md
+    crossZonePlacement: cross-zone-placement.md
+    databaseRestore: database-restore-drill.md
+    etcdRestore: etcd-restore-drill.md
+    namespaceRestore: namespace-restore-drill.md
+    applicationSmokeTest: application-smoke-test.md
+    runbook: recovery-runbook.md
+    commsPlan: continuity-comms.md
+    manualWorkaround: degraded-mode.md
+    supplierContacts: supplier-ownership.md
+    drillEvidence: restore-drill-evidence.md
+    rtoEvidence: measured-rto.md
+    postDrillReview: post-drill-review.md
+
+liveCluster:
+  required: true
+  kubeconfig: /private/production/operator.kubeconfig
+  namespace: urban-platform
+  expectedKafkaVersion: 4.3.0

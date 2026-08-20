@@ -40,7 +40,10 @@ Keepalived owns the virtual IP. Chrony runs on every node to reduce clock drift 
 
 - PostgreSQL/PostGIS/TimescaleDB use CloudNativePG custom resources by default.
 - Elasticsearch/Kibana use ECK custom resources by default.
-- Kafka/ZooKeeper render as StatefulSets to preserve the supplied Confluent images.
+- The production overlay uses Strimzi-managed Apache Kafka 4.3/KRaft with a
+  three-node KafkaNodePool and durable non-deleting storage. Lab/base values
+  retain the backward-compatible Confluent/ZooKeeper profile unless a planned
+  Kafka profile is selected.
 - Redis renders as a Redis + Sentinel scaffold.
 
 Before production, choose storage classes and backup policies in `values.yaml`.

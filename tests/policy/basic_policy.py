@@ -93,14 +93,14 @@ for doc in documents:
                     errors.append(f'{kind}/{name}: application containers must run as non-root')
                 if 'ALL' not in dropped:
                     errors.append(f'{kind}/{name}: application containers must drop ALL capabilities')
-        if kind == 'Deployment':
+        if kind in {'Deployment', 'StatefulSet'}:
             replicas = spec.get('replicas', 0)
             if low_resource_lab_profile:
                 if replicas < 1:
                     errors.append(f'{kind}/{name}: replicas should be >= 1 for the low-resource lab profile')
-            elif production_render and kind == 'StatefulSet':
+            elif production_render:
                 if replicas < 3:
-                    errors.append(f'{kind}/{name}: production stateful workloads require at least 3 replicas')
+                    errors.append(f'{kind}/{name}: production workloads require at least 3 replicas')
             elif replicas < 2:
                 errors.append(f'{kind}/{name}: replicas should be >= 2 for HA')
 

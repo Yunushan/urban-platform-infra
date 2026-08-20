@@ -18,6 +18,9 @@ The local Article 7 planner is `scripts/images/promotion_plan.py`. It generates
 that still need private-registry promotion, digest pins, vulnerability scan
 evidence, SBOM evidence, and signature or attestation evidence before
 production use.
+When run with the production overlay, it merges `values.yaml` with
+`values-production.yaml` so inherited runtime images are included in the
+promotion inventory.
 
 ## Production Promotion
 
@@ -91,6 +94,12 @@ image movement.
 
 Use `REGISTRY_PROMOTION_PROFILE=lab-preload` for small RKE2 labs where registry
 login is intentionally avoided.
+
+For an actual production readiness decision, run the private
+`make production-readiness-gate` target. It verifies that the private overlay
+and image evidence index cover the complete merged image inventory, including
+images inherited from the base values file. The public promotion planners do
+not create or fabricate scan, SBOM, signature, or promotion evidence.
 
 ## Current Pinned Runtime Images
 

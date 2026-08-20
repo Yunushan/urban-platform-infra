@@ -20,7 +20,8 @@ DEPLOY_IO_READ_IOPS ?= 0
 DEPLOY_IO_WRITE_IOPS ?= 0
 OBS ?= disabled
 NAMESPACE ?= urban-platform
-VALUES ?= helm/urban-platform-infra/values.yaml
+DEPLOY_PROFILE ?= $(if $(filter prod production,$(ENV)),production,lab)
+VALUES ?= $(if $(filter production,$(DEPLOY_PROFILE)),helm/urban-platform-infra/values-production.yaml,helm/urban-platform-infra/values.yaml)
 TOPOLOGY ?= three-node-ha
 TOPOLOGY_VALUES ?= helm/urban-platform-infra/topologies/$(TOPOLOGY).yaml
 INVENTORY ?= inventories/$(ENV)/hosts.yml
@@ -88,7 +89,7 @@ DEPLOY_RECOVER_PENDING_PVCS ?= true
 DEPLOY_RECOVER_DELETE_PVCS ?= false
 DEPLOY_RECOVER_STATEFULSETS ?= false
 DEPLOY_RECOVER_CNPG_INITDB ?= false
-DEPLOY_LAB_STORAGE ?= true
+DEPLOY_LAB_STORAGE ?= $(if $(filter production,$(DEPLOY_PROFILE)),false,true)
 DEPLOY_LAB_REPLICA_OVERRIDE ?= 1
 DEPLOY_LAB_AUTOSCALING ?= false
 DEPLOY_LAB_TOPOLOGY_SPREAD ?= false
@@ -104,21 +105,28 @@ DEPLOY_ROOT_INGRESS_PATH ?= /
 DEPLOY_ALLOWED_CIDRS ?=
 DEPLOY_CONFIGURE_EDGE_PORTS ?= true
 DEPLOY_ENABLE_ECK ?= true
-DEPLOY_ENABLE_PROMETHEUS ?= false
-DEPLOY_ENABLE_GRAFANA ?= false
+DEPLOY_ENABLE_CERT_MANAGER ?= true
+DEPLOY_ENABLE_CNPG ?= true
+DEPLOY_ENABLE_EXTERNAL_SECRETS ?= $(if $(filter production,$(DEPLOY_PROFILE)),true,false)
+DEPLOY_ENABLE_PROMETHEUS ?= $(if $(filter production,$(DEPLOY_PROFILE)),true,false)
+DEPLOY_ENABLE_GRAFANA ?= $(if $(filter production,$(DEPLOY_PROFILE)),true,false)
 DEPLOY_ENABLE_OPENTELEMETRY ?= false
 DEPLOY_ENABLE_ELASTICSEARCH ?= false
 DEPLOY_ENABLE_KIBANA ?= false
 DEPLOY_ENABLE_LOGSTASH ?= false
 DEPLOY_ENABLE_LOKI ?= false
 DEPLOY_ENABLE_CLICKHOUSE ?= false
-DEPLOY_ENABLE_VELERO ?= false
 DEPLOY_ENABLE_MINIO ?= false
 DEPLOY_ENABLE_RABBITMQ ?= false
 DEPLOY_ENABLE_KEYCLOAK ?= false
 DEPLOY_ENABLE_EMQX ?= false
 DEPLOY_ENABLE_NATS ?= false
-DEPLOY_ENABLE_STRIMZI ?= false
+DEPLOY_ENABLE_VELERO ?= $(if $(filter production,$(DEPLOY_PROFILE)),true,false)
+DEPLOY_ENABLE_STRIMZI ?= $(if $(filter production,$(DEPLOY_PROFILE)),true,false)
+INSTALL_CERT_MANAGER ?= $(DEPLOY_ENABLE_CERT_MANAGER)
+INSTALL_CNPG ?= $(DEPLOY_ENABLE_CNPG)
+INSTALL_EXTERNAL_SECRETS ?= $(DEPLOY_ENABLE_EXTERNAL_SECRETS)
+export INSTALL_CERT_MANAGER INSTALL_CNPG INSTALL_EXTERNAL_SECRETS
 STRIMZI_OPERATOR_CHART_VERSION ?= 1.0.0
 STRIMZI_OPERATOR_TIMEOUT ?= 10m
 STRIMZI_WATCH_NAMESPACES ?= $(NAMESPACE)
@@ -395,6 +403,11 @@ REGISTRY_PROMOTION_CREDENTIAL_SOURCE ?=
 REGISTRY_PROMOTION_IMAGE_PULL_SECRET ?= registry-credentials
 REGISTRY_PROMOTION_OUTPUT ?= reports/registry-promotion-controller.md
 REGISTRY_PROMOTION_VALUES ?= reports/registry-promotion-values.yaml
+PRODUCTION_EVIDENCE_CONFIG ?= /var/lib/urban-platform/private/production-evidence.yaml
+PRODUCTION_EVIDENCE_BASE_VALUES ?= helm/urban-platform-infra/values.yaml
+PRODUCTION_EVIDENCE_VALUES ?= helm/urban-platform-infra/values-production.yaml
+PRODUCTION_EVIDENCE_OUTPUT ?= reports/production-evidence-gate.md
+PRODUCTION_EVIDENCE_LIVE ?= true
 RUNTIME_HARDENING_CONFIG ?= config/runtime-hardening.yaml
 RUNTIME_HARDENING_PROFILE ?=
 RUNTIME_HARDENING_OUTPUT ?= reports/runtime-hardening-plan.md
@@ -522,7 +535,7 @@ DISASTER_RECOVERY_POST_DRILL_REVIEW ?= false
 DISASTER_RECOVERY_OUTPUT ?= reports/disaster-recovery-plan.md
 DISASTER_RECOVERY_VALUES ?= reports/disaster-recovery-values.yaml
 
-.PHONY: help setup-local doctor-local ci-contract private-data-audit operator-ready tool-inventory version-policy-check version-update-plan version-update-request version-update-apply validate production-readiness image-policy image-promotion-plan registry-promotion-plan runtime-hardening-plan gitops-delivery-plan progressive-delivery-plan scaling-policy-plan network-connectivity-plan access-governance-plan compliance-evidence-plan incident-response-plan change-management-plan cutover-gate-plan smoke-test-plan load-test-plan load-test release-runbook-plan cluster-upgrade-plan disaster-recovery-plan lint configure backup-plan observability-plan cluster-doctor cluster-repair lab-deploy-plan capacity-preflight image-cache-plan database-migration-plan edge-migration-plan environment-profile-plan import-check import-plan import-preflight import-recovery-plan import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig configure-edge-ports install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace recover-helm-release deploy deploy-auto deploy-strimzi-kafka deploy-dry-run package-chart release-evidence verify-release-evidence status observability-status docker-up docker-down docker-status docker-standalone-config docker-standalone-up docker-standalone-down docker-standalone-status policy clean
+.PHONY: help setup-local doctor-local ci-contract private-data-audit operator-ready tool-inventory version-policy-check version-update-plan version-update-request version-update-apply validate production-readiness production-readiness-gate production-evidence-gate image-policy image-promotion-plan registry-promotion-plan runtime-hardening-plan gitops-delivery-plan progressive-delivery-plan scaling-policy-plan network-connectivity-plan access-governance-plan compliance-evidence-plan incident-response-plan change-management-plan cutover-gate-plan smoke-test-plan load-test-plan load-test release-runbook-plan cluster-upgrade-plan disaster-recovery-plan lint configure backup-plan observability-plan cluster-doctor cluster-repair lab-deploy-plan capacity-preflight image-cache-plan database-migration-plan edge-migration-plan environment-profile-plan import-check import-plan import-preflight import-recovery-plan import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig configure-edge-ports install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace recover-helm-release deploy deploy-auto deploy-strimzi-kafka deploy-dry-run package-chart release-evidence verify-release-evidence status observability-status docker-up docker-down docker-status docker-standalone-config docker-standalone-up docker-standalone-down docker-standalone-status policy clean
 
 HELM_DEPLOY_SET_ARGS = \
 	--set namespace.create=false \
@@ -604,6 +617,12 @@ ci-contract: ## Validate GitHub/GitLab CI lane pins, actions, and gate commands.
 
 production-readiness: ## Score repository-level production readiness (100-point static contract).
 	$(PYTHON) scripts/production_readiness_score.py
+
+production-evidence-gate: ## Verify private production evidence and optionally live Kubernetes health (fail closed).
+	mkdir -p reports
+	$(PYTHON) scripts/production_evidence_gate.py --config "$(PRODUCTION_EVIDENCE_CONFIG)" --base-values "$(PRODUCTION_EVIDENCE_BASE_VALUES)" --values "$(PRODUCTION_EVIDENCE_VALUES)" --output "$(PRODUCTION_EVIDENCE_OUTPUT)" $(if $(filter true,$(PRODUCTION_EVIDENCE_LIVE)),--live,) --redact-sensitive
+
+production-readiness-gate: production-evidence-gate ## Alias for the private operational production evidence gate.
 
 private-data-audit: ## Scan tracked repository content for secret/private-data leakage and write a public-safe report.
 	mkdir -p reports
@@ -818,7 +837,7 @@ import-auto: MIGRATION_AUTO_REPAIR_CLUSTER = true
 import-auto: operator-kubeconfig ## Run the full import migration workflow with preparation, execution, and validation.
 	@if [ "$(MIGRATION_DEPLOY_PLATFORM)" = "true" ]; then \
 		echo "Deploying/upgrading the platform chart before import so PostgreSQL 18 and platform services are reconciled."; \
-		$(MAKE) deploy-auto VALUES="$(VALUES)" NAMESPACE="$(MIGRATION_NAMESPACE)" DEPLOY_NAMESPACE_RESOURCE_QUOTA="$(if $(filter true,$(MIGRATION_RELAX_RESOURCE_QUOTA)),false,$(DEPLOY_NAMESPACE_RESOURCE_QUOTA))"; \
+		$(MAKE) deploy-auto DEPLOY_PROFILE=lab VALUES=helm/urban-platform-infra/values.yaml NAMESPACE="$(MIGRATION_NAMESPACE)" DEPLOY_NAMESPACE_RESOURCE_QUOTA="$(if $(filter true,$(MIGRATION_RELAX_RESOURCE_QUOTA)),false,$(DEPLOY_NAMESPACE_RESOURCE_QUOTA))"; \
 	else \
 		echo "Skipping platform Helm deploy because MIGRATION_DEPLOY_PLATFORM=$(MIGRATION_DEPLOY_PLATFORM)."; \
 	fi
@@ -906,7 +925,7 @@ wait-operator-crds: ## Wait until CRDs required by the default platform chart ex
 install-operators: install-helmfile operator-kubeconfig ensure-storageclass ## Install optional operators/charts needed for HA data and observability profiles.
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) OPERATOR_KUBECONFIG=$(OPERATOR_KUBECONFIG) NAMESPACE="$(NAMESPACE)" DEPLOY_ENABLE_STRIMZI="$(DEPLOY_ENABLE_STRIMZI)" STRIMZI_OPERATOR_CHART_VERSION="$(STRIMZI_OPERATOR_CHART_VERSION)" STRIMZI_OPERATOR_TIMEOUT="$(STRIMZI_OPERATOR_TIMEOUT)" STRIMZI_WATCH_NAMESPACES="$(STRIMZI_WATCH_NAMESPACES)" STRIMZI_WATCH_ANY_NAMESPACE="$(STRIMZI_WATCH_ANY_NAMESPACE)" STRIMZI_PRELOAD_IMAGES="$(STRIMZI_PRELOAD_IMAGES)" STRIMZI_KAFKA_VERSION="$(STRIMZI_KAFKA_VERSION)" RKE2_IMAGE_PRELOAD_SCRIPT="$(RKE2_IMAGE_PRELOAD_SCRIPT)" MIGRATION_IMAGE_MODE="$(MIGRATION_IMAGE_MODE)" MIGRATION_IMAGE_OUTPUT_DIR="$(MIGRATION_IMAGE_OUTPUT_DIR)" MIGRATION_RKE2_IMAGE_DIR="$(MIGRATION_RKE2_IMAGE_DIR)" MIGRATION_RKE2_NODES="$(MIGRATION_RKE2_NODES)" MIGRATION_SSH_USER="$(MIGRATION_SSH_USER)" MIGRATION_SSH_KEY="$(MIGRATION_SSH_KEY)" MIGRATION_CONTAINER_TOOL="$(MIGRATION_CONTAINER_TOOL)" MIGRATION_FALLBACK_INVENTORY="$(MIGRATION_FALLBACK_INVENTORY)" bash $(STRIMZI_INSTALL_SCRIPT)
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) OPERATOR_KUBECONFIG=$(OPERATOR_KUBECONFIG) HELMFILE=$(HELMFILE) HELMFILE_CONFIG=$(HELMFILE_CONFIG) HELMFILE_SYNC_RETRIES=$(HELMFILE_SYNC_RETRIES) HELMFILE_SYNC_RETRY_DELAY=$(HELMFILE_SYNC_RETRY_DELAY) HELMFILE_SYNC_ATTEMPT_TIMEOUT=$(HELMFILE_SYNC_ATTEMPT_TIMEOUT) SKIP_HELMFILE_SYNC="$(SKIP_HELMFILE_SYNC)" KUBECONFIG_SCRIPT=$(KUBECONFIG_SCRIPT) ENV=$(ENV) ENGINE=$(ENGINE) INVENTORY=$(INVENTORY) ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) ANSIBLE_PLAYBOOK=$(ANSIBLE_PLAYBOOK) ANSIBLE_ARGS="$(ANSIBLE_ARGS)" MIGRATION_RKE2_NODES="$(MIGRATION_RKE2_NODES)" MIGRATION_SSH_USER="$(MIGRATION_SSH_USER)" MIGRATION_SSH_KEY="$(MIGRATION_SSH_KEY)" MIGRATION_BECOME_PASSWORD_FILE="$(MIGRATION_BECOME_PASSWORD_FILE)" MIGRATION_BECOME_PASSWORD_PROMPT="$(MIGRATION_BECOME_PASSWORD_PROMPT)" MIGRATION_CLUSTER_VIP="$(if $(MIGRATION_CLUSTER_VIP),$(MIGRATION_CLUSTER_VIP),$(DEPLOY_CLUSTER_VIP))" MIGRATION_KUBERNETES_API_VIP_PORT="$(MIGRATION_KUBERNETES_API_VIP_PORT)" MIGRATION_CLUSTER_DOMAIN="$(MIGRATION_CLUSTER_DOMAIN)" MIGRATION_RKE2_VERSION="$(MIGRATION_RKE2_VERSION)" MIGRATION_KEEPALIVED_AUTH_PASS="$(MIGRATION_KEEPALIVED_AUTH_PASS)" MIGRATION_KEEPALIVED_INTERFACE="$(MIGRATION_KEEPALIVED_INTERFACE)" INSTALL_ECK="$(DEPLOY_ENABLE_ECK)" INSTALL_PROMETHEUS="$(DEPLOY_ENABLE_PROMETHEUS)" GRAFANA_ENABLED="$(DEPLOY_ENABLE_GRAFANA)" INSTALL_OPENTELEMETRY="$(DEPLOY_ENABLE_OPENTELEMETRY)" INSTALL_LOKI="$(DEPLOY_ENABLE_LOKI)" INSTALL_CLICKHOUSE="$(DEPLOY_ENABLE_CLICKHOUSE)" INSTALL_VELERO="$(DEPLOY_ENABLE_VELERO)" INSTALL_MINIO="$(DEPLOY_ENABLE_MINIO)" INSTALL_RABBITMQ="$(DEPLOY_ENABLE_RABBITMQ)" INSTALL_KEYCLOAK="$(DEPLOY_ENABLE_KEYCLOAK)" INSTALL_EMQX="$(DEPLOY_ENABLE_EMQX)" INSTALL_NATS="$(DEPLOY_ENABLE_NATS)" INSTALL_STRIMZI="false" INSTALL_VAULT="$(DEPLOY_ENABLE_VAULT)" INSTALL_KYVERNO="$(DEPLOY_ENABLE_KYVERNO)" INSTALL_TEMPORAL="$(DEPLOY_ENABLE_TEMPORAL)" INSTALL_ARGO_WORKFLOWS="$(DEPLOY_ENABLE_ARGO_WORKFLOWS)" INSTALL_LINKERD="$(DEPLOY_ENABLE_LINKERD)" INSTALL_ISTIO="$(DEPLOY_ENABLE_ISTIO)" VELERO_PROVIDER="$(VELERO_PROVIDER)" VELERO_BUCKET="$(VELERO_BUCKET)" VELERO_PREFIX="$(VELERO_PREFIX)" VELERO_REGION="$(VELERO_REGION)" VELERO_S3_URL="$(VELERO_S3_URL)" VELERO_S3_FORCE_PATH_STYLE="$(VELERO_S3_FORCE_PATH_STYLE)" VELERO_USE_SECRET="$(VELERO_USE_SECRET)" VELERO_EXISTING_SECRET="$(VELERO_EXISTING_SECRET)" VELERO_SNAPSHOTS_ENABLED="$(VELERO_SNAPSHOTS_ENABLED)" VELERO_NODE_AGENT_ENABLED="$(VELERO_NODE_AGENT_ENABLED)" GRAFANA_SERVICE_TYPE="$(DEPLOY_OBSERVABILITY_SERVICE_TYPE)" GRAFANA_NODE_PORT="$(DEPLOY_GRAFANA_NODE_PORT)" LOKI_SERVICE_TYPE="$(DEPLOY_OBSERVABILITY_SERVICE_TYPE)" LOKI_NODE_PORT="$(DEPLOY_LOKI_NODE_PORT)" CLICKHOUSE_SERVICE_TYPE="$(DEPLOY_OBSERVABILITY_SERVICE_TYPE)" CLICKHOUSE_HTTP_NODE_PORT="$(DEPLOY_CLICKHOUSE_HTTP_NODE_PORT)" CLICKHOUSE_TCP_NODE_PORT="$(DEPLOY_CLICKHOUSE_TCP_NODE_PORT)" bash $(HELMFILE_SYNC_SCRIPT)
-	$(MAKE) wait-operator-crds OPERATOR_CRD_TIMEOUT=$(OPERATOR_CRD_TIMEOUT) OPERATOR_KUBECONFIG=$(OPERATOR_KUBECONFIG) DEPLOY_ENABLE_ECK=$(DEPLOY_ENABLE_ECK) DEPLOY_ENABLE_STRIMZI=$(DEPLOY_ENABLE_STRIMZI)
+	$(MAKE) wait-operator-crds OPERATOR_CRD_TIMEOUT=$(OPERATOR_CRD_TIMEOUT) OPERATOR_KUBECONFIG=$(OPERATOR_KUBECONFIG) DEPLOY_ENABLE_ECK=$(DEPLOY_ENABLE_ECK) DEPLOY_ENABLE_CNPG=$(DEPLOY_ENABLE_CNPG) DEPLOY_ENABLE_STRIMZI=$(DEPLOY_ENABLE_STRIMZI)
 
 ensure-namespace: ## Create and label the target namespace before deploying the platform chart.
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl get namespace $(NAMESPACE) >/dev/null 2>&1 || \
@@ -921,11 +940,11 @@ recover-helm-release: operator-kubeconfig ensure-namespace ## Recover a failed, 
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) HELM=$(HELM) PROJECT=$(PROJECT) NAMESPACE=$(NAMESPACE) HELM_TIMEOUT=$(HELM_TIMEOUT) DEPLOY_RECOVER_FAILED_RELEASE=$(DEPLOY_RECOVER_FAILED_RELEASE) DEPLOY_RECOVER_STALE_RESOURCES=$(DEPLOY_RECOVER_STALE_RESOURCES) DEPLOY_RECOVER_PENDING_PVCS=$(DEPLOY_RECOVER_PENDING_PVCS) DEPLOY_RECOVER_DELETE_PVCS=$(DEPLOY_RECOVER_DELETE_PVCS) DEPLOY_RECOVER_STATEFULSETS=$(DEPLOY_RECOVER_STATEFULSETS) DEPLOY_RECOVER_CNPG_INITDB=$(DEPLOY_RECOVER_CNPG_INITDB) bash $(HELM_RECOVERY_SCRIPT)
 
 deploy-dry-run: install-helm ## Render the Helm chart without applying it.
-	$(HELM) template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f $(VALUES) -f $(TOPOLOGY_VALUES) --dry-run > rendered.yaml
+	$(HELM) template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f $(TOPOLOGY_VALUES) -f $(VALUES) --dry-run > rendered.yaml
 
 policy: ## Run policy checks against rendered manifests.
 	mkdir -p reports
-	$(HELM) template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f $(VALUES) -f $(TOPOLOGY_VALUES) > reports/rendered.yaml
+	$(HELM) template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f $(TOPOLOGY_VALUES) -f $(VALUES) > reports/rendered.yaml
 	$(PYTHON) tests/policy/basic_policy.py reports/rendered.yaml
 
 package-chart: install-helm ## Package the Helm chart into dist/.
@@ -949,7 +968,7 @@ deploy: install-operators ensure-namespace recover-helm-release ## Deploy/upgrad
 	@attempt=1; \
 	while true; do \
 		echo "Running Helm upgrade/install (attempt $$attempt/$(HELM_DEPLOY_RETRIES))."; \
-		if KUBECONFIG=$(OPERATOR_KUBECONFIG) $(HELM) upgrade --install $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) --cleanup-on-fail --timeout $(HELM_TIMEOUT) $(HELM_DEPLOY_SET_ARGS) -f $(VALUES) -f $(TOPOLOGY_VALUES) $(HELM_EXTRA_ARGS); then \
+		if KUBECONFIG=$(OPERATOR_KUBECONFIG) $(HELM) upgrade --install $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) --cleanup-on-fail --timeout $(HELM_TIMEOUT) $(HELM_DEPLOY_SET_ARGS) -f $(TOPOLOGY_VALUES) -f $(VALUES) $(HELM_EXTRA_ARGS); then \
 			break; \
 		fi; \
 		status=$$?; \
@@ -961,6 +980,8 @@ deploy: install-operators ensure-namespace recover-helm-release ## Deploy/upgrad
 		attempt=$$((attempt + 1)); \
 	done
 
+deploy-auto: DEPLOY_PROFILE = lab
+deploy-auto: VALUES = helm/urban-platform-infra/values.yaml
 deploy-auto: DEPLOY_RECOVER_FAILED_RELEASE = true
 deploy-auto: DEPLOY_RECOVER_STATEFULSETS = true
 deploy-auto: DEPLOY_RECOVER_CNPG_INITDB = true

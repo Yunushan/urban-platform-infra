@@ -30,7 +30,7 @@ The optional report is written to `reports/ci-contract.md` and is safe to share.
 - `dependency-review`: required pull-request dependency review.
 - `validate`: CI contract, private-data audit, repository validation, and image-policy validation across Python 3.11 through 3.14.
 - `render`: Helm lint, Helm template rendering, rendered-manifest policy checks, and rendered manifest artifact upload.
-- `production-contract`: production overlay validation, strict production rendering, and rendered-manifest policy checks.
+- `production-contract`: production overlay validation, strict production rendering, HA/durability policy checks, and the repository readiness score.
 - `security`: Trivy filesystem scan that fails on unresolved HIGH or CRITICAL findings.
 - `version-update-request`: manually dispatched, read-only version request evidence; it has no repository write or cluster deployment permission.
 
@@ -80,3 +80,6 @@ Strimzi-managed Apache Kafka, Redis Sentinel, smoke probes, and release
 evidence requirements. Real production deployments must layer a private
 environment overlay containing promoted image digests, real StorageClasses,
 trusted issuer references, registry credentials, and tested backup targets.
+The private operator/release-runner gate is documented in
+[`production-readiness.md`](production-readiness.md); public CI validates its
+code and contract but does not receive the private manifest or kubeconfig.

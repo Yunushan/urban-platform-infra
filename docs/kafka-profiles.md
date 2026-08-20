@@ -3,6 +3,9 @@
 Kafka is enabled by default with a backward-compatible Confluent 7.9 ZooKeeper
 profile. Newer Kafka runtimes are opt-in because Confluent 8.x and Apache
 Kafka 4.x use KRaft and should be rolled out as a planned platform change.
+The production overlay selects Apache Kafka 4.3 through Strimzi/KRaft; the
+Confluent/ZooKeeper default below remains the compatibility profile for lab and
+legacy deployments.
 
 ## Supported Profiles
 
