@@ -1,5 +1,6 @@
 version: 1
 description: Public-safe controlled HTTP load-test profiles and resource/I/O measurement defaults.
+defaultRunner: k6
 defaults:
   targetUrl: https://platform.example.invalid
   path: /healthz
@@ -12,6 +13,9 @@ defaults:
   expectedStatus:
   - 200
   - 204
+  thresholds:
+    errorRate: 0.01
+    p95Ms: 1000
   sampleIntervalSeconds: 5
   io:
     enabled: true
@@ -42,14 +46,100 @@ profiles:
     concurrency: 100
     ratePerSecond: 100
     maxRequests: 60000
+  soak:
+    description: Long-running stability profile for an approved staging environment.
+    durationSeconds: 1800
+    concurrency: 25
+    ratePerSecond: 15
+    maxRequests: 27000
+  spike:
+    description: Short burst profile for an approved staging environment and rollback window.
+    durationSeconds: 120
+    concurrency: 250
+    ratePerSecond: 250
+    maxRequests: 30000
+runners:
+  k6:
+    displayName: k6
+    kind: http
+    tool: k6
+    enabled: true
+    execution: native
+    description: Default HTTP, API, WebSocket, and SignalR runner with threshold-based pass/fail.
+  locust:
+    displayName: Locust
+    kind: http
+    tool: locust
+    enabled: false
+    execution: external
+    description: Python user-journey and distributed load testing.
+  jmeter:
+    displayName: Apache JMeter
+    kind: http
+    tool: jmeter
+    enabled: false
+    execution: external
+    description: Protocol-rich enterprise test plans and CLI execution.
+  gatling:
+    displayName: Gatling
+    kind: http
+    tool: gatling
+    enabled: false
+    execution: external
+    description: Code-defined high-throughput HTTP performance tests.
+  artillery:
+    displayName: Artillery
+    kind: http
+    tool: artillery
+    enabled: false
+    execution: external
+    description: Node.js and TypeScript API, WebSocket, and event-driven scenarios.
+  fortio:
+    displayName: Fortio
+    kind: http
+    tool: fortio
+    enabled: false
+    execution: external
+    description: Lightweight HTTP and gRPC checks near Kubernetes services.
+  vegeta:
+    displayName: Vegeta
+    kind: http
+    tool: vegeta
+    enabled: false
+    execution: external
+    description: Constant-rate HTTP benchmarking.
+  wrk2:
+    displayName: wrk2
+    kind: http
+    tool: wrk2
+    enabled: false
+    execution: external
+    description: High-throughput constant-rate HTTP microbenchmarks.
+  kafka:
+    displayName: Apache Kafka performance tools
+    kind: kafka
+    tool: kafka-perf
+    enabled: false
+    execution: external
+    description: Native Kafka producer and consumer throughput benchmarking.
+  pgbench:
+    displayName: PostgreSQL pgbench
+    kind: postgres
+    tool: pgbench
+    enabled: false
+    execution: external
+    description: PostgreSQL and TimescaleDB transaction, concurrency, and TPS benchmarking.
 tools:
   nativePython:
     enabled: true
     name: python-stdlib
   k6:
-    enabled: false
+    enabled: true
     command: k6
 notes:
+- k6 is the default selected runner, but it is never executed by normal push or pull-request CI.
+- The nine non-default runners are optional external tools. They are catalogued for manual or protected staging execution and do not become mandatory host dependencies.
+- The native Python runner remains available as an explicit fallback with `LOAD_TEST_RUNNER=python`.
 - The native runner is intentionally dependency-light and records HTTP latency, status, CPU, memory, and cgroup I/O counters when Kubernetes access permits.
 - A zero I/O budget means measure only; it does not mean unlimited storage capacity.
-- Run stress profiles only against an approved test environment or maintenance window.
+- Run baseline, soak, spike, and stress profiles only against an approved test environment or maintenance window.

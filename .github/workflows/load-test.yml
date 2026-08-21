@@ -1,0 +1,130 @@
+name: load-test
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: Load-test runner to plan or execute
+        required: true
+        type: choice
+        default: k6
+        options:
+          - k6
+          - locust
+          - jmeter
+          - gatling
+          - artillery
+          - fortio
+          - vegeta
+          - wrk2
+          - kafka
+          - pgbench
+      profile:
+        description: Bounded profile
+        required: true
+        type: choice
+        default: smoke
+        options:
+          - smoke
+          - baseline
+          - soak
+          - spike
+          - stress
+      mode:
+        description: Plan is safe by default; execute requires the protected runner
+        required: true
+        type: choice
+        default: plan
+        options:
+          - plan
+          - execute
+      confirm:
+        description: Confirm the reviewed target and approved staging window
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: load-test-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: inputs.mode == 'plan'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.11'
+      - name: Install plan dependencies
+        run: python3 -m pip install -r requirements-ci.txt
+      - name: Generate no-traffic load-test plan
+        run: |
+          mkdir -p reports
+          python3 scripts/load_test.py \
+            --config config/load-test.yaml \
+            --runner "${{ inputs.runner }}" \
+            --profile "${{ inputs.profile }}" \
+            --environment staging \
+            --output reports/load-test-plan.md \
+            --redact-sensitive
+      - name: Upload load-test plan
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: urban-platform-load-test-plan
+          path: reports/load-test-plan.md
+
+  execute:
+    if: inputs.mode == 'execute' && (inputs.runner == 'k6' || inputs.runner == 'python')
+    runs-on: [self-hosted, linux, urban-platform-load-test]
+    environment:
+      name: staging-load-test
+    env:
+      LOAD_TEST_TARGET_URL: ${{ secrets.LOAD_TEST_TARGET_URL }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.11'
+      - name: Install execution dependencies
+        run: python3 -m pip install -r requirements-ci.txt
+      - name: Verify explicit approval and private target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ inputs.confirm }}" = "true"
+          test -n "${LOAD_TEST_TARGET_URL}"
+          if [[ "${{ inputs.runner }}" == "k6" ]]; then command -v k6; fi
+      - name: Execute bounded load test
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          python3 scripts/load_test.py \
+            --config config/load-test.yaml \
+            --runner "${{ inputs.runner }}" \
+            --profile "${{ inputs.profile }}" \
+            --environment staging \
+            --target-url "${LOAD_TEST_TARGET_URL}" \
+            --output reports/load-test.md \
+            --execute \
+            --redact-sensitive
+      - name: Upload load-test evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: urban-platform-load-test-evidence
+          path: reports/load-test.md
+
+  external-runner-notice:
+    if: inputs.mode == 'execute' && inputs.runner != 'k6' && inputs.runner != 'python'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Stop before generating traffic
+        run: |
+          echo "${{ inputs.runner }} is catalogued as an optional external runner, but this repository workflow only executes k6 or the native Python fallback."
+          echo "Use the generated plan and run the selected native tool from an approved staging runner with its protocol-specific configuration."
+          exit 2

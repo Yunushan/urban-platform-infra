@@ -53,6 +53,6 @@ Required for cluster deployment or project import execution:
 - OpenSSH client and `scp` for RKE2 image preload and kubeconfig repair
 - OpenSSL for lab TLS fallback
 
-For bounded capacity evidence, the built-in Python load runner is the mandatory tool in the `load-test` scope. Kubernetes access, `kubectl`, and cgroup-v2 visibility are optional measurements: HTTP results remain available when CPU, memory, or I/O telemetry cannot be sampled. See [`load-testing.md`](load-testing.md).
+For bounded capacity evidence, k6 is the default optional runner and the built-in Python load runner is the explicit fallback. Locust, JMeter, Gatling, Artillery, Fortio, Vegeta, wrk2, Kafka performance tools, and `pgbench` are optional protocol-specific tools. Kubernetes access, `kubectl`, and cgroup-v2 visibility are optional measurements: HTTP results remain available when CPU, memory, or I/O telemetry cannot be sampled. See [`load-testing.md`](load-testing.md).
 
 The doctor marks validation/lint prerequisites as blocking. Cluster tools are warnings until you run mutating targets such as `make bootstrap`, `make install-cluster`, `make deploy`, or `make import-auto`.

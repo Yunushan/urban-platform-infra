@@ -11,6 +11,7 @@ import shutil
 import statistics
 import subprocess
 import threading
+import tempfile
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
@@ -22,6 +23,31 @@ from urllib.request import Request, urlopen
 
 
 ROOT = Path(__file__).resolve().parents[1]
+FALLBACK_RUNNER = "python"
+
+
+def resolve_runner(config: dict[str, Any], requested: str) -> tuple[str, dict[str, Any]]:
+    runners = config.get("runners", {})
+    if not isinstance(runners, dict):
+        raise SystemExit("Load-test configuration must define a runners mapping.")
+    default_runner = str(config.get("defaultRunner", "k6")).strip() or "k6"
+    selected = (requested or "auto").strip().lower()
+    if selected in {"", "auto"}:
+        selected = default_runner
+    if selected == FALLBACK_RUNNER:
+        return selected, {
+            "displayName": "Native Python runner",
+            "kind": "http",
+            "tool": "python",
+            "enabled": True,
+            "execution": "native",
+            "description": "Dependency-light HTTP fallback with Kubernetes resource sampling.",
+        }
+    runner = runners.get(selected)
+    if not isinstance(runner, dict):
+        available = ", ".join(sorted([str(name) for name in runners] + [FALLBACK_RUNNER]))
+        raise SystemExit(f"Unknown load-test runner {selected!r}; choose one of: {available}.")
+    return selected, runner
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -407,9 +433,149 @@ def format_number(value: Any, digits: int = 2) -> str:
     return str(value)
 
 
+def k6_script(profile: dict[str, Any], target: str, expected_status: set[int]) -> str:
+    duration = int(profile["durationSeconds"])
+    concurrency = int(profile["concurrency"])
+    rate = float(profile["ratePerSecond"])
+    max_requests = int(profile["maxRequests"])
+    method = json.dumps(str(profile["method"]).upper())
+    target_literal = json.dumps(target)
+    expected_literal = json.dumps(sorted(expected_status))
+    thresholds = profile.get("thresholds", {}) if isinstance(profile.get("thresholds"), dict) else {}
+    error_rate = float(thresholds.get("errorRate", 0.01))
+    p95_ms = int(thresholds.get("p95Ms", 1000))
+
+    if rate > 0:
+        effective_rate = min(rate, max_requests / max(duration, 1))
+        scenario = {
+            "executor": "constant-arrival-rate",
+            "rate": max(1, math.floor(effective_rate)),
+            "timeUnit": "1s",
+            "duration": f"{duration}s",
+            "preAllocatedVUs": max(1, concurrency),
+            "maxVUs": max(1, concurrency),
+            "gracefulStop": "0s",
+        }
+    else:
+        scenario = {
+            "executor": "constant-vus",
+            "vus": max(1, concurrency),
+            "duration": f"{duration}s",
+            "gracefulStop": "0s",
+        }
+    scenario_literal = json.dumps(scenario, indent=2)
+    return f"""import http from 'k6/http';
+import {{ check }} from 'k6';
+
+const target = {target_literal};
+const expectedStatuses = new Set({expected_literal});
+
+export const options = {{
+  scenarios: {{
+    default: {scenario_literal}
+  }},
+  thresholds: {{
+    http_req_failed: ['rate<{error_rate}'],
+    http_req_duration: ['p(95)<{p95_ms}'],
+    checks: ['rate>0.99'],
+  }},
+}};
+
+export default function () {{
+  const response = http.request({method}, target, null, {{ tags: {{ component: 'urban-platform' }} }});
+  check(response, {{ 'expected status': (value) => expectedStatuses.has(value.status) }});
+}}
+"""
+
+
+def empty_k6_summary() -> dict[str, Any]:
+    return {
+        "requests": 0,
+        "errors": 1,
+        "errorRate": 1.0,
+        "rps": 0.0,
+        "latencyMs": {"min": 0.0, "avg": 0.0, "p50": 0.0, "p95": 0.0, "p99": 0.0, "max": 0.0},
+        "statusCounts": {},
+        "errorSamples": ["k6 did not produce a summary"],
+    }
+
+
+def k6_metric(summary: dict[str, Any], metric_name: str, value_name: str, default: float = 0.0) -> float:
+    metrics = summary.get("metrics", {})
+    metric = metrics.get(metric_name, {}) if isinstance(metrics, dict) else {}
+    values = metric.get("values", {}) if isinstance(metric, dict) else {}
+    try:
+        return float(values.get(value_name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def parse_k6_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    requests = int(k6_metric(summary, "http_reqs", "count", 0))
+    http_failed_rate = k6_metric(summary, "http_req_failed", "rate", 0.0)
+    checks_rate = k6_metric(summary, "checks", "rate", 1.0)
+    error_rate = max(http_failed_rate, 1.0 - checks_rate)
+    errors = min(requests, max(0, math.ceil(requests * error_rate)))
+    return {
+        "requests": requests,
+        "errors": errors,
+        "errorRate": error_rate,
+        "rps": k6_metric(summary, "http_reqs", "rate", 0.0),
+        "latencyMs": {
+            "min": k6_metric(summary, "http_req_duration", "min", 0.0),
+            "avg": k6_metric(summary, "http_req_duration", "avg", 0.0),
+            "p50": k6_metric(summary, "http_req_duration", "med", 0.0),
+            "p95": k6_metric(summary, "http_req_duration", "p(95)", 0.0),
+            "p99": k6_metric(summary, "http_req_duration", "p(99)", 0.0),
+            "max": k6_metric(summary, "http_req_duration", "max", 0.0),
+        },
+        "statusCounts": {"external-runner": requests},
+        "errorSamples": ["k6 threshold failure"] if errors else [],
+    }
+
+
+def run_k6(
+    profile: dict[str, Any],
+    target: str,
+    expected_status: set[int],
+    command: str,
+) -> tuple[dict[str, Any], list[str], bool]:
+    executable = shutil.which(command)
+    if not executable:
+        raise SystemExit(f"Selected load-test runner requires `{command}` on PATH. Install it or use LOAD_TEST_RUNNER=python.")
+    findings: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="urban-platform-k6-") as temporary_dir:
+        working_dir = Path(temporary_dir)
+        script_path = working_dir / "load-test.js"
+        summary_path = working_dir / "summary.json"
+        script_path.write_text(k6_script(profile, target, expected_status), encoding="utf-8")
+        timeout = int(profile["durationSeconds"]) + max(60, int(profile["timeoutSeconds"]))
+        try:
+            completed = subprocess.run(
+                [executable, "run", "--summary-export", str(summary_path), str(script_path)],
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            findings.append(f"{command} exceeded the bounded execution timeout of {timeout}s.")
+            return empty_k6_summary(), findings, True
+        try:
+            raw_summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            raw_summary = {}
+        summary = parse_k6_summary(raw_summary) if raw_summary else empty_k6_summary()
+        if completed.returncode != 0:
+            findings.append(f"{command} exited with status {completed.returncode}; inspect the protected runner logs.")
+        return summary, findings, completed.returncode != 0 or bool(summary["errors"])
+
+
 def render_report(
     *,
     profile_name: str,
+    runner_name: str,
+    runner: dict[str, Any],
     profile: dict[str, Any],
     target: str,
     redacted_target: str,
@@ -426,6 +592,10 @@ def render_report(
         "This report is public-safe. It records bounded test settings and aggregate metrics only. Do not place credentials, cookies, authorization headers, private hostnames, or response bodies in the report.",
         "",
         f"- Profile: `{profile_name}`",
+        f"- Runner: `{runner_name}` ({runner.get('displayName', runner_name)})",
+        f"- Runner kind: `{runner.get('kind', 'http')}`",
+        f"- Runner tool: `{runner.get('tool', 'not specified')}`",
+        f"- Environment: `{profile.get('environment', 'staging')}`",
         f"- Mode: `{'executed' if executed else 'plan-only'}`",
         f"- Target: `{redacted_target}`",
         f"- Method: `{profile.get('method', 'GET')}`",
@@ -492,7 +662,7 @@ def render_report(
             "## Safety",
             "",
             "- The runner never prints response bodies or supplied header values.",
-            "- The Make target requires `LOAD_TEST_EXECUTE=true` before it can generate traffic.",
+            "- The Make target requires `LOAD_TEST_EXECUTE=true` and `LOAD_TEST_CONFIRM=true` before it can generate traffic.",
             "- Stress profiles must use an approved test environment, maintenance window, and rollback owner.",
         ]
     )
@@ -503,6 +673,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run a bounded HTTP load test with Kubernetes resource/I/O evidence.")
     parser.add_argument("--config", default="config/load-test.yaml")
     parser.add_argument("--profile", default="smoke")
+    parser.add_argument("--environment", default="")
     parser.add_argument("--target-url", default="")
     parser.add_argument("--namespace", default="")
     parser.add_argument("--selector", default="app.kubernetes.io/part-of=urban-platform-infra")
@@ -514,7 +685,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-requests", default="")
     parser.add_argument("--timeout", default="")
     parser.add_argument("--sample-interval", default="")
-    parser.add_argument("--runner", choices=["auto", "python"], default="auto")
+    parser.add_argument("--runner", default="")
     parser.add_argument("--io-enabled", choices=["true", "false"], default="")
     parser.add_argument("--cpu-limit", default="")
     parser.add_argument("--memory-limit", default="")
@@ -526,13 +697,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", default="reports/load-test.md")
     parser.add_argument("--redact-sensitive", action="store_true")
     parser.add_argument("--execute", action="store_true")
+    parser.add_argument("--list-runners", action="store_true")
     args = parser.parse_args(argv)
 
     config_path = Path(args.config).expanduser()
     if not config_path.is_absolute():
         config_path = ROOT / config_path
     config = load_yaml(config_path)
+    if args.list_runners:
+        runners = config.get("runners", {})
+        print(f"Default runner: {config.get('defaultRunner', 'k6')}")
+        for name, runner in runners.items():
+            if isinstance(runner, dict):
+                print(f"{name}: {runner.get('displayName', name)} [{runner.get('kind', 'unknown')}] - {runner.get('description', '')}")
+        print(f"{FALLBACK_RUNNER}: Native Python runner [http] - explicit low-dependency fallback")
+        return 0
+    runner_name, runner = resolve_runner(config, args.runner)
     profile = merge_profile(config, args.profile)
+    profile["runner"] = runner_name
+    profile["environment"] = args.environment or str(profile.get("environment", "staging"))
 
     target_base = args.target_url or str(profile.get("targetUrl", ""))
     path = args.path or str(profile.get("path", "/"))
@@ -585,8 +768,15 @@ def main(argv: list[str] | None = None) -> int:
     findings: list[str] = []
 
     if not args.execute:
+        plan_findings = ["Plan only: no traffic was sent."]
+        if runner_name not in {"k6", FALLBACK_RUNNER}:
+            plan_findings.append(
+                f"{runner.get('displayName', runner_name)} is an optional external runner; install `{runner.get('tool', runner_name)}` and execute it only from the protected manual load-test workflow."
+            )
         report = render_report(
             profile_name=args.profile,
+            runner_name=runner_name,
+            runner=runner,
             profile=profile,
             target=target,
             redacted_target=redacted_target,
@@ -594,35 +784,52 @@ def main(argv: list[str] | None = None) -> int:
             summary=None,
             resources={"available": False},
             io={"available": False, "reason": "Traffic was not executed."},
-            findings=["Plan only: no traffic was sent."],
+            findings=plan_findings,
             evidence=args.evidence,
         )
         output.write_text(report, encoding="utf-8")
         print(f"Load-test plan written: {output}")
         return 0
 
+    if runner_name not in {"k6", FALLBACK_RUNNER}:
+        raise SystemExit(
+            f"Runner `{runner_name}` is catalogued for manual planning but has no built-in adapter in the bounded runner. "
+            f"Use its native tool (`{runner.get('tool', runner_name)}`) from an approved staging runner, or choose k6/python."
+        )
     if profile["method"] not in {"GET", "HEAD", "OPTIONS"}:
         raise SystemExit("Only GET, HEAD, and OPTIONS are supported by the safe native runner.")
     headers = {"User-Agent": "urban-platform-load-test/1"}
     sampler = KubernetesSampler(namespace, args.selector, sample_interval, io_enabled)
     sampler.start()
-    results, elapsed = run_load(
-        target,
-        profile["method"],
-        profile["durationSeconds"],
-        profile["concurrency"],
-        profile["ratePerSecond"],
-        profile["maxRequests"],
-        profile["timeoutSeconds"],
-        expected_status,
-        headers,
-    )
+    runner_findings: list[str] = []
+    runner_failed = False
+    if runner_name == "k6":
+        summary, runner_findings, runner_failed = run_k6(
+            profile,
+            target,
+            expected_status,
+            str(runner.get("command", "k6")),
+        )
+        elapsed = max(float(profile["durationSeconds"]), 0.001)
+    else:
+        results, elapsed = run_load(
+            target,
+            profile["method"],
+            profile["durationSeconds"],
+            profile["concurrency"],
+            profile["ratePerSecond"],
+            profile["maxRequests"],
+            profile["timeoutSeconds"],
+            expected_status,
+            headers,
+        )
+        summary = metric_summary(results, elapsed, expected_status)
     sampler.stop()
-    summary = metric_summary(results, elapsed, expected_status)
     resources = resource_summary(sampler.samples)
     io = io_summary(sampler.samples, summary["requests"], elapsed)
     if summary["errors"]:
         findings.append(f"{summary['errors']} request(s) returned an error or an unexpected status.")
+    findings.extend(runner_findings)
     if not resources["available"] and namespace:
         findings.append("CPU/memory metrics were unavailable; verify metrics-server or Prometheus Adapter and the selector.")
     if io_enabled and not io["available"] and namespace:
@@ -632,6 +839,8 @@ def main(argv: list[str] | None = None) -> int:
 
     report = render_report(
         profile_name=args.profile,
+        runner_name=runner_name,
+        runner=runner,
         profile=profile,
         target=target,
         redacted_target=redacted_target,
@@ -645,7 +854,7 @@ def main(argv: list[str] | None = None) -> int:
     output.write_text(report, encoding="utf-8")
     print(f"Load-test evidence written: {output}")
     print(f"Requests: {summary['requests']}; errors: {summary['errors']}; p95: {summary['latencyMs']['p95']:.2f}ms")
-    return 1 if summary["errors"] else 0
+    return 1 if summary["errors"] or runner_failed else 0
 
 
 if __name__ == "__main__":

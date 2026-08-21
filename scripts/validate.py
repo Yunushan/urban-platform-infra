@@ -930,6 +930,22 @@ load_test_contract = safe_load((ROOT / 'config/load-test.yaml').read_text(encodi
 load_test_profiles = load_test_contract.get('profiles', {})
 if not isinstance(load_test_profiles, dict) or not {'smoke', 'baseline', 'stress'}.issubset(load_test_profiles):
     errors.append('Load-test contract must define smoke, baseline, and stress profiles')
+load_test_runners = load_test_contract.get('runners', {})
+required_load_test_runners = {
+    'k6', 'locust', 'jmeter', 'gatling', 'artillery',
+    'fortio', 'vegeta', 'wrk2', 'kafka', 'pgbench',
+}
+if not isinstance(load_test_runners, dict) or not required_load_test_runners.issubset(load_test_runners):
+    errors.append('Load-test contract must define the ten supported optional runners')
+elif load_test_contract.get('defaultRunner') != 'k6':
+    errors.append('Load-test defaultRunner must be k6')
+else:
+    for runner_name in sorted(required_load_test_runners):
+        runner = load_test_runners.get(runner_name, {})
+        if not isinstance(runner, dict) or runner.get('kind') not in {'http', 'kafka', 'postgres'}:
+            errors.append(f'Load-test runner must define a supported kind: {runner_name}')
+        if not isinstance(runner, dict) or not runner.get('tool'):
+            errors.append(f'Load-test runner must define a tool requirement: {runner_name}')
 load_test_defaults = load_test_contract.get('defaults', {})
 if not isinstance(load_test_defaults, dict):
     errors.append('Load-test contract defaults must be a mapping')

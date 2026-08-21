@@ -49,13 +49,21 @@ scopes:
     - helm
     - helmfile
   load-test:
-    description: Controlled HTTP load generation with Kubernetes resource and I/O measurement.
+    description: Controlled optional load generation with Kubernetes resource and I/O measurement.
     mandatory:
     - python
     optional:
     - kubectl
     - k6
+    - locust
+    - jmeter
+    - gatling
+    - artillery
+    - fortio
     - vegeta
+    - wrk2
+    - kafka-perf
+    - pgbench
     - hey
     - fio
     - iostat
@@ -185,6 +193,56 @@ tools:
     - vegeta
     versionArgs:
     - -version
+  locust:
+    displayName: Locust load-test runner
+    commands:
+    - locust
+    versionArgs:
+    - --version
+  jmeter:
+    displayName: Apache JMeter load-test runner
+    commands:
+    - jmeter
+    versionArgs:
+    - --version
+  gatling:
+    displayName: Gatling load-test runner
+    commands:
+    - gatling
+    - gatling.sh
+    versionArgs:
+    - --version
+  artillery:
+    displayName: Artillery load-test runner
+    commands:
+    - artillery
+    versionArgs:
+    - --version
+  fortio:
+    displayName: Fortio load-test runner
+    commands:
+    - fortio
+    versionArgs:
+    - version
+  wrk2:
+    displayName: wrk2 load-test runner
+    commands:
+    - wrk
+    versionArgs:
+    - --version
+  kafka-perf:
+    displayName: Apache Kafka performance tools
+    commands:
+    - kafka-producer-perf-test.sh
+    - kafka-producer-perf-test
+    versionArgs:
+    - --help
+  pgbench:
+    displayName: PostgreSQL pgbench benchmark
+    commands:
+    - pgbench
+    versionArgs:
+    - --version
   hey:
     displayName: hey load-test runner
     commands:

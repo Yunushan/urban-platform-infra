@@ -136,7 +136,7 @@ def render_report(
             "## Notes",
             "",
             "- `docker-or-podman` is an alternative group; one of the two is sufficient for image workflows.",
-            "- The built-in Python load runner does not require k6, Vegeta, or hey. Those tools remain optional for teams that standardize on them.",
+            "- k6 is the default optional load-test runner. The built-in Python runner remains an explicit fallback, while protocol-specific tools remain optional and are not required by CI.",
             "- `fio` is a benchmark tool. Never run destructive I/O benchmarks against a production data volume; use a dedicated test volume and an approved maintenance window.",
         ]
     )

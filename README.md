@@ -118,7 +118,7 @@ For deploying a previously packaged application archive onto three local RKE2 no
 
 For local workstation setup and validation, run `make operator-ready`. It prepares the local Python toolchain, writes public-safe readiness and capacity reports, checks CI workflow contracts, audits private-data exposure, and runs validation/lint without exposing private operator data. See [`docs/operator-workflows.md`](docs/operator-workflows.md) and [`docs/local-toolchain.md`](docs/local-toolchain.md).
 
-Before deployment or import, check the host contract with `make tool-inventory TOOL_INVENTORY_SCOPE=deployment`. For capacity evidence, generate a no-traffic plan with `make load-test-plan LOAD_TEST_PROFILE=smoke IMPORT_REDACT=true`, then run an explicitly approved bounded profile with `make load-test LOAD_TEST_EXECUTE=true`. See [`docs/tool-inventory.md`](docs/tool-inventory.md) and [`docs/load-testing.md`](docs/load-testing.md).
+Before deployment or import, check the host contract with `make tool-inventory TOOL_INVENTORY_SCOPE=deployment`. For capacity evidence, generate a no-traffic plan with `make load-test-plan LOAD_TEST_RUNNER=k6 LOAD_TEST_PROFILE=smoke IMPORT_REDACT=true`, then run an explicitly approved bounded profile with `make load-test LOAD_TEST_RUNNER=k6 LOAD_TEST_EXECUTE=true LOAD_TEST_CONFIRM=true`. See [`docs/tool-inventory.md`](docs/tool-inventory.md) and [`docs/load-testing.md`](docs/load-testing.md).
 
 Existing Compose project compatibility check:
 
@@ -408,7 +408,7 @@ Supported database profiles are defined in [`config/databases.catalog.yaml`](con
 18. Run `make gitops-delivery-plan` before enabling Argo CD or Flux automation. Keep private repo URLs, kubeconfigs, deploy keys, and environment overlays outside public reports; production GitOps should require protected branches and signed/evidenced releases.
 19. Run `make progressive-delivery-plan` before enabling canary, blue-green, Argo Rollouts, Flagger, or service-mesh traffic shifting. Keep `autoPromotion=false` until SLO analysis, rollback drills, and GitOps ownership are reviewed.
 20. Run `make scaling-policy-plan` before enabling HPA, VPA, KEDA, or cluster autoscaler automation. Keep runtime autoscaling disabled until metrics, SLO alerts, capacity reports, and load-test evidence are reviewed.
-21. Run `make load-test-plan LOAD_TEST_PROFILE=smoke IMPORT_REDACT=true` before enabling autoscaling or declaring capacity evidence complete. Execute only an approved bounded profile and keep private target URLs and result evidence outside Git.
+21. Run `make load-test-plan LOAD_TEST_RUNNER=k6 LOAD_TEST_PROFILE=smoke IMPORT_REDACT=true` before enabling autoscaling or declaring capacity evidence complete. Execute only an approved bounded profile, use the manual `load-test` workflow or a protected operator host, and keep private target URLs and result evidence outside Git.
 22. Run `make network-connectivity-plan` before tightening egress, removing shared lab web access, or enabling Linkerd/Istio. Keep service mesh disabled until DNS, TLS, health probes, capacity, and rollback ownership are reviewed.
 23. Run `make access-governance-plan` before enabling OIDC/SSO, broad RBAC changes, tenant namespaces, or break-glass procedures. Keep user/group mappings and identity URLs outside public reports.
 24. Run `make smoke-test-plan` before production cutover. Keep private endpoints, database DSNs, synthetic monitors, and result evidence outside public reports.
