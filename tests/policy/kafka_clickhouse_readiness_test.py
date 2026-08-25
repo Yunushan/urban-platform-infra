@@ -51,7 +51,9 @@ def main() -> int:
         },
         "messaging": {
             "kafka": {
+                "image": {"digest": DIGEST},
                 "strimzi": {
+                    "operatorImage": {"digest": DIGEST},
                     "connect": {
                         "image": {"digest": DIGEST},
                         "networkPolicy": {"egressCidrs": [SYNTHETIC_PRIVATE_CIDR]},
@@ -67,6 +69,20 @@ def main() -> int:
         raise SystemExit(f"synthetic private Kafka-to-ClickHouse profile failed: {failed}")
     if sum(check.weight for check in private_checks) != 84:
         raise SystemExit("static Kafka-to-ClickHouse score weights no longer total 84")
+
+    mutable_broker_values = readiness.merge(
+        readiness.merge(public_values, private_overlay),
+        {"messaging": {"kafka": {"image": {"digest": ""}}}},
+    )
+    if readiness.static_checks(mutable_broker_values)[-1].passed:
+        raise SystemExit("a mutable Kafka broker image was accepted as a private production input")
+
+    mutable_operator_values = readiness.merge(
+        readiness.merge(public_values, private_overlay),
+        {"messaging": {"kafka": {"strimzi": {"operatorImage": {"digest": ""}}}}},
+    )
+    if readiness.static_checks(mutable_operator_values)[-1].passed:
+        raise SystemExit("a mutable Strimzi operator image was accepted as a private production input")
 
     reused_worker_group = {
         "messaging": {
@@ -137,6 +153,14 @@ def main() -> int:
         "registry.prod.corp.internal/platform/urban-platform/"
         f"clickhouse-kafka-connect@{DIGEST}"
     )
+    kafka_image = (
+        "registry.prod.corp.internal/platform/quay.io/strimzi/"
+        f"kafka@{DIGEST}"
+    )
+    operator_image = (
+        "registry.prod.corp.internal/platform/quay.io/strimzi/"
+        f"operator@{DIGEST}"
+    )
     kafka_config = {
         "offsets.topic.replication.factor": 3,
         "transaction.state.log.replication.factor": 3,
@@ -191,6 +215,7 @@ def main() -> int:
             spec={
                 "kafka": {
                     "version": "4.3.0",
+                    "image": kafka_image,
                     "listeners": [
                         {
                             "name": "tls",
@@ -205,13 +230,35 @@ def main() -> int:
                     "template": {
                         "pod": {"imagePullSecrets": [{"name": "registry-credentials"}]},
                     },
-                }
+                },
+                "kafkaExporter": {"image": kafka_image},
+                "cruiseControl": {"image": kafka_image},
+                "entityOperator": {
+                    "topicOperator": {"image": operator_image},
+                    "userOperator": {"image": operator_image},
+                },
             },
             status={
                 "kafkaVersion": "4.3.0",
                 "operatorLastSuccessfulVersion": "1.1.0",
             },
         ),
+        "deployment/strimzi-cluster-operator": {
+            "spec": {
+                "template": {
+                    "spec": {
+                        "containers": [
+                            {
+                                "name": "strimzi-cluster-operator",
+                                "image": operator_image,
+                                "env": [{"name": "STRIMZI_NAMESPACE", "value": "urban-platform"}],
+                            }
+                        ]
+                    }
+                }
+            },
+            "status": {"availableReplicas": 1},
+        },
         "kafkanodepool/dual-role": ready_resource(
             spec={
                 "replicas": 3,
@@ -273,7 +320,7 @@ def main() -> int:
                             "containers": [
                                 {
                                     "name": "kafka",
-                                    "image": "quay.io/strimzi/kafka:1.1.0-kafka-4.3.0",
+                                    "image": kafka_image,
                                 }
                             ],
                         },
@@ -435,6 +482,21 @@ def main() -> int:
         if readiness.live_checks(readiness.merge(public_values, private_overlay), Path(__file__), "urban-platform", True)[0].passed:
             raise SystemExit("non-expandable Kafka storage was accepted as production ready")
         storage_class["allowVolumeExpansion"] = True
+
+        resources["kafka/kafka"]["spec"]["kafka"]["image"] = "quay.io/strimzi/kafka:1.1.0-kafka-4.3.0"
+        if readiness.live_checks(readiness.merge(public_values, private_overlay), Path(__file__), "urban-platform", True)[0].passed:
+            raise SystemExit("a drifted Kafka CR broker image was accepted as ready")
+        resources["kafka/kafka"]["spec"]["kafka"]["image"] = kafka_image
+
+        resources["deployment/strimzi-cluster-operator"]["spec"]["template"]["spec"]["containers"][0]["image"] = "quay.io/strimzi/operator:1.1.0"
+        if readiness.live_checks(readiness.merge(public_values, private_overlay), Path(__file__), "urban-platform", True)[0].passed:
+            raise SystemExit("a mutable Strimzi operator image was accepted as ready")
+        resources["deployment/strimzi-cluster-operator"]["spec"]["template"]["spec"]["containers"][0]["image"] = operator_image
+
+        pods[0]["spec"]["containers"][0]["image"] = "quay.io/strimzi/kafka:1.1.0-kafka-4.3.0"
+        if readiness.live_checks(readiness.merge(public_values, private_overlay), Path(__file__), "urban-platform", True)[0].passed:
+            raise SystemExit("a broker pod running outside the promoted image was accepted as ready")
+        pods[0]["spec"]["containers"][0]["image"] = kafka_image
 
         resources["kafkaconnector/clickhouse-bemobile-sink"]["metadata"]["generation"] = 2
         if readiness.live_checks(readiness.merge(public_values, private_overlay), Path(__file__), "urban-platform", True)[1].passed:

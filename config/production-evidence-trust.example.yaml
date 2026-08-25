@@ -1,0 +1,13 @@
+# Copy this file to a root-owned operator path outside Git. The evidence signing
+# private key must remain in the approved signing system; the gate needs only the
+# public key and standardized Sigstore bundle.
+version: 2
+provider: cosign-key-bundle
+
+evidenceManifest:
+  publicKey: /etc/urban-platform/trust/production-evidence.pub
+  bundle: /private/production/production-evidence.sigstore.json
+
+trustedApprovers:
+  - '<security-reviewer-id>'
+  - '<release-reviewer-id>'

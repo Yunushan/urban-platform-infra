@@ -1,0 +1,13 @@
+{{- if .Values.global.releaseIdentity.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: urban-platform-release-identity
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+data:
+  releaseTag: {{ .Values.global.releaseIdentity.tag | quote }}
+  sourceRevision: {{ .Values.global.releaseIdentity.sourceRevision | quote }}
+  deploymentId: {{ .Values.global.releaseIdentity.deploymentId | quote }}
+{{- end }}

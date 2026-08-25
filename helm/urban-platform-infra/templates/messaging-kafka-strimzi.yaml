@@ -19,6 +19,7 @@
 {{- $strimziExporter := $strimzi.kafkaExporter | default dict }}
 {{- $strimziCruiseControl := $strimzi.cruiseControl | default dict }}
 {{- $strimziMetrics := $strimzi.metrics | default dict }}
+{{- $strimziOperatorImage := $strimzi.operatorImage | default dict }}
 {{- $imagePullSecrets := .Values.global.imagePullSecrets | default list }}
 {{- $plainListenerEnabled := true }}
 {{- if hasKey $strimziPlainListener "enabled" }}
@@ -126,6 +127,9 @@ metadata:
 spec:
   kafka:
     version: {{ $strimzi.kafkaVersion | default .Values.messaging.kafka.image.tag | quote }}
+    {{- if ($strimzi.useCustomKafkaImage | default false) }}
+    image: {{ include "cip.image" (list . .Values.messaging.kafka.image) | quote }}
+    {{- end }}
     {{- if $strimzi.metadataVersion }}
     metadataVersion: {{ $strimzi.metadataVersion | quote }}
     {{- end }}
@@ -211,19 +215,37 @@ spec:
     {{- end }}
   {{- if ($strimziExporter.enabled | default false) }}
   kafkaExporter:
+    {{- if ($strimzi.useCustomKafkaImage | default false) }}
+    image: {{ include "cip.image" (list . .Values.messaging.kafka.image) | quote }}
+    {{- end }}
     topicRegex: {{ $strimziExporter.topicRegex | default ".*" | quote }}
     groupRegex: {{ $strimziExporter.groupRegex | default ".*" | quote }}
   {{- end }}
   {{- if ($strimziCruiseControl.enabled | default false) }}
+  {{- if ($strimzi.useCustomKafkaImage | default false) }}
+  cruiseControl:
+    image: {{ include "cip.image" (list . .Values.messaging.kafka.image) | quote }}
+  {{- else }}
   cruiseControl: {}
+  {{- end }}
   {{- end }}
   {{- if $entityOperatorEnabled }}
   entityOperator:
     {{- if $topicOperatorEnabled }}
+    {{- if and ($strimzi.useCustomKafkaImage | default false) $strimziOperatorImage.repository }}
+    topicOperator:
+      image: {{ include "cip.image" (list . $strimziOperatorImage) | quote }}
+    {{- else }}
     topicOperator: {}
     {{- end }}
+    {{- end }}
     {{- if $userOperatorEnabled }}
+    {{- if and ($strimzi.useCustomKafkaImage | default false) $strimziOperatorImage.repository }}
+    userOperator:
+      image: {{ include "cip.image" (list . $strimziOperatorImage) | quote }}
+    {{- else }}
     userOperator: {}
+    {{- end }}
     {{- end }}
   {{- end }}
 ---

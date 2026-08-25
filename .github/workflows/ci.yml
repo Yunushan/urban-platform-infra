@@ -130,6 +130,7 @@ jobs:
           python3 scripts/images/validate-images.py
           python3 -m py_compile scripts/production_evidence_gate.py scripts/kafka_clickhouse_readiness.py scripts/kafka_clickhouse_reconcile.py scripts/images/registry_promotion_controller.py
           python3 tests/policy/production_evidence_gate_test.py
+          python3 tests/policy/tool_inventory_test.py
           python3 tests/policy/kafka_clickhouse_readiness_test.py
           python3 tests/policy/kafka_clickhouse_reconcile_test.py
       - name: Check validation tool inventory

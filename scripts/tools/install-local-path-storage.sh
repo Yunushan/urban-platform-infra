@@ -5,7 +5,16 @@ version="${LOCAL_PATH_PROVISIONER_VERSION:-v0.0.35}"
 storage_class="${LOCAL_PATH_STORAGE_CLASS:-local-path}"
 make_default="${LOCAL_PATH_STORAGE_DEFAULT:-true}"
 timeout="${LOCAL_PATH_ROLLOUT_TIMEOUT:-180s}"
-manifest_url="${LOCAL_PATH_PROVISIONER_MANIFEST_URL:-https://raw.githubusercontent.com/rancher/local-path-provisioner/${version}/deploy/local-path-storage.yaml}"
+manifest_commit="${LOCAL_PATH_PROVISIONER_COMMIT:-}"
+if [ -z "${manifest_commit}" ] && [ "${version}" = "v0.0.35" ]; then
+  manifest_commit="d0d5dd11912a806b25dfa36250e9f931212581c8"
+fi
+manifest_ref="${manifest_commit:-${version}}"
+manifest_url="${LOCAL_PATH_PROVISIONER_MANIFEST_URL:-https://raw.githubusercontent.com/rancher/local-path-provisioner/${manifest_ref}/deploy/local-path-storage.yaml}"
+manifest_sha256="${LOCAL_PATH_PROVISIONER_MANIFEST_SHA256:-}"
+if [ -z "${manifest_sha256}" ] && [ "${manifest_url}" = "https://raw.githubusercontent.com/rancher/local-path-provisioner/d0d5dd11912a806b25dfa36250e9f931212581c8/deploy/local-path-storage.yaml" ]; then
+  manifest_sha256="c34a11046a555ef22c1e4125a2adaa090a1b954158840de10e4a8d27415a9cf9"
+fi
 request_timeout="${KUBECTL_REQUEST_TIMEOUT:-60s}"
 retries="${KUBECTL_RETRIES:-8}"
 retry_delay="${KUBECTL_RETRY_DELAY:-5}"
@@ -13,8 +22,46 @@ host_path="${LOCAL_PATH_STORAGE_PATH:-/opt/local-path-provisioner}"
 prepare_host_paths="${LOCAL_PATH_PREPARE_HOST_PATHS:-auto}"
 fallback_inventory_path="${FALLBACK_INVENTORY_PATH:-/tmp/urban-platform-import-inventory.yml}"
 
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$1" | awk '{print $NF}'
+  else
+    echo "sha256sum, shasum, or openssl is required to verify local-path storage." >&2
+    return 1
+  fi
+}
+
 if ! command -v kubectl >/dev/null 2>&1; then
   echo "kubectl is required to install local-path storage." >&2
+  exit 1
+fi
+if ! command -v curl >/dev/null 2>&1; then
+  echo "curl is required to download local-path storage." >&2
+  exit 1
+fi
+case "${manifest_url}" in
+  https://*) ;;
+  *)
+    echo "LOCAL_PATH_PROVISIONER_MANIFEST_URL must use HTTPS." >&2
+    exit 1
+    ;;
+esac
+if ! printf '%s\n' "${manifest_sha256}" | grep -Eq '^[A-Fa-f0-9]{64}$'; then
+  echo "No trusted local-path manifest checksum is pinned for ${version}. Set LOCAL_PATH_PROVISIONER_MANIFEST_SHA256 explicitly." >&2
+  exit 1
+fi
+
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
+manifest_file="${tmp_dir}/local-path-storage.yaml"
+curl --proto '=https' --tlsv1.2 --retry 3 -fsSL "${manifest_url}" -o "${manifest_file}"
+actual_manifest_sha256="$(sha256_file "${manifest_file}")"
+if [ "$(printf '%s' "${actual_manifest_sha256}" | tr '[:upper:]' '[:lower:]')" != "$(printf '%s' "${manifest_sha256}" | tr '[:upper:]' '[:lower:]')" ]; then
+  echo "Local-path storage manifest checksum verification failed." >&2
   exit 1
 fi
 
@@ -250,7 +297,7 @@ prepare_host_paths() {
 prepare_host_paths
 
 echo "Installing local-path provisioner ${version} from ${manifest_url}"
-kubectl_retry apply -f "${manifest_url}"
+kubectl_retry apply -f "${manifest_file}"
 kubectl_retry -n local-path-storage delete pod --field-selector=status.phase=Failed --ignore-not-found || true
 kubectl_retry -n local-path-storage rollout restart deployment/local-path-provisioner
 

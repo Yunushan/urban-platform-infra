@@ -252,6 +252,7 @@ REQUIRED = [
     'config/environment-profiles.yaml',
     'config/tooling.yaml', 'config/load-test.yaml',
     'config/supply-chain-policy.yaml', 'config/version-policy.yaml', 'config/image-policy.yaml', 'config/slo.yaml',
+    'config/production-evidence.example.yaml', 'config/production-evidence-trust.example.yaml',
     'scripts/images/validate-images.py', 'scripts/images/promotion_plan.py',
     'scripts/images/registry_promotion_controller.py',
     'scripts/runtime_hardening_plan.py',
@@ -291,7 +292,8 @@ REQUIRED = [
     'scripts/tools/helmfile-sync-retry.sh',
     'scripts/tools/install-local-path-storage.sh', 'scripts/tools/recover-helm-release.sh',
     'scripts/tools/ensure-kubeconfig.sh', 'scripts/tools/standalone-docker-config.sh',
-    'tests/policy/basic_policy.py', 'docs/hld.md', 'docs/lld.md',
+    'helm/urban-platform-infra/templates/release-identity.yaml',
+    'tests/policy/basic_policy.py', 'tests/policy/tool_inventory_test.py', 'docs/hld.md', 'docs/lld.md',
     'docs/local-toolchain.md', 'docs/tool-inventory.md', 'docs/load-testing.md', 'docs/version-management.md', 'docs/database-topologies.md', 'docs/ci-validation.md',
     'docs/operator-workflows.md',
     'docs/bootstrap-safety.md', 'docs/secrets-management.md',
@@ -925,6 +927,12 @@ else:
     for tool_name, tool in tooling_tools.items():
         if not isinstance(tool, dict) or not tool.get('commands') and not tool.get('alternatives'):
             errors.append(f'Tooling contract tool must define commands or alternatives: {tool_name}')
+    production_evidence_tools = set((tooling_scopes.get('production-evidence') or {}).get('mandatory', []) or [])
+    if not {'python', 'git', 'kubectl', 'cosign'}.issubset(production_evidence_tools):
+        errors.append('Production evidence tooling scope must require Python, Git, kubectl, and Cosign')
+    cosign_tool = tooling_tools.get('cosign', {})
+    if not isinstance(cosign_tool, dict) or cosign_tool.get('minimumVersion') != '3.1.3':
+        errors.append('Production evidence tooling contract must require Cosign 3.1.3 or newer')
 
 load_test_contract = safe_load((ROOT / 'config/load-test.yaml').read_text(encoding='utf-8'))
 load_test_profiles = load_test_contract.get('profiles', {})
@@ -1505,6 +1513,30 @@ if 'bootstrap-check' not in makefile_text or 'install-cluster-check' not in make
     errors.append('Makefile must expose Ansible check-mode targets')
 if re.search(r'^PROJECT_PATH\s*\?=\s*/', makefile_text, re.MULTILINE):
     errors.append('PROJECT_PATH must not have a committed machine-specific absolute default')
+for production_evidence_token in [
+    'PRODUCTION_EVIDENCE_TRUST_POLICY ?=',
+    '--trust-policy "$(PRODUCTION_EVIDENCE_TRUST_POLICY)"',
+]:
+    if production_evidence_token not in makefile_text:
+        errors.append(f'Makefile missing signed production evidence token: {production_evidence_token}')
+production_evidence_gate_text = (ROOT / 'scripts/production_evidence_gate.py').read_text(encoding='utf-8')
+for production_evidence_gate_token in [
+    'validate_attestation_window',
+    'validate_source_checkout',
+    'MIN_COSIGN_VERSION = (3, 1, 3)',
+    'application/vnd.dev.sigstore.bundle.v0.3+json',
+    'deploymentId',
+    'clusterUid',
+    'configmap/urban-platform-release-identity',
+    'approved_runtime_image_references',
+    'runtime_digest != declared_digest',
+]:
+    if production_evidence_gate_token not in production_evidence_gate_text:
+        errors.append(f'Production evidence gate missing anti-replay or runtime binding: {production_evidence_gate_token}')
+release_identity_template_text = (ROOT / 'helm/urban-platform-infra/templates/release-identity.yaml').read_text(encoding='utf-8')
+for release_identity_token in ['urban-platform-release-identity', 'releaseTag:', 'sourceRevision:', 'deploymentId:']:
+    if release_identity_token not in release_identity_template_text:
+        errors.append(f'Release identity template missing signed rollout token: {release_identity_token}')
 for makefile_helm_token in [
     'INGRESS ?= traefik',
     'PROJECT_PATH ?=',
@@ -1865,6 +1897,8 @@ for makefile_helm_token in [
     'DEPLOY_ENABLE_STRIMZI',
     'STRIMZI_INSTALL_SCRIPT',
     'STRIMZI_OPERATOR_CHART_VERSION',
+    'STRIMZI_OPERATOR_IMAGE_DIGEST',
+    'STRIMZI_OPERATOR_IMAGE_PULL_SECRETS',
     'STRIMZI_WATCH_NAMESPACES',
     'STRIMZI_WATCH_ANY_NAMESPACE',
     'STRIMZI_PRELOAD_IMAGES',
@@ -3929,6 +3963,9 @@ for helm_installer_token in [
     'HELM_VERSION',
     'v4.2.1',
     'https://get.helm.sh/',
+    'HELM_ARCHIVE_SHA256',
+    'checksum verification failed',
+    "--proto '=https'",
     'helm version --short',
 ]:
     if helm_installer_token not in helm_installer_text:
@@ -3940,6 +3977,9 @@ for helmfile_installer_token in [
     'HELMFILE_VERSION',
     'v1.5.3',
     'github.com/helmfile/helmfile/releases/download',
+    'HELMFILE_ARCHIVE_SHA256',
+    'checksum verification failed',
+    "--proto '=https'",
     'helmfile --version',
 ]:
     if helmfile_installer_token not in helmfile_installer_text:
@@ -3949,6 +3989,10 @@ strimzi_installer_text = (ROOT / 'scripts/tools/install-strimzi.sh').read_text(e
 for strimzi_installer_token in [
     'DEPLOY_ENABLE_STRIMZI',
     'STRIMZI_OPERATOR_CHART_VERSION',
+    'STRIMZI_OPERATOR_IMAGE_REGISTRY',
+    'STRIMZI_OPERATOR_IMAGE_REPOSITORY',
+    'STRIMZI_OPERATOR_IMAGE_DIGEST',
+    'image.imagePullSecrets',
     '1.1.0',
     'https://strimzi.io/charts/',
     'strimzi/strimzi-kafka-operator',
@@ -4016,6 +4060,10 @@ for helmfile_sync_retry_token in [
 local_path_installer_text = (ROOT / 'scripts/tools/install-local-path-storage.sh').read_text(encoding='utf-8')
 for local_path_installer_token in [
     'LOCAL_PATH_PROVISIONER_VERSION',
+    'LOCAL_PATH_PROVISIONER_COMMIT',
+    'LOCAL_PATH_PROVISIONER_MANIFEST_SHA256',
+    'd0d5dd11912a806b25dfa36250e9f931212581c8',
+    'Local-path storage manifest checksum verification failed',
     'KUBECTL_RETRIES',
     'kubectl_retry',
     'rancher/local-path-provisioner',

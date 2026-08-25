@@ -32,7 +32,7 @@ import kafka_clickhouse_readiness as readiness  # noqa: E402
 HELM_VERSION_RE = re.compile(r"v?(\d+)\.(\d+)(?:\.(\d+))?")
 HELM_DURATION_RE = re.compile(r"^(\d+)([smh])$")
 STATIC_TOTAL = 84
-REQUIRED_MINIMUM = 92
+REQUIRED_MINIMUM = 100
 REQUIRED_CRDS = {
     "kafkas.kafka.strimzi.io": "v1",
     "kafkanodepools.kafka.strimzi.io": "v1",
@@ -552,8 +552,11 @@ def strimzi_operator_preflight(
         30,
     )
     deployment = readiness.mapping(parse_json(result.stdout) if result.returncode == 0 else None)
-    desired_version = str(
-        readiness.get(values, "messaging", "kafka", "strimzi", "operatorVersion", default="")
+    desired_image = readiness.expected_component_image(
+        values,
+        readiness.mapping(
+            readiness.get(values, "messaging", "kafka", "strimzi", "operatorImage", default={})
+        ),
     )
     containers = readiness.get(deployment, "spec", "template", "spec", "containers", default=[])
     images = [str(item.get("image", "")) for item in containers if isinstance(item, dict)]
@@ -572,7 +575,7 @@ def strimzi_operator_preflight(
         (
             result.returncode == 0,
             int(readiness.get(deployment, "status", "availableReplicas", default=0) or 0) >= 1,
-            bool(desired_version) and any(desired_version in image for image in images),
+            bool(desired_image) and images == [desired_image],
             watches_target,
         )
     )

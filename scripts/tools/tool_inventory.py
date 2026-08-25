@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -14,6 +15,14 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[2]
+SEMVER_RE = re.compile(r"(?<![0-9])v?(\d+)\.(\d+)\.(\d+)(?![0-9])")
+
+
+def semantic_version(value: str) -> tuple[int, int, int] | None:
+    match = SEMVER_RE.search(value)
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -89,12 +98,22 @@ def check_tool(name: str, tool: dict[str, Any], required: bool) -> dict[str, str
     version_args = tool.get("versionArgs", [])
     probe_ok, version = run_version(command, [str(value) for value in version_args])
     expected_version = str(tool.get("expectedVersion", "")).strip()
+    minimum_version = str(tool.get("minimumVersion", "")).strip()
     if not probe_ok:
         status = "BROKEN"
         detail = f"{path} - version probe failed: {version}"
     elif expected_version and expected_version not in version:
         status = "VERSION-MISMATCH"
         detail = f"{path} - {version} (expected {expected_version})"
+    elif minimum_version:
+        installed_semver = semantic_version(version)
+        minimum_semver = semantic_version(minimum_version)
+        if installed_semver is None or minimum_semver is None or installed_semver < minimum_semver:
+            status = "VERSION-MISMATCH"
+            detail = f"{path} - {version} (minimum {minimum_version})"
+        else:
+            status = "OK"
+            detail = f"{path} - {version}"
     else:
         status = "OK"
         detail = f"{path} - {version}"

@@ -74,6 +74,21 @@ In preload lab workflows, the installer also stages `quay.io/strimzi/operator`
 and `quay.io/strimzi/kafka` onto discovered RKE2 nodes before Helm creates
 Strimzi pods.
 
+For production, point the installer at the same promoted operator image used by
+the private values overlay. The installer passes the digest and pull secret to
+the official Strimzi chart and preloads that exact reference when preloading is
+enabled:
+
+```bash
+make install-operators \
+  DEPLOY_ENABLE_STRIMZI=true \
+  STRIMZI_OPERATOR_IMAGE_REGISTRY=registry.production.example/platform \
+  STRIMZI_OPERATOR_IMAGE_REPOSITORY=quay.io/strimzi \
+  STRIMZI_OPERATOR_IMAGE_DIGEST=sha256:<reviewed-strimzi-operator-image-digest> \
+  STRIMZI_OPERATOR_IMAGE_PULL_SECRETS=registry-credentials \
+  STRIMZI_KAFKA_IMAGE=registry.production.example/platform/quay.io/strimzi/kafka@sha256:<reviewed-kafka-image-digest>
+```
+
 Then deploy Kafka as Strimzi-managed custom resources:
 
 ```bash
@@ -175,7 +190,15 @@ secretManagement:
 
 messaging:
   kafka:
+    image:
+      repository: quay.io/strimzi/kafka
+      tag: 1.1.0-kafka-4.3.0
+      digest: sha256:<reviewed-kafka-image-digest>
     strimzi:
+      operatorImage:
+        repository: quay.io/strimzi/operator
+        tag: 1.1.0
+        digest: sha256:<reviewed-strimzi-operator-image-digest>
       connect:
         image:
           repository: clickhouse-kafka-connect
@@ -188,15 +211,22 @@ messaging:
           hostname: clickhouse.production.example
 ```
 
-The reserved example hostname, documentation CIDR, and digest placeholder are
+The reserved example hostname, documentation CIDR, and digest placeholders are
 intentionally rejected by the readiness gate. Do not deploy the example file
 directly; the private copy must contain the promoted registry, pull secret,
-real DNS name, narrowly scoped egress CIDR, and reviewed digest.
+real DNS name, narrowly scoped egress CIDR, and reviewed digests.
 
 The promoted image must be based on the matching Strimzi Kafka image and
 contain the official ClickHouse connector `1.4.0`. The optional Strimzi build
 configuration pins the upstream ZIP with SHA-512, but production disables
 in-cluster builds and requires a scanned, signed, SBOM-backed private image.
+The production profile also sets `messaging.kafka.strimzi.useCustomKafkaImage`
+so the promoted, digest-pinned `messaging.kafka.image` is written to
+`Kafka.spec.kafka.image`, Kafka Exporter, and Cruise Control. The promoted
+`strimzi.operatorImage` is used by the Topic and User Operators. The live gate
+compares the exact broker and cluster-operator references and verifies all four
+component overrides in the reconciled Kafka resource; mutable defaults cannot
+earn the supply-chain points.
 When ClickHouse uses a private CA, include that CA in the promoted Java trust
 store; `?sslmode=STRICT` intentionally rejects an untrusted certificate.
 For self-managed ClickHouse, exactly-once mode additionally requires a healthy
@@ -224,7 +254,7 @@ make kafka-clickhouse-reconcile \
   KAFKA_CLICKHOUSE_PRIVATE_VALUES=/var/lib/urban-platform/private/values-production-private.yaml \
   KAFKA_CLICKHOUSE_KUBECONFIG=/root/.kube/config \
   KAFKA_CLICKHOUSE_APPLY=true \
-  KAFKA_CLICKHOUSE_MINIMUM=92
+  KAFKA_CLICKHOUSE_MINIMUM=100
 ```
 
 This is one bounded operation: it renders locally, verifies established v1
@@ -243,13 +273,13 @@ make kafka-clickhouse-readiness \
   KAFKA_CLICKHOUSE_PRIVATE_VALUES=/var/lib/urban-platform/private/values-production-private.yaml \
   KAFKA_CLICKHOUSE_KUBECONFIG=/root/.kube/config \
   KAFKA_CLICKHOUSE_LIVE=true \
-  KAFKA_CLICKHOUSE_MINIMUM=92
+  KAFKA_CLICKHOUSE_MINIMUM=100
 ```
 
 The public profile alone scores `76/100`: it proves repository controls but
 cannot prove a private endpoint, immutable promoted image, or live health. A
 private overlay raises the maximum static score to `84/100`; live broker/topic
-and Connect/connector evidence are required to cross `92/100`.
+and Connect/connector evidence are required to reach `100/100`.
 
 ## Fast Health Checks
 

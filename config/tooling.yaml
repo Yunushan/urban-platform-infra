@@ -48,6 +48,14 @@ scopes:
     - pg-tools
     - helm
     - helmfile
+  production-evidence:
+    description: Signed private release evidence and authenticated live-cluster verification.
+    mandatory:
+    - python
+    - git
+    - kubectl
+    - cosign
+    optional: []
   load-test:
     description: Controlled optional load generation with Kubernetes resource and I/O measurement.
     mandatory:
@@ -68,7 +76,7 @@ scopes:
     - fio
     - iostat
   all:
-    description: Union of validation, deployment, import, and load-test requirements.
+    description: Union of validation, deployment, import, production-evidence, and load-test requirements.
     mandatory: []
     optional: []
 tools:
@@ -167,6 +175,14 @@ tools:
     - openssl
     versionArgs:
     - version
+  cosign:
+    displayName: Cosign 3.1.3+
+    minimumVersion: 3.1.3
+    commands:
+    - cosign
+    versionArgs:
+    - version
+    - --json
   docker-or-podman:
     displayName: Docker or Podman
     alternatives:

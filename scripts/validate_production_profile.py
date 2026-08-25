@@ -58,6 +58,7 @@ def is_ip_literal(value: Any) -> bool:
 def validate_values(values: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     require(errors, get(values, "global", "environment") == "production", "global.environment must be production")
+    require(errors, get(values, "global", "releaseIdentity", "enabled") is True, "production release identity must be enabled")
     require(errors, get(values, "global", "defaultReplicas", default=0) >= 3, "global.defaultReplicas must be at least 3")
     require(errors, get(values, "global", "replicaOverride", default=None) is None, "global.replicaOverride must remain null so per-service HA replicas are preserved")
     require(errors, get(values, "global", "scheduling", "topologySpread") is True, "topology spread must be enabled")
@@ -139,6 +140,10 @@ def validate_values(values: dict[str, Any]) -> list[str]:
     require(errors, get(values, "messaging", "kafka", "strimzi", "kafkaVersion") == "4.3.0", "production Kafka version must be 4.3.0")
     strimzi = get(values, "messaging", "kafka", "strimzi", default={})
     require(errors, get(strimzi, "operatorVersion") == "1.1.0", "Apache Kafka 4.3.0 requires the reviewed Strimzi 1.1.0 operator")
+    require(errors, get(strimzi, "operatorNamespace") == "strimzi-system", "production Strimzi operator namespace must be explicit")
+    require(errors, get(strimzi, "operatorImage", "repository") == "quay.io/strimzi/operator", "production Strimzi operator image repository must be explicit")
+    require(errors, get(strimzi, "operatorImage", "tag") == "1.1.0", "production Strimzi operator image tag must match the operator version")
+    require(errors, get(strimzi, "useCustomKafkaImage") is True, "production Strimzi must consume the promoted Kafka image override")
     require(errors, get(strimzi, "listeners", "plain", "enabled") is False, "production Kafka must disable its plaintext listener")
     require(errors, get(strimzi, "listeners", "tls", "enabled") is True, "production Kafka must enable its TLS listener")
     require(errors, get(strimzi, "listeners", "tls", "authentication") == "tls", "production Kafka clients must use mutual TLS")

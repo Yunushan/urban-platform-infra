@@ -5,6 +5,13 @@
 # addresses, credentials, or customer identifiers.
 global:
   environment: production
+  # The private production overlay must set these to the signed release tag and
+  # immutable source revision before promotion.
+  releaseIdentity:
+    enabled: true
+    tag: ''
+    sourceRevision: ''
+    deploymentId: ''
   imagePullSecrets:
     - registry-credentials
   defaultReplicas: 3
@@ -525,6 +532,10 @@ messaging:
     strimzi:
       apiVersion: kafka.strimzi.io/v1
       kafkaVersion: 4.3.0
+      operatorImage:
+        repository: quay.io/strimzi/operator
+        tag: 1.1.0
+      useCustomKafkaImage: true
       deleteClaim: false
       listeners:
         plain:

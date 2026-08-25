@@ -17,8 +17,48 @@ kubeconfig_path="${OPERATOR_KUBECONFIG:-${KUBECONFIG:-${HOME}/.kube/config}}"
 preload_images="${STRIMZI_PRELOAD_IMAGES:-auto}"
 preload_script="${RKE2_IMAGE_PRELOAD_SCRIPT:-scripts/tools/preload-rke2-images.sh}"
 kafka_version="${STRIMZI_KAFKA_VERSION:-4.2.0}"
-operator_image="${STRIMZI_OPERATOR_IMAGE:-quay.io/strimzi/operator:${chart_version}}"
+operator_image_registry="${STRIMZI_OPERATOR_IMAGE_REGISTRY:-quay.io}"
+operator_image_repository="${STRIMZI_OPERATOR_IMAGE_REPOSITORY:-strimzi}"
+operator_image_name="${STRIMZI_OPERATOR_IMAGE_NAME:-operator}"
+operator_image_tag="${STRIMZI_OPERATOR_IMAGE_TAG:-${chart_version}}"
+operator_image_digest="${STRIMZI_OPERATOR_IMAGE_DIGEST:-}"
+operator_image_pull_secrets="${STRIMZI_OPERATOR_IMAGE_PULL_SECRETS:-}"
 kafka_image="${STRIMZI_KAFKA_IMAGE:-quay.io/strimzi/kafka:${chart_version}-kafka-${kafka_version}}"
+
+if [ -z "${operator_image_registry}" ] || [ -z "${operator_image_repository}" ] || [ -z "${operator_image_name}" ]; then
+  echo "Strimzi operator image registry, repository, and name must be non-empty." >&2
+  exit 2
+fi
+
+if [ -n "${operator_image_digest}" ] && [[ ! "${operator_image_digest}" =~ ^sha256:[[:xdigit:]]{64}$ ]]; then
+  echo "STRIMZI_OPERATOR_IMAGE_DIGEST must be a sha256 digest." >&2
+  exit 2
+fi
+
+operator_image="${operator_image_registry}/${operator_image_repository}/${operator_image_name}"
+helm_image_args=(
+  --set-string "image.registry=${operator_image_registry}"
+  --set-string "image.repository=${operator_image_repository}"
+  --set-string "image.name=${operator_image_name}"
+)
+if [ -n "${operator_image_digest}" ]; then
+  operator_image="${operator_image}@${operator_image_digest}"
+  helm_image_args+=(--set-string "image.digest=${operator_image_digest}")
+else
+  operator_image="${operator_image}:${operator_image_tag}"
+  helm_image_args+=(--set-string "image.tag=${operator_image_tag}")
+fi
+
+if [ -n "${operator_image_pull_secrets}" ]; then
+  IFS=',' read -r -a pull_secret_values <<< "${operator_image_pull_secrets}"
+  pull_secret_index=0
+  for pull_secret in "${pull_secret_values[@]}"; do
+    pull_secret="${pull_secret//[[:space:]]/}"
+    [ -n "${pull_secret}" ] || continue
+    helm_image_args+=(--set-string "image.imagePullSecrets[${pull_secret_index}].name=${pull_secret}")
+    pull_secret_index=$((pull_secret_index + 1))
+  done
+fi
 
 case "${chart_version}:${kafka_version}" in
   0.*:4.3.*|1.0.*:4.3.*)
@@ -115,6 +155,7 @@ while true; do
       --create-namespace \
       --version "${chart_version}" \
       "${helm_watch_args[@]}" \
+      "${helm_image_args[@]}" \
       --wait \
       --timeout "${timeout_value}"; then
     KUBECONFIG="${kubeconfig_path}" kubectl -n "${namespace}" rollout status deployment/strimzi-cluster-operator --timeout="${timeout_value}"

@@ -98,8 +98,12 @@ login is intentionally avoided.
 For an actual production readiness decision, run the private
 `make production-readiness-gate` target. It verifies that the private overlay
 and image evidence index cover the complete merged image inventory, including
-images inherited from the base values file. The public promotion planners do
-not create or fabricate scan, SBOM, signature, or promotion evidence.
+images inherited from the base values file. Its version 4 evidence contract also
+requires a Cosign-verified standardized bundle, a separate operator
+trust policy, trusted approvers, a clean signed Git revision, a short-lived
+cluster-specific deployment identity, and SHA-256 bindings for both the private
+overlay and image evidence index. The public promotion planners do not create or
+fabricate scan, SBOM, signature, or promotion evidence.
 
 ## Current Pinned Runtime Images
 

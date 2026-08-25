@@ -1,40 +1,123 @@
-# Copy this file to a private operator directory and replace every value.
+# Copy this file to a private operator directory, replace every value, and sign
+# the exact resulting bytes with the key referenced by the separate trust policy.
 # Never commit the copied file, evidence index, kubeconfig, or evidence bodies.
-version: 1
+version: 4
+
+attestation:
+  issuedAt: '<ISO-8601 timestamp>'
+  expiresAt: '<ISO-8601 timestamp no more than 24 hours after issuedAt>'
 
 release:
-  tag: v0.0.0
-  owner: platform-owner
+  tag: v1.0.0
+  owner: '<release-owner-id>'
+  sourceRevision: '<40-or-64-hex-source-revision>'
+  deploymentId: '<new UUIDv4 for this rollout>'
   valuesOverlay: /private/production/values-production-private.yaml
+  valuesOverlaySha256: sha256:<64-hex-digest>
 
 registry:
   privateRegistry: registry.example.invalid/platform
   evidenceRoot: /private/production/image-evidence
   imageEvidenceIndex: image-evidence-index.yaml
+  imageEvidenceIndexSha256: sha256:<64-hex-digest>
+  maximumEvidenceAgeDays: 30
 
 disasterRecovery:
   evidenceRoot: /private/production/dr-evidence
+  maximumEvidenceAgeDays: 180
   artifacts:
-    rtoRpo: rto-rpo.yaml
-    dependencyMap: dependency-map.yaml
-    criticalityMap: criticality-map.yaml
-    backupReplication: backup-replication.md
-    dataReplication: data-replication.md
-    crossZonePlacement: cross-zone-placement.md
-    databaseRestore: database-restore-drill.md
-    etcdRestore: etcd-restore-drill.md
-    namespaceRestore: namespace-restore-drill.md
-    applicationSmokeTest: application-smoke-test.md
-    runbook: recovery-runbook.md
-    commsPlan: continuity-comms.md
-    manualWorkaround: degraded-mode.md
-    supplierContacts: supplier-ownership.md
-    drillEvidence: restore-drill-evidence.md
-    rtoEvidence: measured-rto.md
-    postDrillReview: post-drill-review.md
+    rtoRpo:
+      path: rto-rpo.yaml
+      sha256: sha256:<64-hex-digest>
+      capturedAt: '<ISO-8601 timestamp>'
+      approvedBy: '<reviewer-id>'
+    dependencyMap:
+      path: dependency-map.yaml
+      sha256: sha256:<64-hex-digest>
+      capturedAt: '<ISO-8601 timestamp>'
+      approvedBy: '<reviewer-id>'
+    criticalityMap:
+      path: criticality-map.yaml
+      sha256: sha256:<64-hex-digest>
+      capturedAt: '<ISO-8601 timestamp>'
+      approvedBy: '<reviewer-id>'
+    backupReplication:
+      path: backup-replication.md
+      sha256: sha256:<64-hex-digest>
+      capturedAt: '<ISO-8601 timestamp>'
+      approvedBy: '<reviewer-id>'
+    dataReplication:
+      path: data-replication.md
+      sha256: sha256:<64-hex-digest>
+      capturedAt: '<ISO-8601 timestamp>'
+      approvedBy: '<reviewer-id>'
+    crossZonePlacement:
+      path: cross-zone-placement.md
+      sha256: sha256:<64-hex-digest>
+      capturedAt: '<ISO-8601 timestamp>'
+      approvedBy: '<reviewer-id>'
+    databaseRestore:
+      path: database-restore-drill.md
+      sha256: sha256:<64-hex-digest>
+      capturedAt: '<ISO-8601 timestamp>'
+      approvedBy: '<reviewer-id>'
+    etcdRestore:
+      path: etcd-restore-drill.md
+      sha256: sha256:<64-hex-digest>
+      capturedAt: '<ISO-8601 timestamp>'
+      approvedBy: '<reviewer-id>'
+    namespaceRestore:
+      path: namespace-restore-drill.md
+      sha256: sha256:<64-hex-digest>
+      capturedAt: '<ISO-8601 timestamp>'
+      approvedBy: '<reviewer-id>'
+    applicationSmokeTest:
+      path: application-smoke-test.md
+      sha256: sha256:<64-hex-digest>
+      capturedAt: '<ISO-8601 timestamp>'
+      approvedBy: '<reviewer-id>'
+    runbook:
+      path: recovery-runbook.md
+      sha256: sha256:<64-hex-digest>
+      capturedAt: '<ISO-8601 timestamp>'
+      approvedBy: '<reviewer-id>'
+    commsPlan:
+      path: continuity-comms.md
+      sha256: sha256:<64-hex-digest>
+      capturedAt: '<ISO-8601 timestamp>'
+      approvedBy: '<reviewer-id>'
+    manualWorkaround:
+      path: degraded-mode.md
+      sha256: sha256:<64-hex-digest>
+      capturedAt: '<ISO-8601 timestamp>'
+      approvedBy: '<reviewer-id>'
+    supplierContacts:
+      path: supplier-ownership.md
+      sha256: sha256:<64-hex-digest>
+      capturedAt: '<ISO-8601 timestamp>'
+      approvedBy: '<reviewer-id>'
+    drillEvidence:
+      path: restore-drill-evidence.md
+      sha256: sha256:<64-hex-digest>
+      capturedAt: '<ISO-8601 timestamp>'
+      approvedBy: '<reviewer-id>'
+    rtoEvidence:
+      path: measured-rto.md
+      sha256: sha256:<64-hex-digest>
+      capturedAt: '<ISO-8601 timestamp>'
+      approvedBy: '<reviewer-id>'
+    postDrillReview:
+      path: post-drill-review.md
+      sha256: sha256:<64-hex-digest>
+      capturedAt: '<ISO-8601 timestamp>'
+      approvedBy: '<reviewer-id>'
 
 liveCluster:
   required: true
   kubeconfig: /private/production/operator.kubeconfig
+  clusterUid: '<kube-system Namespace metadata.uid>'
   namespace: urban-platform
+  minimumReadyNodes: 3
+  failureDomainLabel: kubernetes.io/hostname
+  expectedPostgresClusters: 18
   expectedKafkaVersion: 4.3.0

@@ -2,6 +2,11 @@
 # Never commit the real registry, endpoint, CIDRs, secret paths, or digest.
 global:
   imageRegistry: registry.production.example/platform
+  releaseIdentity:
+    enabled: true
+    tag: v1.2.3
+    sourceRevision: 0123456789abcdef0123456789abcdef01234567
+    deploymentId: 123e4567-e89b-42d3-a456-426614174000
   imagePullSecrets:
     - registry-credentials
 
@@ -52,9 +57,17 @@ secretManagement:
 
 messaging:
   kafka:
+    image:
+      repository: quay.io/strimzi/kafka
+      tag: 1.1.0-kafka-4.3.0
+      digest: sha256:<reviewed-kafka-image-digest>
     storage:
       className: replicated-rwo
     strimzi:
+      operatorImage:
+        repository: quay.io/strimzi/operator
+        tag: 1.1.0
+        digest: sha256:<reviewed-strimzi-operator-image-digest>
       connect:
         image:
           repository: clickhouse-kafka-connect

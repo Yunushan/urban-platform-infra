@@ -145,7 +145,7 @@ sanitized plan. Apply mode requires the complete 84-point static contract,
 established operator APIs, a matching available Strimzi operator, a Ready
 external secret store, expandable retained storage, and three failure domains
 before Helm can change the cluster. Helm 4 uses `--rollback-on-failure`; the
-post-deploy gate must pass twice consecutively at or above `92/100`.
+post-deploy gate must pass twice consecutively at `100/100`.
 
 Inspect the public-safe outputs after any failure:
 

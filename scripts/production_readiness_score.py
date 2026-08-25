@@ -107,11 +107,14 @@ def documentation_check() -> Check:
         "config/image-policy.yaml",
         "config/version-policy.yaml",
         "config/production-evidence.example.yaml",
+        "config/production-evidence-trust.example.yaml",
         "scripts/production_evidence_gate.py",
         "scripts/kafka_clickhouse_readiness.py",
         "scripts/kafka_clickhouse_reconcile.py",
         "tests/policy/production_render.py",
+        "helm/urban-platform-infra/templates/release-identity.yaml",
         "tests/policy/production_evidence_gate_test.py",
+        "tests/policy/tool_inventory_test.py",
         "tests/policy/kafka_clickhouse_readiness_test.py",
         "tests/policy/kafka_clickhouse_reconcile_test.py",
     ]
@@ -125,7 +128,43 @@ def documentation_check() -> Check:
         or "values-production.yaml" not in workflow
     ):
         return Check("Operations and release evidence coverage", 10, False, "release workflow does not enforce the production contract")
-    return Check("Operations and release evidence coverage", 10, True, "runbooks and production release gates are present")
+    evidence_example = (ROOT / "config/production-evidence.example.yaml").read_text(encoding="utf-8")
+    for token in (
+        "version: 4",
+        "attestation:",
+        "expiresAt:",
+        "sourceRevision:",
+        "deploymentId:",
+        "valuesOverlaySha256:",
+        "imageEvidenceIndexSha256:",
+        "maximumEvidenceAgeDays:",
+        "required: true",
+        "minimumReadyNodes: 3",
+        "clusterUid:",
+    ):
+        if token not in evidence_example:
+            return Check("Operations and release evidence coverage", 10, False, "private evidence example does not enforce the signed version 4 live contract")
+    trust_example = (ROOT / "config/production-evidence-trust.example.yaml").read_text(encoding="utf-8")
+    for token in ("version: 2", "provider: cosign-key-bundle", "publicKey:", "bundle:", "trustedApprovers:"):
+        if token not in trust_example:
+            return Check("Operations and release evidence coverage", 10, False, "operator trust example does not enforce standardized Sigstore bundle verification")
+    tooling_contract = (ROOT / "config/tooling.yaml").read_text(encoding="utf-8")
+    for token in ("production-evidence:", "- cosign", "minimumVersion: 3.1.3"):
+        if token not in tooling_contract:
+            return Check("Operations and release evidence coverage", 10, False, "production evidence tooling does not require patched Cosign")
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    if "TOOL_INVENTORY_SCOPE=production-evidence" not in makefile:
+        return Check("Operations and release evidence coverage", 10, False, "production evidence target does not verify its mandatory toolchain")
+    for test in (
+        "tests/policy/production_evidence_gate_test.py",
+        "tests/policy/tool_inventory_test.py",
+        "tests/policy/kafka_clickhouse_readiness_test.py",
+        "tests/policy/kafka_clickhouse_reconcile_test.py",
+    ):
+        passed, detail = command_result([PYTHON, test])
+        if not passed:
+            return Check("Operations and release evidence coverage", 10, False, detail)
+    return Check("Operations and release evidence coverage", 10, True, "runbooks and fail-closed production evidence gates passed")
 
 
 def main(argv: list[str] | None = None) -> int:

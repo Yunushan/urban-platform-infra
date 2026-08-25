@@ -64,7 +64,9 @@ def private_overlay() -> dict:
         },
         "messaging": {
             "kafka": {
+                "image": {"digest": DIGEST},
                 "strimzi": {
+                    "operatorImage": {"digest": DIGEST},
                     "connect": {
                         "image": {"digest": DIGEST},
                         "networkPolicy": {"egressCidrs": [PRIVATE_CIDR]},
@@ -140,7 +142,10 @@ def cluster_runner(command: list[str], _timeout: int) -> reconcile.CommandResult
                             "spec": {
                                 "containers": [
                                     {
-                                        "image": "quay.io/strimzi/operator:1.1.0",
+                                        "image": (
+                                            "registry.prod.corp.internal/platform/quay.io/"
+                                            f"strimzi/operator@{DIGEST}"
+                                        ),
                                         "env": [{"name": "STRIMZI_NAMESPACE", "value": "urban-platform"}],
                                     }
                                 ]
@@ -201,6 +206,45 @@ def main() -> int:
     if not all(stage.passed for stage in preflight):
         failed = ", ".join(stage.name for stage in preflight if not stage.passed)
         raise SystemExit(f"synthetic production cluster preflight failed: {failed}")
+
+    def mutable_operator_runner(command: list[str], timeout: int) -> reconcile.CommandResult:
+        if "deployment/strimzi-cluster-operator" in command:
+            return reconcile.CommandResult(
+                0,
+                json.dumps(
+                    {
+                        "spec": {
+                            "template": {
+                                "spec": {
+                                    "containers": [
+                                        {
+                                            "image": "quay.io/strimzi/operator:1.1.0",
+                                            "env": [
+                                                {
+                                                    "name": "STRIMZI_NAMESPACE",
+                                                    "value": "urban-platform",
+                                                }
+                                            ],
+                                        }
+                                    ]
+                                }
+                            }
+                        },
+                        "status": {"availableReplicas": 1},
+                    }
+                ),
+            )
+        return cluster_runner(command, timeout)
+
+    if reconcile.strimzi_operator_preflight(
+        values,
+        "kubectl",
+        Path("synthetic-kubeconfig"),
+        "urban-platform",
+        "strimzi-system",
+        mutable_operator_runner,
+    ).passed:
+        raise SystemExit("a mutable Strimzi operator image passed production preflight")
 
     with tempfile.TemporaryDirectory(prefix="urban-kafka-reconcile-") as directory:
         temp = Path(directory)

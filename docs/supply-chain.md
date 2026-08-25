@@ -52,6 +52,15 @@ For private repositories, GitHub artifact attestations require a plan that suppo
 
 Dependabot tracks GitHub Actions and Python CI dependencies. Pull requests run dependency review where the repository plan supports it, and private repositories keep that job non-blocking until GitHub Advanced Security or equivalent policy support is available. GitLab CI images are pinned to explicit tags instead of `latest`.
 
+## Operator Bootstrap Integrity
+
+The Helm and Helmfile installers verify downloaded release archives against
+repository-pinned official SHA-256 values before extracting or installing any
+binary. The local-path installer uses the immutable commit behind its supported
+release tag, verifies the complete manifest SHA-256 locally, and applies that
+verified file. Unsupported version overrides require an explicitly supplied
+trusted digest and fail closed when it is absent or mismatched.
+
 ## Action Pinning
 
 Full-length commit SHA pins are the preferred enterprise control for GitHub Actions because tags can move. This repository also blocks floating `@main` and `@master` action refs. Before a regulated production release, convert approved action tags to reviewed full-length commit SHAs and keep Dependabot enabled for digest updates.

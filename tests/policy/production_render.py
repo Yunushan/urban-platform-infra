@@ -56,6 +56,19 @@ def main(argv: list[str] | None = None) -> int:
     if by_kind.get("Secret"):
         errors.append("plain Kubernetes Secret manifests must not be rendered")
 
+    release_identity = next(
+        (
+            item
+            for item in by_kind.get("ConfigMap", [])
+            if item.get("metadata", {}).get("name") == "urban-platform-release-identity"
+        ),
+        None,
+    )
+    if release_identity is None:
+        errors.append("ConfigMap/urban-platform-release-identity: signed release identity is missing")
+    elif set(release_identity.get("data", {})) != {"releaseTag", "sourceRevision", "deploymentId"}:
+        errors.append("ConfigMap/urban-platform-release-identity: release tag, source revision, and deployment ID keys are required")
+
     for workload in by_kind.get("Deployment", []) + by_kind.get("StatefulSet", []):
         name = workload.get("metadata", {}).get("name", "<unknown>")
         spec = workload.get("spec", {})
@@ -125,6 +138,19 @@ def main(argv: list[str] | None = None) -> int:
         errors.append("Kafka: Apache Kafka 4.3.0 is not rendered")
     elif kafka:
         kafka_spec = kafka.get("spec", {}).get("kafka", {})
+        expected_kafka_image = "quay.io/strimzi/kafka:1.1.0-kafka-4.3.0"
+        expected_operator_image = "quay.io/strimzi/operator:1.1.0"
+        if kafka_spec.get("image") != expected_kafka_image:
+            errors.append("Kafka: the reviewed Strimzi Apache Kafka image override is not rendered")
+        if kafka.get("spec", {}).get("kafkaExporter", {}).get("image") != expected_kafka_image:
+            errors.append("Kafka: Kafka Exporter must use the reviewed Kafka image")
+        if kafka.get("spec", {}).get("cruiseControl", {}).get("image") != expected_kafka_image:
+            errors.append("Kafka: Cruise Control must use the reviewed Kafka image")
+        entity_operator = kafka.get("spec", {}).get("entityOperator", {})
+        if entity_operator.get("topicOperator", {}).get("image") != expected_operator_image:
+            errors.append("Kafka: Topic Operator must use the reviewed Strimzi operator image")
+        if entity_operator.get("userOperator", {}).get("image") != expected_operator_image:
+            errors.append("Kafka: User Operator must use the reviewed Strimzi operator image")
         kafka_pull_secrets = {
             item.get("name")
             for item in kafka_spec.get("template", {}).get("pod", {}).get("imagePullSecrets", [])

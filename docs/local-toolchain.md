@@ -53,6 +53,18 @@ Required for cluster deployment or project import execution:
 - OpenSSH client and `scp` for RKE2 image preload and kubeconfig repair
 - OpenSSL for lab TLS fallback
 
+Required for the private operational production gate:
+
+- Cosign `3.1.3` or newer
+- Git, Python, kubectl, and authenticated cluster access
+
+The Helm and Helmfile bootstrap scripts verify their downloaded archives
+against checksums pinned from the official releases before extraction. The
+local-path installer downloads an immutable upstream commit and verifies its
+pinned manifest digest before applying it. A version override fails closed
+unless its corresponding `HELM_ARCHIVE_SHA256`, `HELMFILE_ARCHIVE_SHA256`, or
+`LOCAL_PATH_PROVISIONER_MANIFEST_SHA256` is supplied from a trusted release.
+
 For bounded capacity evidence, k6 is the default optional runner and the built-in Python load runner is the explicit fallback. Locust, JMeter, Gatling, Artillery, Fortio, Vegeta, wrk2, Kafka performance tools, and `pgbench` are optional protocol-specific tools. Kubernetes access, `kubectl`, and cgroup-v2 visibility are optional measurements: HTTP results remain available when CPU, memory, or I/O telemetry cannot be sampled. See [`load-testing.md`](load-testing.md).
 
 The doctor marks validation/lint prerequisites as blocking. Cluster tools are warnings until you run mutating targets such as `make bootstrap`, `make install-cluster`, `make deploy`, or `make import-auto`.

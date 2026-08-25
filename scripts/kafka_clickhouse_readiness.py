@@ -134,6 +134,7 @@ def static_checks(values: dict[str, Any]) -> list[Check]:
     topics = topic_map(strimzi)
     source = topics.get(str(connector.get("topic", "")), {})
     dlq = topics.get(str(errors.get("deadLetterTopic", "")), {})
+    operator_image = mapping(strimzi.get("operatorImage"))
 
     broker_ok = all(
         (
@@ -141,6 +142,9 @@ def static_checks(values: dict[str, Any]) -> list[Check]:
             int(kafka.get("replicas", 0) or 0) >= 3,
             strimzi.get("kafkaVersion") == "4.3.0",
             strimzi.get("operatorVersion") == "1.1.0",
+            strimzi.get("operatorNamespace") == "strimzi-system",
+            operator_image.get("tag") == strimzi.get("operatorVersion"),
+            strimzi.get("useCustomKafkaImage") is True,
             get(strimzi, "listeners", "plain", "enabled") is False,
             get(strimzi, "listeners", "tls", "enabled") is True,
             get(strimzi, "listeners", "tls", "authentication") == "tls",
@@ -166,6 +170,7 @@ def static_checks(values: dict[str, Any]) -> list[Check]:
         )
     )
 
+    broker_image = mapping(kafka.get("image"))
     image = mapping(connect.get("image"))
     connect_ok = all(
         (
@@ -269,6 +274,10 @@ def static_checks(values: dict[str, Any]) -> list[Check]:
             all(key and not key.startswith("example/") for key in registry_remote_keys),
             bool(image.get("repository")),
             bool(DIGEST_RE.fullmatch(str(image.get("digest", "")))),
+            bool(broker_image.get("repository")),
+            bool(DIGEST_RE.fullmatch(str(broker_image.get("digest", "")))),
+            bool(operator_image.get("repository")),
+            bool(DIGEST_RE.fullmatch(str(operator_image.get("digest", "")))),
             bool(remote_keys),
             all(key and not key.startswith("example/") for key in remote_keys),
             valid_cidrs(get(connect, "networkPolicy", "egressCidrs", default=[])),
@@ -281,7 +290,7 @@ def static_checks(values: dict[str, Any]) -> list[Check]:
         Check("Kafka Connect HA and broker authentication", 16, connect_ok, "three mTLS workers with durable internal topics", True),
         Check("ClickHouse delivery and failure controls", 20, connector_ok, "bounded batching, acknowledged async inserts, retries, and DLQ", True),
         Check("Credential delivery and observability", 10, controls_ok, "ExternalSecret, metrics, exporter, and Cruise Control"),
-        Check("Private production endpoint and immutable image", 8, deployment_inputs_ok, "DNS/TLS endpoint, non-example secret refs, and digest-pinned image", True),
+        Check("Private production endpoint and immutable images", 8, deployment_inputs_ok, "DNS/TLS endpoint, non-example secret refs, and digest-pinned operator, broker, and Connect images", True),
     ]
 
 
@@ -339,7 +348,10 @@ def int_at_least(values: Any, key: str, minimum: int) -> bool:
 
 
 def expected_connect_image(values: dict[str, Any], connect: dict[str, Any]) -> str:
-    image = mapping(connect.get("image"))
+    return expected_component_image(values, mapping(connect.get("image")))
+
+
+def expected_component_image(values: dict[str, Any], image: dict[str, Any]) -> str:
     repository = str(image.get("repository", "")).strip()
     registry = str(get(values, "global", "imageRegistry", default="")).strip().rstrip("/")
     if registry:
@@ -543,19 +555,57 @@ def live_checks(values: dict[str, Any], kubeconfig: Path | None, namespace: str,
     }
     topology_key = str(get(strimzi, "rack", "topologyKey", default="topology.kubernetes.io/zone"))
     desired_replicas = int(get(values, "messaging", "kafka", "replicas", default=0) or 0)
+    expected_kafka_image = expected_component_image(
+        values,
+        mapping(get(values, "messaging", "kafka", "image", default={})),
+    )
+    expected_operator_image = expected_component_image(
+        values,
+        mapping(strimzi.get("operatorImage")),
+    )
+    operator_namespace = str(strimzi.get("operatorNamespace", "strimzi-system"))
+    operator = kubectl_json(
+        kubectl,
+        kubeconfig,
+        operator_namespace,
+        "deployment/strimzi-cluster-operator",
+    )
+    operator_containers = get(operator or {}, "spec", "template", "spec", "containers", default=[])
+    operator_images = {
+        str(container.get("image", ""))
+        for container in operator_containers
+        if isinstance(container, dict)
+    }
+    operator_namespace_values = {
+        str(env.get("value", ""))
+        for container in operator_containers
+        if isinstance(container, dict)
+        for env in container.get("env", [])
+        if isinstance(env, dict) and env.get("name") == "STRIMZI_NAMESPACE"
+    }
+    operator_watches_namespace = not operator_namespace_values or any(
+        value == "*" or namespace in {part.strip() for part in value.split(",")}
+        for value in operator_namespace_values
+    )
+    operator_ready = bool(
+        operator
+        and int(get(operator, "status", "availableReplicas", default=0) or 0) >= 1
+        and operator_images == {expected_operator_image}
+        and operator_watches_namespace
+    )
     kafka_pods = [
         pod
         for pod in pods
         if get(pod, "metadata", "labels", "strimzi.io/cluster") == "kafka"
         and get(pod, "metadata", "labels", "strimzi.io/pool-name") == node_pool_name
     ]
-    kafka_image_suffix = f"{strimzi.get('operatorVersion')}-kafka-{strimzi.get('kafkaVersion')}"
     broker_pods_ready = distributed_ready_pods(
         kafka_pods,
         nodes,
         desired_replicas,
         topology_key,
-    ) and all(kafka_image_suffix in pod_image(pod, "kafka") for pod in kafka_pods)
+        expected_kafka_image,
+    )
     desired_storage_class = str(get(values, "messaging", "kafka", "storage", "className", default=""))
     desired_storage_size = str(get(values, "messaging", "kafka", "storage", "size", default=""))
     storage_class = kubectl_json(
@@ -629,6 +679,12 @@ def live_checks(values: dict[str, Any], kubeconfig: Path | None, namespace: str,
         and dlq
         and reconciled_ready(kafka)
         and kafka_runtime.get("version") == strimzi.get("kafkaVersion")
+        and kafka_runtime.get("image") == expected_kafka_image
+        and get(kafka_spec, "kafkaExporter", "image") == expected_kafka_image
+        and get(kafka_spec, "cruiseControl", "image") == expected_kafka_image
+        and get(kafka_spec, "entityOperator", "topicOperator", "image") == expected_operator_image
+        and get(kafka_spec, "entityOperator", "userOperator", "image") == expected_operator_image
+        and operator_ready
         and str(get(kafka, "status", "kafkaVersion", default="")) == "4.3.0"
         and str(get(kafka, "status", "operatorLastSuccessfulVersion", default="")) == strimzi.get("operatorVersion")
         and broker_pods_ready
@@ -903,7 +959,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--kubeconfig", default="")
     parser.add_argument("--namespace", default="urban-platform")
     parser.add_argument("--live", action="store_true")
-    parser.add_argument("--minimum", type=int, default=92)
+    parser.add_argument("--minimum", type=int, default=100)
     parser.add_argument("--output", default=str(ROOT / "reports/kafka-clickhouse-readiness.md"))
     args = parser.parse_args(argv)
 

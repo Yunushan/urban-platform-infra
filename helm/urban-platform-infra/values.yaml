@@ -2,6 +2,11 @@ global:
   projectName: urban-platform-infra
   environment: production
   imageRegistry: ''
+  releaseIdentity:
+    enabled: false
+    tag: ''
+    sourceRevision: ''
+    deploymentId: ''
   imagePullSecrets: []
   imagePullPolicy: IfNotPresent
   enableServiceLinks: false
@@ -903,6 +908,11 @@ messaging:
     strimzi:
       installOperator: false
       operatorVersion: 1.1.0
+      operatorNamespace: strimzi-system
+      operatorImage:
+        repository: quay.io/strimzi/operator
+        tag: 1.1.0
+      useCustomKafkaImage: false
       apiVersion: kafka.strimzi.io/v1
       kafkaVersion: 4.2.0
       metadataVersion: ''
