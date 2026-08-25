@@ -4,10 +4,31 @@
 {{- $apiVersion := $strimzi.apiVersion | default "kafka.strimzi.io/v1" -}}
 {{- $kafkaApi := printf "%s/Kafka" $apiVersion -}}
 {{- $nodePoolApi := printf "%s/KafkaNodePool" $apiVersion -}}
+{{- $topics := $strimzi.topics | default dict -}}
+{{- $connect := $strimzi.connect | default dict -}}
+{{- $connector := $connect.connector | default dict -}}
+{{- $brokerMetrics := $strimzi.metrics | default dict -}}
+{{- $connectMetrics := $connect.metrics | default dict -}}
 {{- if not (.Capabilities.APIVersions.Has $kafkaApi) -}}
 {{- fail (printf "Strimzi Kafka CRD API %s is not available to Helm. Install/wait for Strimzi first, then refresh Kubernetes discovery cache and rerun the chart upgrade." $kafkaApi) -}}
 {{- end -}}
 {{- if not (.Capabilities.APIVersions.Has $nodePoolApi) -}}
 {{- fail (printf "Strimzi KafkaNodePool CRD API %s is not available to Helm. Install/wait for Strimzi first, then refresh Kubernetes discovery cache and rerun the chart upgrade." $nodePoolApi) -}}
+{{- end -}}
+{{- if and ($topics.enabled | default false) (not (.Capabilities.APIVersions.Has (printf "%s/KafkaTopic" $apiVersion))) -}}
+{{- fail (printf "Strimzi KafkaTopic CRD API %s/KafkaTopic is not available to Helm. Install/wait for the complete Strimzi CRD set before enabling managed topics." $apiVersion) -}}
+{{- end -}}
+{{- if $connect.enabled | default false -}}
+{{- range $kind := list "KafkaUser" "KafkaConnect" -}}
+{{- if not ($.Capabilities.APIVersions.Has (printf "%s/%s" $apiVersion $kind)) -}}
+{{- fail (printf "Strimzi %s CRD API %s/%s is not available to Helm. Install/wait for the complete Strimzi CRD set before enabling Kafka Connect." $kind $apiVersion $kind) -}}
+{{- end -}}
+{{- end -}}
+{{- if and ($connector.enabled | default false) (not (.Capabilities.APIVersions.Has (printf "%s/KafkaConnector" $apiVersion))) -}}
+{{- fail (printf "Strimzi KafkaConnector CRD API %s/KafkaConnector is not available to Helm. Install/wait for the complete Strimzi CRD set before enabling the ClickHouse sink." $apiVersion) -}}
+{{- end -}}
+{{- end -}}
+{{- if and (or ($brokerMetrics.enabled | default false) ($connectMetrics.enabled | default false)) (not (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PodMonitor")) -}}
+{{- fail "Prometheus Operator PodMonitor API monitoring.coreos.com/v1/PodMonitor is unavailable. Install/wait for the monitoring CRDs before enabling Kafka metrics." -}}
 {{- end -}}
 {{- end -}}

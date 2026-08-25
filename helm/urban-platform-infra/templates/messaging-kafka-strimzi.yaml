@@ -11,6 +11,79 @@
 {{- $strimziEntityOperator := $strimzi.entityOperator | default dict }}
 {{- $strimziApiVersion := $strimzi.apiVersion | default "kafka.strimzi.io/v1" }}
 {{- $strimziResources := $strimzi.resources | default .Values.messaging.kafka.resources }}
+{{- $strimziAuthorization := $strimzi.authorization | default dict }}
+{{- $strimziRack := $strimzi.rack | default dict }}
+{{- $strimziBrokerConfig := $strimzi.brokerConfig | default dict }}
+{{- $strimziScheduling := $strimzi.scheduling | default dict }}
+{{- $strimziPdb := $strimzi.podDisruptionBudget | default dict }}
+{{- $strimziExporter := $strimzi.kafkaExporter | default dict }}
+{{- $strimziCruiseControl := $strimzi.cruiseControl | default dict }}
+{{- $strimziMetrics := $strimzi.metrics | default dict }}
+{{- $imagePullSecrets := .Values.global.imagePullSecrets | default list }}
+{{- $plainListenerEnabled := true }}
+{{- if hasKey $strimziPlainListener "enabled" }}
+{{- $plainListenerEnabled = $strimziPlainListener.enabled }}
+{{- end }}
+{{- $entityOperatorEnabled := true }}
+{{- if hasKey $strimziEntityOperator "enabled" }}
+{{- $entityOperatorEnabled = $strimziEntityOperator.enabled }}
+{{- end }}
+{{- $topicOperatorEnabled := true }}
+{{- if hasKey $strimziEntityOperator "topicOperator" }}
+{{- $topicOperatorEnabled = $strimziEntityOperator.topicOperator }}
+{{- end }}
+{{- $userOperatorEnabled := true }}
+{{- if hasKey $strimziEntityOperator "userOperator" }}
+{{- $userOperatorEnabled = $strimziEntityOperator.userOperator }}
+{{- end }}
+{{- $autoCreateTopics := true }}
+{{- if hasKey $strimziBrokerConfig "autoCreateTopics" }}
+{{- $autoCreateTopics = $strimziBrokerConfig.autoCreateTopics }}
+{{- end }}
+{{- $kafkaClientPort := int (.Values.messaging.kafka.ports.client | default 9092) }}
+{{- if and (not $plainListenerEnabled) ($strimziTlsListener.enabled | default false) }}
+{{- $kafkaClientPort = 9093 }}
+{{- end }}
+{{- if ($strimziMetrics.enabled | default false) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $strimziMetrics.configMapName | default "kafka-metrics" | quote }}
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+data:
+  {{ $strimziMetrics.configMapKey | default "kafka-metrics-config.yml" }}: |
+    lowercaseOutputName: true
+    rules:
+      - pattern: kafka.server<type=(.+), name=(.+)PerSec\w*><>Count
+        name: kafka_server_$1_$2_total
+        type: COUNTER
+      - pattern: kafka.server<type=(.+), name=(.+)><>Value
+        name: kafka_server_$1_$2
+        type: GAUGE
+      - pattern: kafka.controller<type=(.+), name=(.+)><>Value
+        name: kafka_controller_$1_$2
+        type: GAUGE
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: kafka
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+    release: {{ .Values.monitoring.prometheus.releaseLabel | default "kube-prometheus-stack" | quote }}
+spec:
+  selector:
+    matchLabels:
+      strimzi.io/cluster: kafka
+      strimzi.io/kind: Kafka
+  podMetricsEndpoints:
+    - path: /metrics
+      port: tcp-prometheus
+{{- end }}
 ---
 apiVersion: {{ $strimziApiVersion }}
 kind: KafkaNodePool
@@ -57,7 +130,7 @@ spec:
     metadataVersion: {{ $strimzi.metadataVersion | quote }}
     {{- end }}
     listeners:
-      {{- if ($strimziPlainListener.enabled | default true) }}
+      {{- if $plainListenerEnabled }}
       - name: plain
         port: {{ .Values.messaging.kafka.ports.client | default 9092 }}
         type: internal
@@ -68,19 +141,88 @@ spec:
         port: 9093
         type: internal
         tls: true
+        authentication:
+          type: {{ $strimziTlsListener.authentication | default "tls" | quote }}
       {{- end }}
+    {{- if ($strimziAuthorization.enabled | default false) }}
+    authorization:
+      type: {{ $strimziAuthorization.type | default "simple" | quote }}
+      {{- with $strimziAuthorization.superUsers }}
+      superUsers:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- end }}
+    {{- if ($strimziRack.enabled | default false) }}
+    rack:
+      topologyKey: {{ $strimziRack.topologyKey | default "topology.kubernetes.io/zone" | quote }}
+    {{- end }}
     config:
       offsets.topic.replication.factor: {{ $kafkaReplicationFactor }}
       transaction.state.log.replication.factor: {{ $kafkaReplicationFactor }}
       transaction.state.log.min.isr: {{ $kafkaMinIsr }}
       default.replication.factor: {{ $kafkaReplicationFactor }}
       min.insync.replicas: {{ $kafkaMinIsr }}
-  {{- if ($strimziEntityOperator.enabled | default true) }}
+      auto.create.topics.enable: {{ $autoCreateTopics }}
+      unclean.leader.election.enable: {{ $strimziBrokerConfig.uncleanLeaderElection | default false }}
+      num.partitions: {{ $strimziBrokerConfig.numPartitions | default 3 }}
+    {{- if ($strimziMetrics.enabled | default false) }}
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef:
+          name: {{ $strimziMetrics.configMapName | default "kafka-metrics" | quote }}
+          key: {{ $strimziMetrics.configMapKey | default "kafka-metrics-config.yml" | quote }}
+    {{- end }}
+    {{- if or ($strimziScheduling.enabled | default false) $imagePullSecrets }}
+    template:
+      pod:
+        {{- with $imagePullSecrets }}
+        imagePullSecrets:
+          {{- range . }}
+          - name: {{ . | quote }}
+          {{- end }}
+        {{- end }}
+        {{- if ($strimziScheduling.enabled | default false) }}
+        topologySpreadConstraints:
+          - maxSkew: 1
+            topologyKey: topology.kubernetes.io/zone
+            whenUnsatisfiable: DoNotSchedule
+            labelSelector:
+              matchLabels:
+                strimzi.io/cluster: kafka
+          - maxSkew: 1
+            topologyKey: kubernetes.io/hostname
+            whenUnsatisfiable: DoNotSchedule
+            labelSelector:
+              matchLabels:
+                strimzi.io/cluster: kafka
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchLabels:
+                    strimzi.io/cluster: kafka
+                topologyKey: kubernetes.io/hostname
+        {{- end }}
+      {{- if ($strimziScheduling.enabled | default false) }}
+      podDisruptionBudget:
+        maxUnavailable: {{ $strimziPdb.maxUnavailable | default 1 }}
+      {{- end }}
+    {{- end }}
+  {{- if ($strimziExporter.enabled | default false) }}
+  kafkaExporter:
+    topicRegex: {{ $strimziExporter.topicRegex | default ".*" | quote }}
+    groupRegex: {{ $strimziExporter.groupRegex | default ".*" | quote }}
+  {{- end }}
+  {{- if ($strimziCruiseControl.enabled | default false) }}
+  cruiseControl: {}
+  {{- end }}
+  {{- if $entityOperatorEnabled }}
   entityOperator:
-    {{- if ($strimziEntityOperator.topicOperator | default true) }}
+    {{- if $topicOperatorEnabled }}
     topicOperator: {}
     {{- end }}
-    {{- if ($strimziEntityOperator.userOperator | default true) }}
+    {{- if $userOperatorEnabled }}
     userOperator: {}
     {{- end }}
   {{- end }}
@@ -98,8 +240,8 @@ spec:
   externalName: {{ printf "%s.%s.svc.cluster.local" ($strimzi.bootstrapService | default "kafka-kafka-bootstrap") (include "cip.namespace" .) | quote }}
   ports:
     - name: client
-      port: {{ .Values.messaging.kafka.ports.client | default 9092 }}
-      targetPort: {{ .Values.messaging.kafka.ports.client | default 9092 }}
+      port: {{ $kafkaClientPort }}
+      targetPort: {{ $kafkaClientPort }}
 {{- if .Values.messaging.kafka.ui.enabled }}
 ---
 apiVersion: apps/v1
@@ -145,7 +287,7 @@ spec:
             - name: KAFKA_CLUSTERS_0_NAME
               value: urban-platform
             - name: KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS
-              value: kafka:9092
+              value: {{ printf "kafka:%d" $kafkaClientPort | quote }}
           ports:
             - name: http
               containerPort: {{ .Values.messaging.kafka.ui.port | default 8080 }}

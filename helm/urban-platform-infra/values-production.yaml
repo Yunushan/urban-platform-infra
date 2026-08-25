@@ -5,6 +5,8 @@
 # addresses, credentials, or customer identifiers.
 global:
   environment: production
+  imagePullSecrets:
+    - registry-credentials
   defaultReplicas: 3
   replicaOverride: null
   skipPlaceholderWorkloads: true
@@ -435,6 +437,20 @@ secretManagement:
   externalSecrets:
     registryCredentials:
       enabled: true
+    clickhouseSinkCredentials:
+      enabled: true
+      targetName: clickhouse-sink-credentials
+      namespace: urban-platform
+      type: Opaque
+      creationPolicy: Owner
+      immutable: false
+      data:
+        - secretKey: username
+          remoteRef:
+            key: example/urban-platform/clickhouse/sink-username
+        - secretKey: password
+          remoteRef:
+            key: example/urban-platform/clickhouse/sink-password
     databaseBackupCredentials:
       enabled: true
       targetName: production-backup-credentials
@@ -477,6 +493,12 @@ monitoring:
   enabled: true
   prometheusRules:
     enabled: true
+    kafkaClickhouse:
+      enabled: true
+      consumerGroup: connect-clickhouse-bemobile-sink
+      sourceTopic: beMobile
+      deadLetterTopic: beMobile.clickhouse.dlq
+      maximumConsumerLag: 100000
   serviceMonitors:
     enabled: false
 
@@ -499,11 +521,142 @@ messaging:
       size: 100Gi
     image:
       repository: quay.io/strimzi/kafka
-      tag: 1.0.0-kafka-4.3.0
+      tag: 1.1.0-kafka-4.3.0
     strimzi:
       apiVersion: kafka.strimzi.io/v1
       kafkaVersion: 4.3.0
       deleteClaim: false
+      listeners:
+        plain:
+          enabled: false
+        tls:
+          enabled: true
+          authentication: tls
+      authorization:
+        enabled: true
+        type: simple
+        superUsers: []
+      rack:
+        enabled: true
+        topologyKey: topology.kubernetes.io/zone
+      brokerConfig:
+        autoCreateTopics: false
+        uncleanLeaderElection: false
+        numPartitions: 6
+      scheduling:
+        enabled: true
+      podDisruptionBudget:
+        maxUnavailable: 1
+      kafkaExporter:
+        enabled: true
+        topicRegex: .*
+        groupRegex: .*
+      cruiseControl:
+        enabled: true
+      metrics:
+        enabled: true
+        configMapName: kafka-metrics
+        configMapKey: kafka-metrics-config.yml
+      topics:
+        enabled: true
+        definitions:
+          - name: beMobile
+            partitions: 6
+            replicas: 3
+            config:
+              min.insync.replicas: 2
+              cleanup.policy: delete
+              retention.ms: 604800000
+          - name: beMobile.clickhouse.dlq
+            partitions: 3
+            replicas: 3
+            config:
+              min.insync.replicas: 2
+              cleanup.policy: delete
+              retention.ms: 2592000000
+      connect:
+        enabled: true
+        name: clickhouse-connect
+        replicas: 3
+        image:
+          repository: urban-platform/clickhouse-kafka-connect
+          tag: 1.4.0
+        build:
+          enabled: false
+        resources:
+          requests:
+            cpu: 500m
+            memory: 2Gi
+          limits:
+            cpu: 2
+            memory: 4Gi
+        metrics:
+          enabled: true
+          configMapName: clickhouse-connect-metrics
+          configMapKey: connect-metrics-config.yml
+        # A private production overlay must add the ClickHouse load-balancer
+        # CIDR(s); Kubernetes NetworkPolicy cannot authorize an FQDN directly.
+        networkPolicy:
+          enabled: true
+          egressCidrs: []
+        groupId: clickhouse-connect
+        configStorageTopic: clickhouse-connect-configs
+        offsetStorageTopic: clickhouse-connect-offsets
+        statusStorageTopic: clickhouse-connect-status
+        tls:
+          enabled: true
+          clusterCaSecret: kafka-cluster-ca-cert
+        authentication:
+          type: tls
+          userSecret: clickhouse-connect
+        credentialsSecret:
+          name: clickhouse-sink-credentials
+          usernameKey: username
+          passwordKey: password
+        connector:
+          enabled: true
+          name: clickhouse-bemobile-sink
+          consumerGroup: connect-clickhouse-bemobile-sink
+          tasksMax: 6
+          topic: beMobile
+          table: bemobile
+          database: sensordb
+          hostname: clickhouse.example.invalid
+          port: 8443
+          ssl: true
+          jdbcConnectionProperties: '?sslmode=STRICT'
+          exactlyOnce: true
+          # Set this in the private overlay for self-managed replicated ClickHouse.
+          # ClickHouse Cloud and single-cluster endpoints can leave it empty.
+          keeperOnCluster: ''
+          ignorePartitionsWhenBatching: false
+          bufferCount: 0
+          bufferFlushTimeMs: 0
+          errors:
+            tolerance: all
+            retryTimeoutMs: 300000
+            retryDelayMaxMs: 10000
+            logEnable: true
+            logIncludeMessages: false
+            deadLetterTopic: beMobile.clickhouse.dlq
+            deadLetterReplicationFactor: 3
+          consumer:
+            isolationLevel: read_committed
+            maxPollRecords: 10000
+            maxPollIntervalMs: 600000
+            fetchMaxBytes: 52428800
+            maxPartitionFetchBytes: 5242880
+            fetchMinBytes: 1048576
+            fetchMaxWaitMs: 500
+            heartbeatIntervalMs: 3000
+            sessionTimeoutMs: 30000
+          clickhouseSettings:
+            asyncInsert: true
+            waitForAsyncInsert: true
+            asyncInsertMaxDataSize: 16777216
+            asyncInsertBusyTimeoutMs: 1500
+            connectionTimeoutMs: 30000
+            socketTimeoutMs: 300000
       resources:
         requests:
           cpu: 500m

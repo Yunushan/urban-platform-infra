@@ -1,0 +1,376 @@
+{{- $kafkaProvider := .Values.messaging.kafka.provider | default "confluent" -}}
+{{- $strimzi := .Values.messaging.kafka.strimzi | default dict -}}
+{{- $strimziApiVersion := $strimzi.apiVersion | default "kafka.strimzi.io/v1" -}}
+{{- $topics := $strimzi.topics | default dict -}}
+{{- $connect := $strimzi.connect | default dict -}}
+{{- $connector := $connect.connector | default dict -}}
+{{- if and .Values.messaging.kafka.enabled (eq $kafkaProvider "strimzi") ($topics.enabled | default false) -}}
+{{- range $topic := $topics.definitions }}
+---
+apiVersion: {{ $strimziApiVersion }}
+kind: KafkaTopic
+metadata:
+  name: {{ $topic.name | lower | replace "." "-" | quote }}
+  namespace: {{ include "cip.namespace" $ }}
+  labels:
+    strimzi.io/cluster: kafka
+    {{- include "cip.labels" $ | nindent 4 }}
+  annotations:
+    strimzi.io/topic-name: {{ $topic.name | quote }}
+spec:
+  partitions: {{ $topic.partitions }}
+  replicas: {{ $topic.replicas }}
+  {{- with $topic.config }}
+  config:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{ end }}
+{{ end }}
+{{ if and .Values.messaging.kafka.enabled (eq $kafkaProvider "strimzi") ($connect.enabled | default false) -}}
+{{- $connectName := $connect.name | default "clickhouse-connect" -}}
+{{- $auth := $connect.authentication | default dict -}}
+{{- $tls := $connect.tls | default dict -}}
+{{- $credentials := $connect.credentialsSecret | default dict -}}
+{{- $build := $connect.build | default dict -}}
+{{- $buildOutput := $build.output | default dict -}}
+{{- $plugin := $build.plugin | default dict -}}
+{{- $artifact := $plugin.artifact | default dict -}}
+{{- $errors := $connector.errors | default dict -}}
+{{- $consumer := $connector.consumer | default dict -}}
+{{- $clickhouse := $connector.clickhouseSettings | default dict -}}
+{{- $connectMetrics := $connect.metrics | default dict -}}
+{{- $connectNetworkPolicy := $connect.networkPolicy | default dict -}}
+{{- $autoRestart := $connector.autoRestart | default dict -}}
+{{- $connectorName := $connector.name | default "clickhouse-bemobile-sink" -}}
+{{- $sinkConsumerGroup := $connector.consumerGroup | default (printf "connect-%s" $connectorName) -}}
+{{- $workerGroup := $connect.groupId | default $connectName -}}
+{{- $tlsEnabled := true -}}
+{{- if hasKey $tls "enabled" -}}
+{{- $tlsEnabled = $tls.enabled -}}
+{{- end -}}
+{{- $autoRestartEnabled := true -}}
+{{- if hasKey $autoRestart "enabled" -}}
+{{- $autoRestartEnabled = $connector.autoRestart.enabled -}}
+{{- end -}}
+{{- $ignorePartitionsWhenBatching := false -}}
+{{- if hasKey $connector "ignorePartitionsWhenBatching" -}}
+{{- $ignorePartitionsWhenBatching = $connector.ignorePartitionsWhenBatching -}}
+{{- end -}}
+{{- $errorsLogEnabled := true -}}
+{{- if hasKey $errors "logEnable" -}}
+{{- $errorsLogEnabled = $errors.logEnable -}}
+{{- end -}}
+{{- $errorsLogIncludeMessages := false -}}
+{{- if hasKey $errors "logIncludeMessages" -}}
+{{- $errorsLogIncludeMessages = $errors.logIncludeMessages -}}
+{{- end -}}
+{{- $sslEnabled := true -}}
+{{- if hasKey $connector "ssl" -}}
+{{- $sslEnabled = $connector.ssl -}}
+{{- end -}}
+{{- $exactlyOnceEnabled := true -}}
+{{- if hasKey $connector "exactlyOnce" -}}
+{{- $exactlyOnceEnabled = $connector.exactlyOnce -}}
+{{- end -}}
+{{- $asyncInsertEnabled := true -}}
+{{- if hasKey $clickhouse "asyncInsert" -}}
+{{- $asyncInsertEnabled = $clickhouse.asyncInsert -}}
+{{- end -}}
+{{- $waitForAsyncInsert := true -}}
+{{- if hasKey $clickhouse "waitForAsyncInsert" -}}
+{{- $waitForAsyncInsert = $clickhouse.waitForAsyncInsert -}}
+{{- end -}}
+{{- if ($connectMetrics.enabled | default false) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $connectMetrics.configMapName | default "clickhouse-connect-metrics" | quote }}
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+data:
+  {{ $connectMetrics.configMapKey | default "connect-metrics-config.yml" }}: |
+    lowercaseOutputName: true
+    rules:
+      - pattern: 'kafka.connect<type=connector-task-metrics, connector=(.+), task=(.+)><>(.+)'
+        name: kafka_connect_connector_task_$3
+        labels:
+          connector: "$1"
+          task: "$2"
+      - pattern: 'kafka.connect<type=connect-worker-metrics><>(.+)'
+        name: kafka_connect_worker_$1
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ $connectName | quote }}
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+    release: {{ .Values.monitoring.prometheus.releaseLabel | default "kube-prometheus-stack" | quote }}
+spec:
+  selector:
+    matchLabels:
+      strimzi.io/cluster: {{ $connectName | quote }}
+      strimzi.io/kind: KafkaConnect
+  podMetricsEndpoints:
+    - path: /metrics
+      port: tcp-prometheus
+{{- end }}
+---
+apiVersion: {{ $strimziApiVersion }}
+kind: KafkaUser
+metadata:
+  name: {{ $auth.userSecret | default $connectName | quote }}
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    strimzi.io/cluster: kafka
+    {{- include "cip.labels" . | nindent 4 }}
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: {{ $connector.topic | quote }}
+          patternType: literal
+        operations:
+          - Read
+          - Describe
+      - resource:
+          type: group
+          name: {{ $workerGroup | quote }}
+          patternType: literal
+        operations:
+          - Read
+      {{- if ne $sinkConsumerGroup $workerGroup }}
+      - resource:
+          type: group
+          name: {{ $sinkConsumerGroup | quote }}
+          patternType: literal
+        operations:
+          - Read
+      {{- end }}
+      {{- range $internalTopic := list ($connect.configStorageTopic | default (printf "%s-configs" $connectName)) ($connect.offsetStorageTopic | default (printf "%s-offsets" $connectName)) ($connect.statusStorageTopic | default (printf "%s-status" $connectName)) }}
+      - resource:
+          type: topic
+          name: {{ $internalTopic | quote }}
+          patternType: literal
+        operations:
+          - Create
+          - Read
+          - Write
+          - Describe
+      {{- end }}
+      - resource:
+          type: topic
+          name: {{ $errors.deadLetterTopic | quote }}
+          patternType: literal
+        operations:
+          - Create
+          - Write
+          - Describe
+      - resource:
+          type: cluster
+        operations:
+          - Describe
+---
+apiVersion: {{ $strimziApiVersion }}
+kind: KafkaConnect
+metadata:
+  name: {{ $connectName | quote }}
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+  annotations:
+    strimzi.io/use-connector-resources: "true"
+spec:
+  version: {{ $strimzi.kafkaVersion | default .Values.messaging.kafka.image.tag | quote }}
+  replicas: {{ include "cip.replicaCount" (list . ($connect.replicas | default 3)) }}
+  bootstrapServers: kafka-kafka-bootstrap:9093
+  groupId: {{ $connect.groupId | default $connectName | quote }}
+  configStorageTopic: {{ $connect.configStorageTopic | default (printf "%s-configs" $connectName) | quote }}
+  offsetStorageTopic: {{ $connect.offsetStorageTopic | default (printf "%s-offsets" $connectName) | quote }}
+  statusStorageTopic: {{ $connect.statusStorageTopic | default (printf "%s-status" $connectName) | quote }}
+  {{- if ($build.enabled | default false) }}
+  build:
+    output:
+      type: {{ $buildOutput.type | default "docker" | quote }}
+      image: {{ required "messaging.kafka.strimzi.connect.build.output.image is required when Connect build is enabled" $buildOutput.image | quote }}
+      {{- with $buildOutput.pushSecret }}
+      pushSecret: {{ . | quote }}
+      {{- end }}
+    plugins:
+      - name: {{ $plugin.name | default "clickhouse-kafka-connect" | quote }}
+        artifacts:
+          - type: {{ $artifact.type | default "zip" | quote }}
+            url: {{ required "ClickHouse connector artifact URL is required" $artifact.url | quote }}
+            sha512sum: {{ required "ClickHouse connector artifact SHA-512 is required" $artifact.sha512sum | quote }}
+  {{- else }}
+  image: {{ include "cip.image" (list . (required "messaging.kafka.strimzi.connect.image is required when Connect is enabled" $connect.image)) | quote }}
+  {{- end }}
+  {{- if $tlsEnabled }}
+  tls:
+    trustedCertificates:
+      - secretName: {{ $tls.clusterCaSecret | default "kafka-cluster-ca-cert" | quote }}
+        certificate: ca.crt
+  {{- end }}
+  authentication:
+    type: {{ $auth.type | default "tls" | quote }}
+    certificateAndKey:
+      secretName: {{ $auth.userSecret | default $connectName | quote }}
+      certificate: user.crt
+      key: user.key
+  config:
+    config.storage.replication.factor: 3
+    offset.storage.replication.factor: 3
+    status.storage.replication.factor: 3
+    connector.client.config.override.policy: All
+    config.providers: env
+    config.providers.env.class: org.apache.kafka.common.config.provider.EnvVarConfigProvider
+    key.converter: org.apache.kafka.connect.storage.StringConverter
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter.schemas.enable: false
+  {{- if ($connectMetrics.enabled | default false) }}
+  metricsConfig:
+    type: jmxPrometheusExporter
+    valueFrom:
+      configMapKeyRef:
+        name: {{ $connectMetrics.configMapName | default "clickhouse-connect-metrics" | quote }}
+        key: {{ $connectMetrics.configMapKey | default "connect-metrics-config.yml" | quote }}
+  {{- end }}
+  resources:
+    {{- toYaml $connect.resources | nindent 4 }}
+  template:
+    pod:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . | quote }}
+        {{- end }}
+      {{- end }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              strimzi.io/cluster: {{ $connectName | quote }}
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              strimzi.io/cluster: {{ $connectName | quote }}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  strimzi.io/cluster: {{ $connectName | quote }}
+              topologyKey: kubernetes.io/hostname
+    podDisruptionBudget:
+      maxUnavailable: 1
+    connectContainer:
+      env:
+        - name: CLICKHOUSE_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: {{ $credentials.name | default "clickhouse-sink-credentials" | quote }}
+              key: {{ $credentials.usernameKey | default "username" | quote }}
+        - name: CLICKHOUSE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ $credentials.name | default "clickhouse-sink-credentials" | quote }}
+              key: {{ $credentials.passwordKey | default "password" | quote }}
+  logging:
+    type: inline
+    loggers:
+      log4j.rootLogger: INFO
+      log4j.logger.com.clickhouse.kafka.connect: INFO
+{{- if and ($connectNetworkPolicy.enabled | default false) $connectNetworkPolicy.egressCidrs }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-clickhouse-egress" $connectName | quote }}
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    {{- include "cip.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      strimzi.io/cluster: {{ $connectName | quote }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        {{- range $cidr := $connectNetworkPolicy.egressCidrs }}
+        - ipBlock:
+            cidr: {{ $cidr | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ $connector.port | default 8443 }}
+{{- end }}
+{{- if ($connector.enabled | default false) }}
+---
+apiVersion: {{ $strimziApiVersion }}
+kind: KafkaConnector
+metadata:
+  name: {{ $connectorName | quote }}
+  namespace: {{ include "cip.namespace" . }}
+  labels:
+    strimzi.io/cluster: {{ $connectName | quote }}
+    {{- include "cip.labels" . | nindent 4 }}
+spec:
+  class: {{ $connector.class | default "com.clickhouse.kafka.connect.ClickHouseSinkConnector" | quote }}
+  tasksMax: {{ $connector.tasksMax | default 6 }}
+  state: running
+  autoRestart:
+    enabled: {{ $autoRestartEnabled }}
+    maxRestarts: {{ $autoRestart.maxRestarts | default 10 }}
+  config:
+    topics: {{ $connector.topic | quote }}
+    topic2TableMap: {{ printf "%s=%s" $connector.topic $connector.table | quote }}
+    hostname: {{ required "ClickHouse hostname is required when the connector is enabled" $connector.hostname | quote }}
+    port: {{ $connector.port | default 8443 | quote }}
+    database: {{ $connector.database | quote }}
+    username: "${env:CLICKHOUSE_USERNAME}"
+    password: "${env:CLICKHOUSE_PASSWORD}"
+    ssl: {{ $sslEnabled | quote }}
+    jdbcConnectionProperties: {{ $connector.jdbcConnectionProperties | default "?sslmode=STRICT" | quote }}
+    key.converter: org.apache.kafka.connect.storage.StringConverter
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter.schemas.enable: "false"
+    exactlyOnce: {{ $exactlyOnceEnabled | quote }}
+    {{- with $connector.keeperOnCluster }}
+    keeperOnCluster: {{ . | quote }}
+    {{- end }}
+    ignorePartitionsWhenBatching: {{ $ignorePartitionsWhenBatching | quote }}
+    bufferCount: {{ $connector.bufferCount | default 0 | int | quote }}
+    bufferFlushTime: {{ $connector.bufferFlushTimeMs | default 0 | int | quote }}
+    errors.retry.timeout: {{ $errors.retryTimeoutMs | default 300000 | int | quote }}
+    errors.retry.delay.max.ms: {{ $errors.retryDelayMaxMs | default 10000 | int | quote }}
+    errors.tolerance: {{ $errors.tolerance | default "all" | quote }}
+    errors.deadletterqueue.topic.name: {{ $errors.deadLetterTopic | quote }}
+    errors.deadletterqueue.topic.replication.factor: {{ $errors.deadLetterReplicationFactor | default 3 | int | quote }}
+    errors.deadletterqueue.context.headers.enable: "true"
+    errors.log.enable: {{ $errorsLogEnabled | quote }}
+    errors.log.include.messages: {{ $errorsLogIncludeMessages | quote }}
+    consumer.override.group.id: {{ $sinkConsumerGroup | quote }}
+    consumer.override.isolation.level: {{ $consumer.isolationLevel | default "read_committed" | quote }}
+    consumer.override.max.poll.records: {{ $consumer.maxPollRecords | default 10000 | int | quote }}
+    consumer.override.max.poll.interval.ms: {{ $consumer.maxPollIntervalMs | default 600000 | int | quote }}
+    consumer.override.fetch.max.bytes: {{ $consumer.fetchMaxBytes | default 52428800 | int | quote }}
+    consumer.override.max.partition.fetch.bytes: {{ $consumer.maxPartitionFetchBytes | default 5242880 | int | quote }}
+    consumer.override.fetch.min.bytes: {{ $consumer.fetchMinBytes | default 1048576 | int | quote }}
+    consumer.override.fetch.max.wait.ms: {{ $consumer.fetchMaxWaitMs | default 500 | int | quote }}
+    consumer.override.heartbeat.interval.ms: {{ $consumer.heartbeatIntervalMs | default 3000 | int | quote }}
+    consumer.override.session.timeout.ms: {{ $consumer.sessionTimeoutMs | default 30000 | int | quote }}
+    clickhouseSettings: {{ printf "async_insert=%d,wait_for_async_insert=%d,async_insert_max_data_size=%d,async_insert_busy_timeout_ms=%d,connection_timeout=%d,socket_timeout=%d" (ternary 1 0 $asyncInsertEnabled) (ternary 1 0 $waitForAsyncInsert) ($clickhouse.asyncInsertMaxDataSize | default 16777216 | int) ($clickhouse.asyncInsertBusyTimeoutMs | default 1500 | int) ($clickhouse.connectionTimeoutMs | default 30000 | int) ($clickhouse.socketTimeoutMs | default 300000 | int) | quote }}
+{{- end }}
+{{- end }}

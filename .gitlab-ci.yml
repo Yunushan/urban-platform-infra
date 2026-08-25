@@ -21,6 +21,8 @@ validate:
     - python3 scripts/tools/private_data_audit.py
     - python3 scripts/validate.py
     - python3 scripts/images/validate-images.py
+    - python3 tests/policy/kafka_clickhouse_readiness_test.py
+    - python3 tests/policy/kafka_clickhouse_reconcile_test.py
     - python3 scripts/version_policy.py check --config config/version-policy.yaml --output reports/version-policy.md
 
 render:

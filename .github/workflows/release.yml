@@ -103,6 +103,11 @@ jobs:
             -f "${HELM_CHART}/values-production.yaml" \
             --api-versions kafka.strimzi.io/v1/Kafka \
             --api-versions kafka.strimzi.io/v1/KafkaNodePool \
+            --api-versions kafka.strimzi.io/v1/KafkaTopic \
+            --api-versions kafka.strimzi.io/v1/KafkaUser \
+            --api-versions kafka.strimzi.io/v1/KafkaConnect \
+            --api-versions kafka.strimzi.io/v1/KafkaConnector \
+            --api-versions monitoring.coreos.com/v1/PodMonitor \
             --api-versions cert-manager.io/v1/Certificate \
             --api-versions cert-manager.io/v1/ClusterIssuer \
             > "${PRODUCTION_RENDERED_MANIFEST}"

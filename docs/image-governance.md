@@ -108,8 +108,8 @@ not create or fabricate scan, SBOM, signature, or promotion evidence.
 | Kafka default | `confluentinc/cp-kafka:7.9.6` |
 | Kafka Confluent KRaft profile | `confluentinc/cp-kafka:8.2.0` |
 | Kafka Apache KRaft profile | `apache/kafka:4.2.0`, `apache/kafka:4.3.0` |
-| Strimzi operator profile | `quay.io/strimzi/operator:1.0.0` |
-| Strimzi Kafka broker profile | `quay.io/strimzi/kafka:1.0.0-kafka-4.2.0` |
+| Strimzi operator profile | `quay.io/strimzi/operator:1.1.0` |
+| Strimzi Kafka broker profile | `quay.io/strimzi/kafka:1.1.0-kafka-4.2.0`, `quay.io/strimzi/kafka:1.1.0-kafka-4.3.0` |
 | ZooKeeper | `confluentinc/cp-zookeeper:7.9.6` |
 | Kafka UI | `provectuslabs/kafka-ui:v0.7.2` |
 | TimescaleDB | `timescale/timescaledb:2.26.4-pg18` |

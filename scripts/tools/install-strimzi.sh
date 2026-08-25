@@ -7,7 +7,7 @@ release="${STRIMZI_OPERATOR_RELEASE:-strimzi-kafka-operator}"
 repo_name="${STRIMZI_OPERATOR_REPO_NAME:-strimzi}"
 repo_url="${STRIMZI_OPERATOR_REPO_URL:-https://strimzi.io/charts/}"
 chart="${STRIMZI_OPERATOR_CHART:-strimzi/strimzi-kafka-operator}"
-chart_version="${STRIMZI_OPERATOR_CHART_VERSION:-1.0.0}"
+chart_version="${STRIMZI_OPERATOR_CHART_VERSION:-1.1.0}"
 timeout_value="${STRIMZI_OPERATOR_TIMEOUT:-10m}"
 retries="${STRIMZI_OPERATOR_RETRIES:-3}"
 retry_delay="${STRIMZI_OPERATOR_RETRY_DELAY:-20}"
@@ -19,6 +19,13 @@ preload_script="${RKE2_IMAGE_PRELOAD_SCRIPT:-scripts/tools/preload-rke2-images.s
 kafka_version="${STRIMZI_KAFKA_VERSION:-4.2.0}"
 operator_image="${STRIMZI_OPERATOR_IMAGE:-quay.io/strimzi/operator:${chart_version}}"
 kafka_image="${STRIMZI_KAFKA_IMAGE:-quay.io/strimzi/kafka:${chart_version}-kafka-${kafka_version}}"
+
+case "${chart_version}:${kafka_version}" in
+  0.*:4.3.*|1.0.*:4.3.*)
+    echo "Apache Kafka ${kafka_version} requires Strimzi 1.1.0 or newer; requested ${chart_version}." >&2
+    exit 2
+    ;;
+esac
 
 if [ "${enabled}" != "true" ]; then
   echo "Strimzi operator install disabled."

@@ -1,0 +1,77 @@
+# Copy this example outside Git and replace every placeholder.
+# Never commit the real registry, endpoint, CIDRs, secret paths, or digest.
+global:
+  imageRegistry: registry.production.example/platform
+  imagePullSecrets:
+    - registry-credentials
+
+# Use the reviewed replicated CSI class deployed in the real environment.
+# The reconciler requires volume expansion and reclaimPolicy Retain.
+storageTiers:
+  hot:
+    storageClassName: replicated-rwo
+
+secretManagement:
+  externalSecrets:
+    registryCredentials:
+      data:
+        - secretKey: .dockerconfigjson
+          remoteRef:
+            key: production/registry/dockerconfigjson
+    clickhouseSinkCredentials:
+      data:
+        - secretKey: username
+          remoteRef:
+            key: production/clickhouse/sink-username
+        - secretKey: password
+          remoteRef:
+            key: production/clickhouse/sink-password
+    databaseBackupCredentials:
+      data:
+        - secretKey: accessKeyId
+          remoteRef:
+            key: production/backup/access-key-id
+        - secretKey: secretAccessKey
+          remoteRef:
+            key: production/backup/secret-access-key
+    veleroBackupCredentials:
+      data:
+        - secretKey: cloud
+          remoteRef:
+            key: production/backup/velero-cloud
+    ingressTls:
+      data:
+        - secretKey: tls.crt
+          remoteRef:
+            key: production/ingress/tls
+            property: tls.crt
+        - secretKey: tls.key
+          remoteRef:
+            key: production/ingress/tls
+            property: tls.key
+
+messaging:
+  kafka:
+    storage:
+      className: replicated-rwo
+    strimzi:
+      connect:
+        image:
+          repository: clickhouse-kafka-connect
+          tag: 1.4.0
+          digest: sha256:<reviewed-image-digest>
+        networkPolicy:
+          egressCidrs:
+            - 192.0.2.44/32
+        connector:
+          hostname: clickhouse.production.example
+          # For self-managed replicated ClickHouse, set the ClickHouse cluster
+          # name and configure keeper_map_path_prefix on the server.
+          # keeperOnCluster: production-clickhouse
+  redis:
+    storage:
+      className: replicated-rwo
+
+databases:
+  storageOverride:
+    className: replicated-rwo

@@ -128,8 +128,10 @@ jobs:
         run: |
           python3 scripts/validate.py
           python3 scripts/images/validate-images.py
-          python3 -m py_compile scripts/production_evidence_gate.py scripts/images/registry_promotion_controller.py
+          python3 -m py_compile scripts/production_evidence_gate.py scripts/kafka_clickhouse_readiness.py scripts/kafka_clickhouse_reconcile.py scripts/images/registry_promotion_controller.py
           python3 tests/policy/production_evidence_gate_test.py
+          python3 tests/policy/kafka_clickhouse_readiness_test.py
+          python3 tests/policy/kafka_clickhouse_reconcile_test.py
       - name: Check validation tool inventory
         run: python3 scripts/tools/tool_inventory.py --config config/tooling.yaml --scope validation --no-fail --output reports/tool-inventory.md
       - name: Validate approval-only version policy
@@ -193,6 +195,11 @@ jobs:
             -f "${HELM_CHART}/values-production.yaml" \
             --api-versions kafka.strimzi.io/v1/Kafka \
             --api-versions kafka.strimzi.io/v1/KafkaNodePool \
+            --api-versions kafka.strimzi.io/v1/KafkaTopic \
+            --api-versions kafka.strimzi.io/v1/KafkaUser \
+            --api-versions kafka.strimzi.io/v1/KafkaConnect \
+            --api-versions kafka.strimzi.io/v1/KafkaConnector \
+            --api-versions monitoring.coreos.com/v1/PodMonitor \
             --api-versions cert-manager.io/v1/Certificate \
             --api-versions cert-manager.io/v1/ClusterIssuer \
             > reports/production-rendered.yaml

@@ -264,10 +264,72 @@ def validate_live(config: dict[str, Any], run_live: bool) -> tuple[bool, str]:
     observed_kafka = str(kafka_status.get("kafkaVersion", kafka_spec.get("kafka", {}).get("version", ""))).strip()
     if not ready_condition(kafka_status) or observed_kafka != expected_kafka:
         return False, "Apache Kafka is not Ready at the expected production version"
+    broker_spec = mapping(kafka_spec.get("kafka"))
+    listeners = broker_spec.get("listeners", [])
+    if (
+        len(listeners) != 1
+        or listeners[0].get("tls") is not True
+        or mapping(listeners[0].get("authentication")).get("type") != "tls"
+        or mapping(broker_spec.get("authorization")).get("type") != "simple"
+    ):
+        return False, "Apache Kafka does not enforce the production TLS and ACL policy"
+    broker_config = mapping(broker_spec.get("config"))
+    if (
+        broker_config.get("auto.create.topics.enable") is not False
+        or broker_config.get("unclean.leader.election.enable") is not False
+        or int(broker_config.get("default.replication.factor", 0) or 0) < 3
+        or int(broker_config.get("min.insync.replicas", 0) or 0) < 2
+    ):
+        return False, "Apache Kafka durability policy is incomplete"
     pools, detail = kubectl_json(kubectl, kubeconfig, namespace, "kafkanodepools.kafka.strimzi.io")
     if pools is None or not pools.get("items") or any(int(mapping(item.get("spec")).get("replicas", 0) or 0) < 3 for item in pools.get("items", [])):
         return False, "Kafka node pools do not provide three production replicas"
-    return True, "nodes, workloads, PostgreSQL, and Apache Kafka passed live checks"
+    topics, detail = kubectl_json(kubectl, kubeconfig, namespace, "kafkatopics.kafka.strimzi.io")
+    if topics is None:
+        return False, detail
+    topics_by_name = {
+        str(mapping(item.get("metadata")).get("annotations", {}).get("strimzi.io/topic-name", "")): item
+        for item in topics.get("items", [])
+    }
+    for topic_name, minimum_partitions in (("beMobile", 6), ("beMobile.clickhouse.dlq", 3)):
+        topic = mapping(topics_by_name.get(topic_name))
+        topic_spec = mapping(topic.get("spec"))
+        if (
+            not topic
+            or not ready_condition(mapping(topic.get("status")))
+            or int(topic_spec.get("partitions", 0) or 0) < minimum_partitions
+            or int(topic_spec.get("replicas", 0) or 0) < 3
+            or int(mapping(topic_spec.get("config")).get("min.insync.replicas", 0) or 0) < 2
+        ):
+            return False, "one or more Kafka source or DLQ topics are not Ready and durable"
+    connect, detail = kubectl_json(kubectl, kubeconfig, namespace, "kafkaconnects.kafka.strimzi.io/clickhouse-connect")
+    if connect is None:
+        return False, detail
+    connect_spec = mapping(connect.get("spec"))
+    if (
+        not ready_condition(mapping(connect.get("status")))
+        or int(connect_spec.get("replicas", 0) or 0) < 3
+        or mapping(connect_spec.get("authentication")).get("type") != "tls"
+        or not mapping(connect_spec.get("tls")).get("trustedCertificates")
+    ):
+        return False, "Kafka Connect is not Ready with three mTLS workers"
+    connector, detail = kubectl_json(kubectl, kubeconfig, namespace, "kafkaconnectors.kafka.strimzi.io/clickhouse-bemobile-sink")
+    if connector is None:
+        return False, detail
+    connector_status = mapping(mapping(connector.get("status")).get("connectorStatus"))
+    connector_state = str(mapping(connector_status.get("connector")).get("state", "")).upper()
+    connector_tasks = connector_status.get("tasks", [])
+    if (
+        not ready_condition(mapping(connector.get("status")))
+        or connector_state != "RUNNING"
+        or not connector_tasks
+        or any(str(mapping(task).get("state", "")).upper() != "RUNNING" for task in connector_tasks)
+    ):
+        return False, "ClickHouse KafkaConnector or one of its tasks is not Running"
+    user, detail = kubectl_json(kubectl, kubeconfig, namespace, "kafkausers.kafka.strimzi.io/clickhouse-connect")
+    if user is None or not ready_condition(mapping(user.get("status"))):
+        return False, "Kafka Connect mTLS user and ACLs are not Ready"
+    return True, "nodes, workloads, PostgreSQL, Kafka, topics, Connect, and ClickHouse sink passed live checks"
 
 
 def report(checks: list[tuple[str, int, bool, str]], image_count: int, dr_count: int) -> str:

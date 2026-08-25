@@ -127,7 +127,7 @@ INSTALL_CERT_MANAGER ?= $(DEPLOY_ENABLE_CERT_MANAGER)
 INSTALL_CNPG ?= $(DEPLOY_ENABLE_CNPG)
 INSTALL_EXTERNAL_SECRETS ?= $(DEPLOY_ENABLE_EXTERNAL_SECRETS)
 export INSTALL_CERT_MANAGER INSTALL_CNPG INSTALL_EXTERNAL_SECRETS
-STRIMZI_OPERATOR_CHART_VERSION ?= 1.0.0
+STRIMZI_OPERATOR_CHART_VERSION ?= 1.1.0
 STRIMZI_OPERATOR_TIMEOUT ?= 10m
 STRIMZI_WATCH_NAMESPACES ?= $(NAMESPACE)
 STRIMZI_WATCH_ANY_NAMESPACE ?= false
@@ -410,6 +410,20 @@ PRODUCTION_EVIDENCE_BASE_VALUES ?= helm/urban-platform-infra/values.yaml
 PRODUCTION_EVIDENCE_VALUES ?= helm/urban-platform-infra/values-production.yaml
 PRODUCTION_EVIDENCE_OUTPUT ?= reports/production-evidence-gate.md
 PRODUCTION_EVIDENCE_LIVE ?= true
+KAFKA_CLICKHOUSE_PRIVATE_VALUES ?=
+KAFKA_CLICKHOUSE_KUBECONFIG ?= $(OPERATOR_KUBECONFIG)
+KAFKA_CLICKHOUSE_NAMESPACE ?= $(NAMESPACE)
+KAFKA_CLICKHOUSE_MINIMUM ?= 92
+KAFKA_CLICKHOUSE_LIVE ?= true
+KAFKA_CLICKHOUSE_OUTPUT ?= reports/kafka-clickhouse-readiness.md
+KAFKA_CLICKHOUSE_APPLY ?= false
+KAFKA_CLICKHOUSE_RELEASE ?= $(PROJECT)
+KAFKA_CLICKHOUSE_STRIMZI_NAMESPACE ?= strimzi-system
+KAFKA_CLICKHOUSE_HELM_TIMEOUT ?= 20m
+KAFKA_CLICKHOUSE_READINESS_TIMEOUT ?= 1200
+KAFKA_CLICKHOUSE_POLL_INTERVAL ?= 10
+KAFKA_CLICKHOUSE_STABLE_PASSES ?= 2
+KAFKA_CLICKHOUSE_PLAN_OUTPUT ?= reports/kafka-clickhouse-reconcile.md
 RUNTIME_HARDENING_CONFIG ?= config/runtime-hardening.yaml
 RUNTIME_HARDENING_PROFILE ?=
 RUNTIME_HARDENING_OUTPUT ?= reports/runtime-hardening-plan.md
@@ -537,7 +551,7 @@ DISASTER_RECOVERY_POST_DRILL_REVIEW ?= false
 DISASTER_RECOVERY_OUTPUT ?= reports/disaster-recovery-plan.md
 DISASTER_RECOVERY_VALUES ?= reports/disaster-recovery-values.yaml
 
-.PHONY: help setup-local doctor-local ci-contract private-data-audit operator-ready tool-inventory version-policy-check version-update-plan version-update-request version-update-apply validate production-readiness production-readiness-gate production-evidence-gate image-policy image-promotion-plan registry-promotion-plan runtime-hardening-plan gitops-delivery-plan progressive-delivery-plan scaling-policy-plan network-connectivity-plan access-governance-plan compliance-evidence-plan incident-response-plan change-management-plan cutover-gate-plan smoke-test-plan load-test-runners load-test-plan load-test release-runbook-plan cluster-upgrade-plan disaster-recovery-plan lint configure backup-plan observability-plan cluster-doctor cluster-repair lab-deploy-plan capacity-preflight image-cache-plan database-migration-plan edge-migration-plan environment-profile-plan import-check import-plan import-preflight import-recovery-plan import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig configure-edge-ports install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace recover-helm-release deploy deploy-auto deploy-strimzi-kafka deploy-dry-run package-chart release-evidence verify-release-evidence status observability-status docker-up docker-down docker-status docker-standalone-config docker-standalone-up docker-standalone-down docker-standalone-status policy clean
+.PHONY: help setup-local doctor-local ci-contract private-data-audit operator-ready tool-inventory version-policy-check version-update-plan version-update-request version-update-apply validate production-readiness kafka-clickhouse-readiness kafka-clickhouse-reconcile production-readiness-gate production-evidence-gate image-policy image-promotion-plan registry-promotion-plan runtime-hardening-plan gitops-delivery-plan progressive-delivery-plan scaling-policy-plan network-connectivity-plan access-governance-plan compliance-evidence-plan incident-response-plan change-management-plan cutover-gate-plan smoke-test-plan load-test-runners load-test-plan load-test release-runbook-plan cluster-upgrade-plan disaster-recovery-plan lint configure backup-plan observability-plan cluster-doctor cluster-repair lab-deploy-plan capacity-preflight image-cache-plan database-migration-plan edge-migration-plan environment-profile-plan import-check import-plan import-preflight import-recovery-plan import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig configure-edge-ports install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace recover-helm-release deploy deploy-auto deploy-strimzi-kafka deploy-dry-run package-chart release-evidence verify-release-evidence status observability-status docker-up docker-down docker-status docker-standalone-config docker-standalone-up docker-standalone-down docker-standalone-status policy clean
 
 HELM_DEPLOY_SET_ARGS = \
 	--set namespace.create=false \
@@ -619,6 +633,14 @@ ci-contract: ## Validate GitHub/GitLab CI lane pins, actions, and gate commands.
 
 production-readiness: ## Score repository-level production readiness (100-point static contract).
 	$(PYTHON) scripts/production_readiness_score.py
+
+kafka-clickhouse-readiness: ## Score private and live Kafka-to-ClickHouse readiness; requires 92/100.
+	mkdir -p reports
+	$(PYTHON) scripts/kafka_clickhouse_readiness.py --base-values "helm/urban-platform-infra/values.yaml" --production-values "helm/urban-platform-infra/values-production.yaml" $(if $(KAFKA_CLICKHOUSE_PRIVATE_VALUES),--private-values "$(KAFKA_CLICKHOUSE_PRIVATE_VALUES)",) --kubeconfig "$(KAFKA_CLICKHOUSE_KUBECONFIG)" --namespace "$(KAFKA_CLICKHOUSE_NAMESPACE)" --minimum "$(KAFKA_CLICKHOUSE_MINIMUM)" --output "$(KAFKA_CLICKHOUSE_OUTPUT)" $(if $(filter true,$(KAFKA_CLICKHOUSE_LIVE)),--live,)
+
+kafka-clickhouse-reconcile: ## Plan or explicitly apply, wait, and prove the private Kafka-to-ClickHouse profile.
+	mkdir -p reports
+	$(PYTHON) scripts/kafka_clickhouse_reconcile.py --base-values "helm/urban-platform-infra/values.yaml" --production-values "helm/urban-platform-infra/values-production.yaml" --private-values "$(KAFKA_CLICKHOUSE_PRIVATE_VALUES)" --chart "helm/urban-platform-infra" --release "$(KAFKA_CLICKHOUSE_RELEASE)" --namespace "$(KAFKA_CLICKHOUSE_NAMESPACE)" --strimzi-namespace "$(KAFKA_CLICKHOUSE_STRIMZI_NAMESPACE)" --kubeconfig "$(KAFKA_CLICKHOUSE_KUBECONFIG)" --minimum "$(KAFKA_CLICKHOUSE_MINIMUM)" --helm-timeout "$(KAFKA_CLICKHOUSE_HELM_TIMEOUT)" --readiness-timeout-seconds "$(KAFKA_CLICKHOUSE_READINESS_TIMEOUT)" --poll-interval-seconds "$(KAFKA_CLICKHOUSE_POLL_INTERVAL)" --stable-passes "$(KAFKA_CLICKHOUSE_STABLE_PASSES)" --output "$(KAFKA_CLICKHOUSE_OUTPUT)" --plan-output "$(KAFKA_CLICKHOUSE_PLAN_OUTPUT)" $(if $(filter true,$(KAFKA_CLICKHOUSE_APPLY)),--apply,)
 
 production-evidence-gate: ## Verify private production evidence and optionally live Kubernetes health (fail closed).
 	mkdir -p reports

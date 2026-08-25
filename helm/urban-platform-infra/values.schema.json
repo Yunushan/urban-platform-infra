@@ -1183,11 +1183,14 @@
                 "installOperator": {
                   "type": "boolean"
                 },
+                "operatorVersion": {
+                  "type": "string",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+                },
                 "apiVersion": {
                   "type": "string",
                   "enum": [
-                    "kafka.strimzi.io/v1",
-                    "kafka.strimzi.io/v1beta2"
+                    "kafka.strimzi.io/v1"
                   ]
                 },
                 "kafkaVersion": {
@@ -1202,6 +1205,259 @@
                 },
                 "nodePoolName": {
                   "$ref": "#/$defs/kubernetesName"
+                },
+                "listeners": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "plain": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "enabled": { "type": "boolean" }
+                      }
+                    },
+                    "tls": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "enabled": { "type": "boolean" },
+                        "authentication": {
+                          "type": "string",
+                          "enum": ["tls", "scram-sha-512"]
+                        }
+                      }
+                    }
+                  }
+                },
+                "authorization": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "enabled": { "type": "boolean" },
+                    "type": {
+                      "type": "string",
+                      "enum": ["simple", "opa", "keycloak"]
+                    }
+                  }
+                },
+                "rack": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": { "type": "boolean" },
+                    "topologyKey": { "type": "string", "minLength": 1 }
+                  }
+                },
+                "brokerConfig": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "autoCreateTopics": { "type": "boolean" },
+                    "uncleanLeaderElection": { "type": "boolean" },
+                    "numPartitions": { "type": "integer", "minimum": 1 }
+                  }
+                },
+                "topics": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": { "type": "boolean" },
+                    "definitions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "name": { "type": "string", "minLength": 1 },
+                          "partitions": { "type": "integer", "minimum": 1 },
+                          "replicas": { "type": "integer", "minimum": 1 },
+                          "config": { "type": "object" }
+                        },
+                        "required": ["name", "partitions", "replicas"]
+                      }
+                    }
+                  }
+                },
+                "connect": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": { "type": "boolean" },
+                    "name": { "$ref": "#/$defs/kubernetesName" },
+                    "replicas": { "type": "integer", "minimum": 1 },
+                    "image": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "repository": { "type": "string" },
+                        "tag": { "type": "string" },
+                        "digest": { "type": "string" }
+                      }
+                    },
+                    "build": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "enabled": { "type": "boolean" },
+                        "output": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "type": { "type": "string", "enum": ["docker", "imagestream"] },
+                            "image": { "type": "string" },
+                            "pushSecret": { "type": "string" }
+                          }
+                        },
+                        "plugin": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "name": { "$ref": "#/$defs/kubernetesName" },
+                            "version": { "type": "string" },
+                            "artifact": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "type": { "type": "string", "enum": ["jar", "tgz", "zip", "maven", "other"] },
+                                "url": { "type": "string" },
+                                "sha512sum": { "type": "string", "pattern": "^[A-Fa-f0-9]{128}$" }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "resources": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requests": { "$ref": "#/$defs/resourceList" },
+                        "limits": { "$ref": "#/$defs/resourceList" }
+                      }
+                    },
+                    "metrics": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "enabled": { "type": "boolean" },
+                        "configMapName": { "$ref": "#/$defs/kubernetesName" },
+                        "configMapKey": { "type": "string", "minLength": 1 }
+                      }
+                    },
+                    "networkPolicy": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "enabled": { "type": "boolean" },
+                        "egressCidrs": {
+                          "type": "array",
+                          "items": { "type": "string", "minLength": 3 },
+                          "uniqueItems": true
+                        }
+                      }
+                    },
+                    "groupId": { "type": "string", "minLength": 1 },
+                    "configStorageTopic": { "type": "string", "minLength": 1 },
+                    "offsetStorageTopic": { "type": "string", "minLength": 1 },
+                    "statusStorageTopic": { "type": "string", "minLength": 1 },
+                    "tls": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "enabled": { "type": "boolean" },
+                        "clusterCaSecret": { "$ref": "#/$defs/kubernetesName" }
+                      }
+                    },
+                    "authentication": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "type": { "type": "string", "enum": ["tls"] },
+                        "userSecret": { "$ref": "#/$defs/kubernetesName" }
+                      }
+                    },
+                    "credentialsSecret": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "name": { "$ref": "#/$defs/kubernetesName" },
+                        "usernameKey": { "type": "string", "minLength": 1 },
+                        "passwordKey": { "type": "string", "minLength": 1 }
+                      }
+                    },
+                    "connector": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "enabled": { "type": "boolean" },
+                        "name": { "$ref": "#/$defs/kubernetesName" },
+                        "consumerGroup": { "type": "string", "minLength": 1 },
+                        "class": { "type": "string", "minLength": 1 },
+                        "tasksMax": { "type": "integer", "minimum": 1 },
+                        "autoRestart": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "enabled": { "type": "boolean" },
+                            "maxRestarts": { "type": "integer", "minimum": 1 }
+                          }
+                        },
+                        "topic": { "type": "string", "minLength": 1 },
+                        "table": { "type": "string", "minLength": 1 },
+                        "database": { "type": "string", "minLength": 1 },
+                        "hostname": { "type": "string" },
+                        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+                        "ssl": { "type": "boolean" },
+                        "jdbcConnectionProperties": { "type": "string" },
+                        "exactlyOnce": { "type": "boolean" },
+                        "keeperOnCluster": { "type": "string" },
+                        "ignorePartitionsWhenBatching": { "type": "boolean" },
+                        "bufferCount": { "type": "integer", "minimum": 0 },
+                        "bufferFlushTimeMs": { "type": "integer", "minimum": 0 },
+                        "errors": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "tolerance": { "type": "string", "enum": ["none", "all"] },
+                            "retryTimeoutMs": { "type": "integer", "minimum": -1 },
+                            "retryDelayMaxMs": { "type": "integer", "minimum": 0 },
+                            "logEnable": { "type": "boolean" },
+                            "logIncludeMessages": { "type": "boolean" },
+                            "deadLetterTopic": { "type": "string", "minLength": 1 },
+                            "deadLetterReplicationFactor": { "type": "integer", "minimum": 1 }
+                          }
+                        },
+                        "consumer": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "isolationLevel": { "type": "string", "enum": ["read_committed"] },
+                            "maxPollRecords": { "type": "integer", "minimum": 1 },
+                            "maxPollIntervalMs": { "type": "integer", "minimum": 1 },
+                            "fetchMaxBytes": { "type": "integer", "minimum": 1 },
+                            "maxPartitionFetchBytes": { "type": "integer", "minimum": 1 },
+                            "fetchMinBytes": { "type": "integer", "minimum": 1 },
+                            "fetchMaxWaitMs": { "type": "integer", "minimum": 0 },
+                            "heartbeatIntervalMs": { "type": "integer", "minimum": 1 },
+                            "sessionTimeoutMs": { "type": "integer", "minimum": 1 }
+                          }
+                        },
+                        "clickhouseSettings": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "asyncInsert": { "type": "boolean" },
+                            "waitForAsyncInsert": { "type": "boolean" },
+                            "asyncInsertMaxDataSize": { "type": "integer", "minimum": 1 },
+                            "asyncInsertBusyTimeoutMs": { "type": "integer", "minimum": 0 },
+                            "connectionTimeoutMs": { "type": "integer", "minimum": 1 },
+                            "socketTimeoutMs": { "type": "integer", "minimum": 1 }
+                          }
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }

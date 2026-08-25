@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +45,14 @@ def get(mapping: dict[str, Any], *keys: str, default: Any = None) -> Any:
 def require(errors: list[str], condition: bool, message: str) -> None:
     if not condition:
         errors.append(message)
+
+
+def is_ip_literal(value: Any) -> bool:
+    try:
+        ipaddress.ip_address(str(value).strip())
+    except ValueError:
+        return False
+    return True
 
 
 def validate_values(values: dict[str, Any]) -> list[str]:
@@ -128,6 +137,86 @@ def validate_values(values: dict[str, Any]) -> list[str]:
     require(errors, get(values, "messaging", "kafka", "replicas", default=0) >= 3, "Kafka must have at least three brokers")
     require(errors, get(values, "messaging", "kafka", "compatibilitySecurityContext") is False, "Kafka compatibility security mode must be disabled")
     require(errors, get(values, "messaging", "kafka", "strimzi", "kafkaVersion") == "4.3.0", "production Kafka version must be 4.3.0")
+    strimzi = get(values, "messaging", "kafka", "strimzi", default={})
+    require(errors, get(strimzi, "operatorVersion") == "1.1.0", "Apache Kafka 4.3.0 requires the reviewed Strimzi 1.1.0 operator")
+    require(errors, get(strimzi, "listeners", "plain", "enabled") is False, "production Kafka must disable its plaintext listener")
+    require(errors, get(strimzi, "listeners", "tls", "enabled") is True, "production Kafka must enable its TLS listener")
+    require(errors, get(strimzi, "listeners", "tls", "authentication") == "tls", "production Kafka clients must use mutual TLS")
+    require(errors, get(strimzi, "authorization", "enabled") is True, "production Kafka authorization must be enabled")
+    require(errors, get(strimzi, "authorization", "type") == "simple", "production Kafka must enforce Strimzi simple ACL authorization")
+    require(errors, get(strimzi, "rack", "enabled") is True, "production Kafka must use rack-aware placement")
+    require(errors, get(strimzi, "rack", "topologyKey") == "topology.kubernetes.io/zone", "production Kafka rack awareness must use zone labels")
+    require(errors, get(strimzi, "brokerConfig", "autoCreateTopics") is False, "production Kafka must disable automatic topic creation")
+    require(errors, get(strimzi, "brokerConfig", "uncleanLeaderElection") is False, "production Kafka must disable unclean leader election")
+    require(errors, get(strimzi, "scheduling", "enabled") is True, "production Kafka must enforce zone and host placement")
+    require(errors, get(strimzi, "kafkaExporter", "enabled") is True, "Kafka exporter must be enabled")
+    require(errors, get(strimzi, "cruiseControl", "enabled") is True, "Kafka Cruise Control must be enabled")
+    require(errors, get(strimzi, "metrics", "enabled") is True, "Kafka JMX metrics must be enabled")
+
+    topics = get(strimzi, "topics", "definitions", default=[])
+    require(errors, get(strimzi, "topics", "enabled") is True, "production Kafka topics must be operator managed")
+    topic_by_name = {
+        str(item.get("name")): item for item in topics if isinstance(item, dict) and item.get("name")
+    }
+    source_topic = topic_by_name.get("beMobile", {})
+    dlq_topic = topic_by_name.get("beMobile.clickhouse.dlq", {})
+    require(errors, int(source_topic.get("partitions", 0) or 0) >= 6, "ClickHouse source topic must have at least six partitions")
+    require(errors, int(source_topic.get("replicas", 0) or 0) >= 3, "ClickHouse source topic must have three replicas")
+    require(errors, int(get(source_topic, "config", "min.insync.replicas", default=0) or 0) >= 2, "ClickHouse source topic must require two in-sync replicas")
+    require(errors, int(dlq_topic.get("partitions", 0) or 0) >= 3, "ClickHouse DLQ must have at least three partitions")
+    require(errors, int(dlq_topic.get("replicas", 0) or 0) >= 3, "ClickHouse DLQ must have three replicas")
+    require(errors, int(get(dlq_topic, "config", "min.insync.replicas", default=0) or 0) >= 2, "ClickHouse DLQ must require two in-sync replicas")
+
+    connect = get(strimzi, "connect", default={})
+    connector = get(connect, "connector", default={})
+    require(errors, get(connect, "enabled") is True, "production Kafka Connect must be enabled")
+    require(errors, int(get(connect, "replicas", default=0) or 0) >= 3, "production Kafka Connect must have at least three workers")
+    require(errors, get(connect, "authentication", "type") == "tls", "Kafka Connect must authenticate with mutual TLS")
+    require(errors, bool(get(connect, "credentialsSecret", "name")), "Kafka Connect must reference a ClickHouse credential Secret")
+    require(errors, get(connect, "build", "enabled") is False, "production must use a promoted Kafka Connect image instead of in-cluster builds")
+    require(errors, get(connect, "image", "tag") == "1.4.0", "production must use the reviewed ClickHouse connector 1.4.0 image")
+    require(errors, get(connect, "metrics", "enabled") is True, "Kafka Connect JMX metrics must be enabled")
+    require(errors, get(connect, "networkPolicy", "enabled") is True, "Kafka Connect must use an explicit ClickHouse egress policy")
+    image_pull_secrets = get(values, "global", "imagePullSecrets", default=[])
+    require(errors, isinstance(image_pull_secrets, list) and bool(image_pull_secrets), "production must declare a registry pull Secret")
+    require(errors, get(connector, "enabled") is True, "ClickHouse KafkaConnector must be enabled")
+    require(errors, get(connector, "class") == "com.clickhouse.kafka.connect.ClickHouseSinkConnector", "the official ClickHouse sink connector class is required")
+    tasks_max = int(get(connector, "tasksMax", default=0) or 0)
+    source_partitions = int(source_topic.get("partitions", 0) or 0)
+    require(errors, tasks_max > 0, "ClickHouse connector tasksMax must be positive")
+    require(errors, source_partitions > 0 and tasks_max <= source_partitions, "ClickHouse connector tasksMax must not exceed source topic partitions")
+    require(errors, get(connector, "topic") == "beMobile", "ClickHouse connector must consume the managed source topic")
+    require(errors, get(connector, "ssl") is True, "ClickHouse transport must use TLS")
+    require(errors, get(connector, "jdbcConnectionProperties") == "?sslmode=STRICT", "ClickHouse TLS must enforce strict certificate validation")
+    require(errors, not is_ip_literal(get(connector, "hostname", default="")), "ClickHouse must use a DNS name rather than a fixed IP address")
+    require(errors, int(get(connector, "port", default=0) or 0) not in {0, 8123}, "ClickHouse must not use the plaintext HTTP port")
+    require(errors, get(connector, "exactlyOnce") is True, "ClickHouse exactly-once delivery must be enabled")
+    require(errors, get(connector, "ignorePartitionsWhenBatching") is False, "partition identity must be preserved while batching")
+    require(errors, int(get(connector, "bufferCount", default=-1) or 0) == 0, "internal connector buffering must be disabled with exactly-once delivery")
+    require(errors, int(get(connector, "bufferFlushTimeMs", default=-1) or 0) == 0, "connector buffer flush timing must remain disabled with exactly-once delivery")
+    require(errors, int(get(connector, "errors", "retryTimeoutMs", default=0) or 0) >= 300000, "ClickHouse retries must cover at least five minutes")
+    require(errors, int(get(connector, "errors", "retryDelayMaxMs", default=0) or 0) >= 10000, "ClickHouse retry backoff must reach at least ten seconds")
+    require(errors, get(connector, "errors", "logIncludeMessages") is False, "connector logs must not include message payloads")
+    require(errors, get(connector, "errors", "deadLetterTopic") == "beMobile.clickhouse.dlq", "connector failures must route to the managed DLQ")
+    require(errors, int(get(connector, "errors", "deadLetterReplicationFactor", default=0) or 0) >= 3, "connector DLQ writes must require replication factor three")
+    sink_consumer_group = str(get(connector, "consumerGroup", default="")).strip()
+    require(errors, bool(sink_consumer_group), "ClickHouse connector must declare its sink consumer group")
+    require(errors, sink_consumer_group != str(get(connect, "groupId", default="")).strip(), "sink tasks must not reuse the Connect worker coordination group")
+    require(errors, get(connector, "consumer", "isolationLevel") == "read_committed", "sink tasks must ignore aborted transactional records")
+    require(errors, int(get(connector, "consumer", "maxPollRecords", default=0) or 0) <= 10000, "max.poll.records must remain bounded at 10,000 or less")
+    require(errors, get(connector, "clickhouseSettings", "asyncInsert") is True, "ClickHouse async inserts must be enabled")
+    require(errors, get(connector, "clickhouseSettings", "waitForAsyncInsert") is True, "the connector must wait for ClickHouse async-insert acknowledgement")
+    require(errors, get(values, "monitoring", "prometheusRules", "kafkaClickhouse", "enabled") is True, "Kafka-to-ClickHouse lag, replication, and DLQ alerts must be enabled")
+    require(errors, get(values, "monitoring", "prometheusRules", "kafkaClickhouse", "consumerGroup") == sink_consumer_group, "consumer-lag alerts must target the sink task group")
+
+    clickhouse_secret = external_secrets.get("clickhouseSinkCredentials", {}) if isinstance(external_secrets, dict) else {}
+    registry_secret = external_secrets.get("registryCredentials", {}) if isinstance(external_secrets, dict) else {}
+    require(errors, registry_secret.get("enabled") is True, "ExternalSecret/registryCredentials must be enabled")
+    require(errors, registry_secret.get("targetName") in image_pull_secrets, "registry ExternalSecret target must match a global imagePullSecret")
+    require(errors, clickhouse_secret.get("enabled") is True, "ExternalSecret/clickhouseSinkCredentials must be enabled")
+    require(errors, clickhouse_secret.get("targetName") == get(connect, "credentialsSecret", "name"), "ClickHouse ExternalSecret target must match the Kafka Connect credential reference")
+    secret_keys = {item.get("secretKey") for item in clickhouse_secret.get("data", []) if isinstance(item, dict)}
+    require(errors, secret_keys >= {"username", "password"}, "ClickHouse ExternalSecret must deliver username and password keys")
     require(errors, get(values, "messaging", "redis", "replicas", default=0) >= 3, "Redis must have at least three replicas")
     require(errors, get(values, "messaging", "redis", "sentinel", "enabled") is True, "Redis Sentinel must be enabled")
     require(errors, get(values, "messaging", "redis", "compatibilitySecurityContext") is False, "Redis compatibility security mode must be disabled")

@@ -113,6 +113,13 @@ trusted TLS/issuer settings, and tested backup and disaster-recovery evidence.
 Run `make production-readiness-gate` from a private operator or release runner
 before calling the environment production-ready; the public repository score
 does not replace that gate.
+For the Apache Kafka-to-ClickHouse path, use
+`make kafka-clickhouse-reconcile KAFKA_CLICKHOUSE_PRIVATE_VALUES=/private/values-production-private.yaml`.
+It is plan-only by default; add `KAFKA_CLICKHOUSE_APPLY=true` to perform the
+rollback-protected deployment and require stable live evidence. The separate
+`kafka-clickhouse-readiness` target remains available for read-only rechecks.
+Neither command can pass the `92/100` gate without private immutable inputs and
+live Strimzi evidence; see [`docs/kafka-profiles.md`](docs/kafka-profiles.md).
 
 For deploying a previously packaged application archive onto three local RKE2 nodes, use the sanitized runbook in [`docs/three-node-rke2-tarball-deploy.md`](docs/three-node-rke2-tarball-deploy.md). It covers image build/preload, private inventory setup, RKE2 bootstrap, Helm deployment, and verification without committing real node addresses or credentials.
 

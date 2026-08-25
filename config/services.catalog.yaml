@@ -321,13 +321,13 @@ images:
   - 29093
   replicas: 3
 - name: strimzi-kafka-operator
-  image: quay.io/strimzi/operator:1.0.0
+  image: quay.io/strimzi/operator:1.1.0
   category: messaging
   type: operator
   ports: []
   replicas: 1
 - name: strimzi-kafka-broker-42
-  image: quay.io/strimzi/kafka:1.0.0-kafka-4.2.0
+  image: quay.io/strimzi/kafka:1.1.0-kafka-4.2.0
   category: messaging
   type: stateful
   ports:

@@ -90,11 +90,11 @@ components:
       - helm/urban-platform-infra/values.yaml
       - config/image-policy.yaml
   strimzi-operator:
-    currentVersion: 1.0.0
+    currentVersion: 1.1.0
     channel: stable
     lifecycle:
       status: supported
-      lastReviewed: '2026-08-20'
+      lastReviewed: '2026-08-25'
     source: https://github.com/strimzi/strimzi-kafka-operator/releases
     sourceFiles:
       - scripts/tools/install-strimzi.sh

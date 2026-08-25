@@ -650,6 +650,19 @@ secretManagement:
       - secretKey: .dockerconfigjson
         remoteRef:
           key: example/urban-platform/registry/dockerconfigjson
+    clickhouseSinkCredentials:
+      enabled: false
+      targetName: clickhouse-sink-credentials
+      type: Opaque
+      creationPolicy: Owner
+      immutable: false
+      data:
+      - secretKey: username
+        remoteRef:
+          key: example/urban-platform/clickhouse/sink-username
+      - secretKey: password
+        remoteRef:
+          key: example/urban-platform/clickhouse/sink-password
     ingressTls:
       enabled: false
       targetName: urban-platform-tls
@@ -835,12 +848,14 @@ messaging:
         mode: operator
         kafkaVersion: 4.2.0
         operatorChart: strimzi-kafka-operator
+        minimumOperatorVersion: 1.0.0
         enterpriseLicenseRequired: false
       apache-4.3-strimzi:
         provider: strimzi
         mode: operator
         kafkaVersion: 4.3.0
         operatorChart: strimzi-kafka-operator
+        minimumOperatorVersion: 1.1.0
         enterpriseLicenseRequired: false
     compatibilitySecurityContext: true
     replicas: 1
@@ -887,6 +902,7 @@ messaging:
         className: ''
     strimzi:
       installOperator: false
+      operatorVersion: 1.1.0
       apiVersion: kafka.strimzi.io/v1
       kafkaVersion: 4.2.0
       metadataVersion: ''
@@ -905,10 +921,131 @@ messaging:
           enabled: true
         tls:
           enabled: false
+          authentication: tls
+      authorization:
+        enabled: false
+        type: simple
+        superUsers: []
+      rack:
+        enabled: false
+        topologyKey: topology.kubernetes.io/zone
+      brokerConfig:
+        autoCreateTopics: true
+        uncleanLeaderElection: false
+        numPartitions: 3
+      scheduling:
+        enabled: false
+      podDisruptionBudget:
+        maxUnavailable: 1
+      kafkaExporter:
+        enabled: false
+        topicRegex: .*
+        groupRegex: .*
+      cruiseControl:
+        enabled: false
+      metrics:
+        enabled: false
+        configMapName: kafka-metrics
+        configMapKey: kafka-metrics-config.yml
       entityOperator:
         enabled: true
         topicOperator: true
         userOperator: true
+      topics:
+        enabled: false
+        definitions: []
+      connect:
+        enabled: false
+        name: clickhouse-connect
+        replicas: 3
+        image: {}
+        build:
+          enabled: false
+          output:
+            type: docker
+            image: ''
+            pushSecret: ''
+          plugin:
+            name: clickhouse-kafka-connect
+            version: 1.4.0
+            artifact:
+              type: zip
+              url: https://github.com/ClickHouse/clickhouse-kafka-connect/releases/download/v1.4.0/clickhouse-kafka-connect-v1.4.0.zip
+              sha512sum: 71fd998ae41542e8e75bdd73f90e0b87dcdbcaf3a08e6d2e6d12baa7bc346618ddfa5d909014d1c974d088531c410e23dbfba3fbdc4eed7ed3d181852bc0a66f
+        resources:
+          requests:
+            cpu: 250m
+            memory: 1Gi
+          limits:
+            cpu: 2
+            memory: 4Gi
+        metrics:
+          enabled: false
+          configMapName: clickhouse-connect-metrics
+          configMapKey: connect-metrics-config.yml
+        networkPolicy:
+          enabled: false
+          egressCidrs: []
+        groupId: clickhouse-connect
+        configStorageTopic: clickhouse-connect-configs
+        offsetStorageTopic: clickhouse-connect-offsets
+        statusStorageTopic: clickhouse-connect-status
+        tls:
+          enabled: true
+          clusterCaSecret: kafka-cluster-ca-cert
+        authentication:
+          type: tls
+          userSecret: clickhouse-connect
+        credentialsSecret:
+          name: clickhouse-sink-credentials
+          usernameKey: username
+          passwordKey: password
+        connector:
+          enabled: false
+          name: clickhouse-bemobile-sink
+          consumerGroup: connect-clickhouse-bemobile-sink
+          class: com.clickhouse.kafka.connect.ClickHouseSinkConnector
+          tasksMax: 6
+          autoRestart:
+            enabled: true
+            maxRestarts: 10
+          topic: beMobile
+          table: bemobile
+          database: sensordb
+          hostname: ''
+          port: 8443
+          ssl: true
+          jdbcConnectionProperties: '?sslmode=STRICT'
+          exactlyOnce: true
+          keeperOnCluster: ''
+          ignorePartitionsWhenBatching: false
+          bufferCount: 0
+          bufferFlushTimeMs: 0
+          errors:
+            tolerance: all
+            retryTimeoutMs: 300000
+            retryDelayMaxMs: 10000
+            logEnable: true
+            logIncludeMessages: false
+            deadLetterTopic: beMobile.clickhouse.dlq
+            deadLetterReplicationFactor: 3
+          consumer:
+            isolationLevel: read_committed
+            maxPollRecords: 10000
+            maxPollIntervalMs: 600000
+            fetchMaxBytes: 52428800
+            maxPartitionFetchBytes: 5242880
+            fetchMinBytes: 1048576
+            fetchMaxWaitMs: 500
+            heartbeatIntervalMs: 3000
+            sessionTimeoutMs: 30000
+          clickhouseSettings:
+            asyncInsert: true
+            waitForAsyncInsert: true
+            asyncInsertMaxDataSize: 16777216
+            asyncInsertBusyTimeoutMs: 1500
+            connectionTimeoutMs: 30000
+            socketTimeoutMs: 300000
     ui:
       enabled: true
       replicas: 1
@@ -1524,6 +1661,12 @@ monitoring:
     enabled: true
     evaluationInterval: 1m
     runbookBaseUrl: https://example.com/runbooks/urban-platform
+    kafkaClickhouse:
+      enabled: false
+      consumerGroup: connect-clickhouse-bemobile-sink
+      sourceTopic: beMobile
+      deadLetterTopic: beMobile.clickhouse.dlq
+      maximumConsumerLag: 100000
     severity:
       page: critical
       ticket: warning

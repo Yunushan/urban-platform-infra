@@ -79,4 +79,45 @@ spec:
             summary: "Urban Platform persistent volume capacity is low"
             description: "A persistent volume has less than 15 percent capacity available."
             runbook_url: {{ printf "%s/persistent-volume-filling" $runbooks | quote }}
+    {{- if .Values.monitoring.prometheusRules.kafkaClickhouse.enabled }}
+    - name: urban-platform.kafka-clickhouse
+      interval: {{ .Values.monitoring.prometheusRules.evaluationInterval | default "1m" | quote }}
+      rules:
+        - alert: UrbanPlatformKafkaUnderReplicatedPartitions
+          expr: |
+            sum(kafka_server_replicamanager_underreplicatedpartitions{namespace="{{ $namespace }}"}) > 0
+          for: 5m
+          labels:
+            severity: {{ .Values.monitoring.prometheusRules.severity.page | default "critical" | quote }}
+            slo: data
+            team: platform
+          annotations:
+            summary: "Kafka has under-replicated partitions"
+            description: "One or more Kafka partitions have remained under-replicated for five minutes."
+            runbook_url: {{ printf "%s/kafka-under-replicated-partitions" $runbooks | quote }}
+        - alert: UrbanPlatformClickHouseSinkConsumerLagHigh
+          expr: |
+            sum(kafka_consumergroup_lag{namespace="{{ $namespace }}",consumergroup={{ .Values.monitoring.prometheusRules.kafkaClickhouse.consumerGroup | quote }},topic={{ .Values.monitoring.prometheusRules.kafkaClickhouse.sourceTopic | quote }}}) > {{ .Values.monitoring.prometheusRules.kafkaClickhouse.maximumConsumerLag }}
+          for: 10m
+          labels:
+            severity: {{ .Values.monitoring.prometheusRules.severity.ticket | default "warning" | quote }}
+            slo: latency
+            team: platform
+          annotations:
+            summary: "ClickHouse sink consumer lag is high"
+            description: "The ClickHouse sink consumer group has exceeded its production lag threshold for ten minutes."
+            runbook_url: {{ printf "%s/clickhouse-sink-consumer-lag" $runbooks | quote }}
+        - alert: UrbanPlatformClickHouseSinkDeadLetterQueueActive
+          expr: |
+            sum(increase(kafka_topic_partition_current_offset{namespace="{{ $namespace }}",topic={{ .Values.monitoring.prometheusRules.kafkaClickhouse.deadLetterTopic | quote }}}[10m])) > 0
+          for: 1m
+          labels:
+            severity: {{ .Values.monitoring.prometheusRules.severity.ticket | default "warning" | quote }}
+            slo: correctness
+            team: platform
+          annotations:
+            summary: "ClickHouse sink is writing to its dead-letter queue"
+            description: "At least one connector record entered the dead-letter queue during the last ten minutes."
+            runbook_url: {{ printf "%s/clickhouse-sink-dlq" $runbooks | quote }}
+    {{- end }}
 {{- end }}
