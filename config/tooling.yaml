@@ -136,7 +136,7 @@ tools:
     versionArgs:
     - --version
   helm:
-    displayName: Helm 4.2.1+
+    displayName: Helm 4.2.1
     expectedVersion: 4.2.1
     commands:
     - helm
@@ -144,7 +144,7 @@ tools:
     - version
     - --short
   helmfile:
-    displayName: Helmfile 1.5.3+
+    displayName: Helmfile 1.5.3
     expectedVersion: 1.5.3
     commands:
     - helmfile

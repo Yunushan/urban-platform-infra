@@ -119,5 +119,25 @@ liveCluster:
   namespace: urban-platform
   minimumReadyNodes: 3
   failureDomainLabel: kubernetes.io/hostname
+  expectedPodSecurityVersion: v1.34
   expectedPostgresClusters: 18
   expectedKafkaVersion: 4.3.0
+  # Include every chart-managed and operator-managed PDB in the signed list.
+  expectedPodDisruptionBudgets:
+    - redis
+    - webserver-nginx
+    - zabbix-agent2
+  expectedAutoscalers:
+    - webserver-nginx
+  ingressProbe:
+    required: true
+    # Use the real production DNS name or a certificate-valid VIP address.
+    # The probe runner bypasses configured HTTP proxies and performs a real GET.
+    httpsUrl: https://platform.example.invalid/login
+    httpUrl: http://platform.example.invalid/login
+    expectedHttpsStatusCodes: [200, 401, 403]
+    expectedHttpStatusCodes: [301, 302, 307, 308]
+    requireHttpRedirect: true
+    tlsVerify: true
+    # Optional PEM bundle for a private enterprise CA; omit for public CA trust.
+    caBundle: /private/production/ingress-ca.pem

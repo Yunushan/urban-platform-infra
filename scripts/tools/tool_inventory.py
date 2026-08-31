@@ -25,6 +25,14 @@ def semantic_version(value: str) -> tuple[int, int, int] | None:
     return tuple(int(part) for part in match.groups())
 
 
+def matches_expected_version(observed: str, expected: str) -> bool:
+    expected_semver = semantic_version(expected)
+    observed_semver = semantic_version(observed)
+    if expected_semver is not None:
+        return observed_semver == expected_semver
+    return bool(expected) and expected in observed
+
+
 def load_yaml(path: Path) -> dict[str, Any]:
     if importlib.util.find_spec("yaml") is None:
         raise SystemExit("PyYAML is required to read the tooling contract.")
@@ -102,7 +110,7 @@ def check_tool(name: str, tool: dict[str, Any], required: bool) -> dict[str, str
     if not probe_ok:
         status = "BROKEN"
         detail = f"{path} - version probe failed: {version}"
-    elif expected_version and expected_version not in version:
+    elif expected_version and not matches_expected_version(version, expected_version):
         status = "VERSION-MISMATCH"
         detail = f"{path} - {version} (expected {expected_version})"
     elif minimum_version:

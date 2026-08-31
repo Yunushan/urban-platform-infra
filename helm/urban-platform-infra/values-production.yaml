@@ -366,7 +366,8 @@ namespace:
     enforce: restricted
     audit: restricted
     warn: restricted
-    version: latest
+    # Pin this to the Kubernetes minor used by the production cluster.
+    version: v1.34
   resourceQuota:
     enabled: true
     hard:
@@ -425,7 +426,7 @@ ingress:
     enabled: true
     createSecret: false
     certManager:
-      enabled: true
+      enabled: false
       issuerName: production-issuer
       issuerKind: ClusterIssuer
     selfSigned:
@@ -510,6 +511,8 @@ monitoring:
     enabled: false
 
 webserver:
+  ingress:
+    enabled: true
   providers:
     nginx:
       autoscaling:

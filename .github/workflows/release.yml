@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Optional version to compare with Chart.yaml, for example v0.1.0.
-        required: false
+        description: Version to compare with Chart.yaml, for example v0.1.0.
+        required: true
         type: string
 
 permissions:
@@ -45,6 +45,28 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+        with:
+          version: v4.2.1
+
+      - name: Install release validation dependencies
+        shell: bash
+        run: python3 -m pip install --disable-pip-version-check --no-cache-dir -r requirements-release.txt
+
+      - name: Validate source contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/tools/validate_ci_contract.py
+          python3 scripts/tools/private_data_audit.py --report reports/release-private-data-audit.md
+          python3 scripts/validate.py
+          python3 scripts/images/validate-images.py
+          python3 tests/policy/production_evidence_gate_test.py
+          python3 tests/policy/tool_inventory_test.py
+          python3 tests/policy/version_policy_test.py
+          python3 tests/policy/release_evidence_test.py
+          python3 tests/policy/kafka_clickhouse_readiness_test.py
+          python3 tests/policy/kafka_clickhouse_reconcile_test.py
+          python3 scripts/version_policy.py check --config config/version-policy.yaml --output reports/release-version-policy.md
 
       - name: Validate release tag matches chart version
         shell: bash
@@ -113,6 +135,7 @@ jobs:
             > "${PRODUCTION_RENDERED_MANIFEST}"
           python3 tests/policy/basic_policy.py "${PRODUCTION_RENDERED_MANIFEST}"
           python3 tests/policy/production_render.py "${PRODUCTION_RENDERED_MANIFEST}"
+          python3 scripts/production_readiness_score.py
 
       - name: Generate SBOM and checksums
         shell: bash
@@ -122,9 +145,22 @@ jobs:
             --chart "${HELM_CHART}" \
             --dist "${DIST_DIR}" \
             --rendered "${RENDERED_MANIFEST}" \
+            --production-rendered "${PRODUCTION_RENDERED_MANIFEST}" \
             --sbom "${SBOM_FILE}" \
             --manifest "${RELEASE_MANIFEST}" \
             --checksums "${CHECKSUM_FILE}"
+
+      - name: Verify release evidence
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.version || github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          python3 scripts/release/verify_release_evidence.py \
+            --chart "${HELM_CHART}" \
+            --tag "${RELEASE_TAG}" \
+            --report reports/release-evidence-verification.md
 
       - name: Attest release artifact provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -148,3 +184,4 @@ jobs:
             ${{ env.SBOM_FILE }}
             ${{ env.RELEASE_MANIFEST }}
             ${{ env.CHECKSUM_FILE }}
+            reports/release-evidence-verification.md

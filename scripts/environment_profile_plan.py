@@ -432,8 +432,8 @@ def generate_report(args: argparse.Namespace, config: dict[str, Any], topologies
             "make cutover-gate-plan CUTOVER_GATES_PROFILE=lab-smoke IMPORT_REDACT=true",
             "make release-runbook-plan RELEASE_RUNBOOK_PROFILE=lab-release IMPORT_REDACT=true",
             "make cluster-upgrade-plan CLUSTER_UPGRADE_PROFILE=lab-upgrade IMPORT_REDACT=true",
-            "make deploy-auto HELM_EXTRA_ARGS=\"-f reports/environment-profile-values.yaml\"",
-            "make import-auto PROJECT_PATH=/path/to/compose-project MIGRATION_PROFILE=lab MIGRATION_IMAGE_MODE=preload",
+            "make deploy-auto ENV=lab HELM_EXTRA_ARGS=\"-f reports/environment-profile-values.yaml\"",
+            "make import-auto PROJECT_PATH=/path/to/compose-project ENV=lab MIGRATION_PROFILE=lab MIGRATION_IMAGE_MODE=preload",
             "```",
         ]
     )

@@ -407,12 +407,23 @@ profiles:
         skipPlaceholderWorkloads: true
         scheduling:
           topologySpread: true
-          antiAffinity: preferred
+          antiAffinity: required
+          topologySpreadWhenUnsatisfiable: DoNotSchedule
+        security:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+        podSecurityContext:
+          enabled: true
+          seccompProfile:
+            type: RuntimeDefault
       autoscaling:
         enabled: true
       backup:
-        enabled: false
-        profile: disabled
+        enabled: true
+        profile: production
       gitOpsDelivery:
         enabled: true
         profile: production-argocd
@@ -479,6 +490,10 @@ profiles:
           enabled: true
         grafana:
           enabled: true
+      monitoring:
+        enabled: true
+        prometheusRules:
+          enabled: true
       secretManagement:
         enabled: true
         provider: external-secrets
@@ -503,6 +518,11 @@ profiles:
           enforce: restricted
           audit: restricted
           warn: restricted
+          version: v1.34
+      storageTiers:
+        hot:
+          enabled: true
+          storageClassName: production-durable
       platformCapabilities:
         enabled: false
       messaging:
@@ -524,6 +544,8 @@ profiles:
             enabled: true
       databases:
         defaultInstances: 3
+        storageOverride:
+          className: production-durable
 requirements:
   lab:
     - capacity plan reviewed for small nodes

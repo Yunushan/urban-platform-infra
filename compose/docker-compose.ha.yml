@@ -1,4 +1,3 @@
-version: '3.9'
 name: urban-platform-infra
 x-defaults:
   restart: unless-stopped
@@ -526,7 +525,7 @@ services:
     environment:
     - POSTGRES_DB=app_db_01
     - POSTGRES_USER=app_db_01
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
     - db-01-postgres-data:/var/lib/postgresql
     networks:
@@ -539,7 +538,7 @@ services:
     environment:
     - POSTGRES_DB=app_db_02
     - POSTGRES_USER=app_db_02
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
     - db-02-postgres-data:/var/lib/postgresql
     networks:
@@ -552,7 +551,7 @@ services:
     environment:
     - POSTGRES_DB=app_db_03
     - POSTGRES_USER=app_db_03
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
     - db-03-postgres-data:/var/lib/postgresql
     networks:
@@ -565,7 +564,7 @@ services:
     environment:
     - POSTGRES_DB=app_db_04
     - POSTGRES_USER=app_db_04
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
     - db-04-postgres-data:/var/lib/postgresql
     networks:
@@ -578,7 +577,7 @@ services:
     environment:
     - POSTGRES_DB=app_db_05
     - POSTGRES_USER=app_db_05
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
     - db-05-postgres-data:/var/lib/postgresql
     networks:
@@ -591,7 +590,7 @@ services:
     environment:
     - POSTGRES_DB=app_db_06
     - POSTGRES_USER=app_db_06
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
     - db-06-postgres-data:/var/lib/postgresql
     networks:
@@ -604,7 +603,7 @@ services:
     environment:
     - POSTGRES_DB=app_db_07
     - POSTGRES_USER=app_db_07
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
     - db-07-postgres-data:/var/lib/postgresql
     networks:
@@ -617,7 +616,7 @@ services:
     environment:
     - POSTGRES_DB=app_db_08
     - POSTGRES_USER=app_db_08
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
     - db-08-postgres-data:/var/lib/postgresql
     networks:
@@ -630,7 +629,7 @@ services:
     environment:
     - POSTGRES_DB=app_db_09
     - POSTGRES_USER=app_db_09
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
     - db-09-postgres-data:/var/lib/postgresql
     networks:
@@ -643,7 +642,7 @@ services:
     environment:
     - POSTGRES_DB=app_db_10
     - POSTGRES_USER=app_db_10
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
     - db-10-postgres-data:/var/lib/postgresql
     networks:
@@ -656,7 +655,7 @@ services:
     environment:
     - POSTGRES_DB=app_db_11
     - POSTGRES_USER=app_db_11
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
     - db-11-postgres-data:/var/lib/postgresql
     networks:
@@ -669,7 +668,7 @@ services:
     environment:
     - POSTGRES_DB=app_db_12
     - POSTGRES_USER=app_db_12
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
     - db-12-postgres-data:/var/lib/postgresql
     networks:
@@ -682,7 +681,7 @@ services:
     environment:
     - POSTGRES_DB=app_db_13
     - POSTGRES_USER=app_db_13
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
     - db-13-postgres-data:/var/lib/postgresql
     networks:
@@ -695,7 +694,7 @@ services:
     environment:
     - POSTGRES_DB=app_db_14
     - POSTGRES_USER=app_db_14
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
     - db-14-postgres-data:/var/lib/postgresql
     networks:
@@ -708,7 +707,7 @@ services:
     environment:
     - POSTGRES_DB=app_db_15
     - POSTGRES_USER=app_db_15
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
     - db-15-postgres-data:/var/lib/postgresql
     networks:
@@ -721,7 +720,7 @@ services:
     environment:
     - POSTGRES_DB=app_db_16
     - POSTGRES_USER=app_db_16
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
     - db-16-postgres-data:/var/lib/postgresql
     networks:
@@ -734,7 +733,7 @@ services:
     environment:
     - POSTGRES_DB=app_db_17
     - POSTGRES_USER=app_db_17
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
     - db-17-postgis-data:/var/lib/postgresql
     networks:
@@ -747,7 +746,7 @@ services:
     environment:
     - POSTGRES_DB=timeseries
     - POSTGRES_USER=timeseries
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
     - timescaledb-data:/var/lib/postgresql
     networks:

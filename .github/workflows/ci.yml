@@ -131,6 +131,8 @@ jobs:
           python3 -m py_compile scripts/production_evidence_gate.py scripts/kafka_clickhouse_readiness.py scripts/kafka_clickhouse_reconcile.py scripts/images/registry_promotion_controller.py
           python3 tests/policy/production_evidence_gate_test.py
           python3 tests/policy/tool_inventory_test.py
+          python3 tests/policy/version_policy_test.py
+          python3 tests/policy/release_evidence_test.py
           python3 tests/policy/kafka_clickhouse_readiness_test.py
           python3 tests/policy/kafka_clickhouse_reconcile_test.py
       - name: Check validation tool inventory
@@ -154,6 +156,8 @@ jobs:
         run: pip install -r requirements-ci.txt
       - name: Helm lint
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+        with:
+          version: v4.2.1
       - name: Run helm lint
         run: helm lint "${HELM_CHART}"
       - name: Render chart
@@ -187,6 +191,8 @@ jobs:
         run: python3 scripts/validate_production_profile.py
       - name: Install Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+        with:
+          version: v4.2.1
       - name: Render production chart
         run: |
           mkdir -p reports

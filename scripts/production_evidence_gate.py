@@ -2,17 +2,21 @@
 """Fail-closed production evidence and live-cluster readiness gate.
 
 The gate reads private evidence metadata and hashes evidence artifact bytes, but
-never reads secrets, kubeconfig contents, or image layers. Evidence content and
-private paths are never included in reports. It is intended to run on the
-operator or a private release runner, not in public CI.
+never prints or persists secret values, kubeconfig contents, or image layers.
+Evidence content and private paths are never included in reports. It is intended
+to run on the operator or a private release runner, not in public CI.
 """
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import hashlib
+import ipaddress
 import json
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import uuid
@@ -20,6 +24,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import urljoin, urlsplit
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 
 try:
     import yaml
@@ -40,10 +47,14 @@ import promotion_plan  # noqa: E402
 DIGEST_RE = re.compile(r"^sha256:[A-Fa-f0-9]{64}$")
 RELEASE_TAG_RE = re.compile(r"^v?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$")
 SOURCE_REVISION_RE = re.compile(r"^(?:[A-Fa-f0-9]{40}|[A-Fa-f0-9]{64})$")
+PSA_VERSION_RE = re.compile(r"^v1\.[0-9]+$")
 MAX_MANIFEST_VALIDITY = timedelta(hours=24)
 MAX_CLOCK_SKEW = timedelta(minutes=5)
 MIN_COSIGN_VERSION = (3, 1, 3)
 SIGSTORE_BUNDLE_MEDIA_TYPE = "application/vnd.dev.sigstore.bundle.v0.3+json"
+HTTP_PROBE_TIMEOUT_SECONDS = 15
+HTTPS_PROBE_STATUS_CODES = frozenset({200, 201, 202, 204, 301, 302, 303, 307, 308, 401, 403})
+HTTP_REDIRECT_STATUS_CODES = frozenset({301, 302, 303, 307, 308})
 REQUIRED_IMAGE_EVIDENCE = (
     "vulnerabilityScan",
     "sbom",
@@ -75,6 +86,13 @@ REQUIRED_DR_ARTIFACTS = (
 class TrustPolicy:
     cosign: str
     trusted_approvers: frozenset[str]
+
+
+class NoRedirectHandler(HTTPRedirectHandler):
+    """Keep redirect responses visible so the HTTP-to-HTTPS contract is tested."""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
 
 
 def meaningful_identity(value: Any) -> bool:
@@ -505,7 +523,10 @@ def kubectl_json(kubectl: str, kubeconfig: Path, namespace: str | None, resource
     if namespace:
         command.extend(["-n", namespace])
     command.extend(["get", resource, "-o", "json", "--request-timeout=15s"])
-    completed = subprocess.run(command, capture_output=True, text=True, check=False, timeout=30)
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, check=False, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None, "Kubernetes API query failed"
     if completed.returncode != 0:
         return None, "Kubernetes API query failed"
     try:
@@ -530,6 +551,256 @@ def condition_is_true(status: dict[str, Any], condition_type: str) -> bool:
         and condition.get("type") == condition_type
         and str(condition.get("status", "")).lower() == "true"
         for condition in status.get("conditions", [])
+    )
+
+
+def signed_resource_names(value: Any) -> set[str] | None:
+    """Parse a non-empty, duplicate-free resource-name inventory from evidence."""
+    if not isinstance(value, (list, tuple)) or not value:
+        return None
+    names = [str(item).strip() for item in value]
+    if any(not name or "/" in name for name in names) or len(set(names)) != len(names):
+        return None
+    return set(names)
+
+
+def resource_names(resources: list[dict[str, Any]]) -> set[str]:
+    return {
+        str(mapping(item.get("metadata")).get("name", "")).strip()
+        for item in resources
+        if str(mapping(item.get("metadata")).get("name", "")).strip()
+    }
+
+
+def valid_tls_secret(resource: dict[str, Any] | None) -> bool:
+    """Require a Kubernetes TLS Secret with both key material entries present."""
+    if resource is None or resource.get("type") != "kubernetes.io/tls":
+        return False
+    data = mapping(resource.get("data"))
+    return valid_encoded_secret_data(data.get("tls.crt")) and valid_encoded_secret_data(data.get("tls.key"))
+
+
+def valid_encoded_secret_data(value: Any) -> bool:
+    """Check presence of non-empty base64 Secret data without exposing its value."""
+    encoded = str(value or "").strip()
+    if not encoded:
+        return False
+    try:
+        decoded = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error):
+        return False
+    return bool(decoded)
+
+
+def quantity_matches(actual: Any, expected: Any) -> bool:
+    """Compare Kubernetes quantities without exposing their values in reports."""
+    return str(actual if actual is not None else "").strip() == str(expected if expected is not None else "").strip()
+
+
+def resource_quota_matches(resource: dict[str, Any] | None, expected_hard: dict[str, Any]) -> bool:
+    if resource is None or not expected_hard:
+        return False
+    actual_hard = mapping(mapping(resource.get("spec")).get("hard"))
+    # Production quotas are reviewed as an exact contract. Extra hard limits
+    # can silently change admission behavior and must not pass the live gate.
+    return set(actual_hard) == set(expected_hard) and all(
+        quantity_matches(actual_hard.get(key), value) for key, value in expected_hard.items()
+    )
+
+
+def limit_range_matches(
+    resource: dict[str, Any] | None,
+    expected_default: dict[str, Any],
+    expected_default_request: dict[str, Any],
+) -> bool:
+    if resource is None or not expected_default or not expected_default_request:
+        return False
+    entries = [
+        entry
+        for entry in mapping(resource.get("spec")).get("limits", [])
+        if isinstance(entry, dict) and entry.get("type") == "Container"
+    ]
+    if len(entries) != 1:
+        return False
+    actual_default = mapping(entries[0].get("default"))
+    actual_default_request = mapping(entries[0].get("defaultRequest"))
+    return (
+        set(actual_default) == set(expected_default)
+        and set(actual_default_request) == set(expected_default_request)
+        and all(quantity_matches(actual_default.get(key), value) for key, value in expected_default.items())
+        and all(
+            quantity_matches(actual_default_request.get(key), value)
+            for key, value in expected_default_request.items()
+        )
+    )
+
+
+def is_http_redirect_ingress(resource: dict[str, Any]) -> bool:
+    """Allow only the explicit HTTP-to-HTTPS redirect Ingress without TLS."""
+    annotations = mapping(mapping(resource.get("metadata")).get("annotations"))
+    return (
+        str(annotations.get("traefik.ingress.kubernetes.io/router.entrypoints", "")).strip() == "web"
+        and "redirect-https@kubernetescrd"
+        in str(annotations.get("traefik.ingress.kubernetes.io/router.middlewares", ""))
+    )
+
+
+def parse_probe_url(value: Any, expected_scheme: str) -> tuple[Any | None, str]:
+    """Validate a signed probe URL without exposing it in failure details."""
+    raw = str(value or "").strip()
+    if not raw or any(character.isspace() for character in raw):
+        return None, "the signed ingress probe URL is missing or malformed"
+    try:
+        parsed = urlsplit(raw)
+        port = parsed.port
+    except ValueError:
+        return None, "the signed ingress probe URL has an invalid port"
+    if (
+        parsed.scheme.lower() != expected_scheme
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+        or (port is not None and not 1 <= port <= 65535)
+    ):
+        return None, "the signed ingress probe URL is malformed"
+    try:
+        address = ipaddress.ip_address(parsed.hostname)
+    except ValueError:
+        address = None
+    if address is not None and (address.is_loopback or address.is_unspecified or address.is_multicast):
+        return None, "the signed ingress probe URL must target the production edge, not a local address"
+    if parsed.hostname.lower() == "localhost":
+        return None, "the signed ingress probe URL must target the production edge, not localhost"
+    return parsed, "ok"
+
+
+def effective_url_port(parsed: Any) -> int:
+    if parsed.port is not None:
+        return int(parsed.port)
+    return 443 if parsed.scheme.lower() == "https" else 80
+
+
+def probe_http_endpoint(
+    url: str,
+    *,
+    ca_bundle: Path | None,
+    expected_status_codes: frozenset[int],
+    redirect_target: Any | None = None,
+) -> tuple[bool, str]:
+    """Perform a bounded, proxy-free GET while keeping endpoint details private."""
+    parsed, parse_detail = parse_probe_url(url, "https" if str(url).lower().startswith("https://") else "http")
+    if parsed is None:
+        return False, parse_detail
+    try:
+        context = ssl.create_default_context(cafile=str(ca_bundle) if ca_bundle is not None else None)
+        opener = build_opener(
+            ProxyHandler({}),
+            HTTPSHandler(context=context),
+            NoRedirectHandler(),
+        )
+        request = Request(
+            url,
+            headers={
+                "Accept": "text/html,application/json;q=0.9,*/*;q=0.1",
+                "User-Agent": "urban-platform-production-evidence/1",
+            },
+            method="GET",
+        )
+        with opener.open(request, timeout=HTTP_PROBE_TIMEOUT_SECONDS) as response:
+            status = int(response.getcode() or 0)
+            headers = response.headers
+            response.read(4096)
+    except HTTPError as exc:
+        status = int(exc.code or 0)
+        headers = exc.headers
+        try:
+            exc.read(4096)
+        except (OSError, ValueError):
+            pass
+    except (OSError, TimeoutError, URLError, ValueError, ssl.SSLError):
+        return False, "the signed ingress endpoint probe could not connect or complete TLS verification"
+    if status not in expected_status_codes:
+        return False, "the signed ingress endpoint returned an unexpected HTTP status"
+    if redirect_target is not None:
+        location = str(headers.get("Location", "")).strip() if headers is not None else ""
+        if not location:
+            return False, "the HTTP ingress probe did not return an HTTPS Location"
+        try:
+            redirected = urlsplit(urljoin(url, location))
+            redirected_port = effective_url_port(redirected)
+        except ValueError:
+            return False, "the HTTP ingress probe returned a malformed redirect"
+        if (
+            redirected.scheme.lower() != "https"
+            or redirected.hostname != redirect_target.hostname
+            or redirected.path != redirect_target.path
+            or redirected.query != redirect_target.query
+            or redirected_port != effective_url_port(redirect_target)
+            or redirected.username is not None
+            or redirected.password is not None
+        ):
+            return False, "the HTTP ingress probe redirected to the wrong HTTPS route"
+    return True, "the signed ingress HTTPS endpoint and HTTP redirect probe passed"
+
+
+def status_codes(value: Any) -> frozenset[int] | None:
+    if not isinstance(value, (list, tuple, set)) or not value:
+        return None
+    parsed: set[int] = set()
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, int) or not 100 <= item <= 599:
+            return None
+        parsed.add(item)
+    return frozenset(parsed)
+
+
+def validate_ingress_probe(live: dict[str, Any], config_dir: Path) -> tuple[bool, str]:
+    """Require externally reachable HTTPS plus an authenticated HTTP redirect check."""
+    probe = mapping(live.get("ingressProbe"))
+    if probe.get("required") is not True:
+        return False, "signed live evidence does not require an external ingress probe"
+    if probe.get("tlsVerify") is not True:
+        return False, "external ingress probing must verify the production TLS certificate"
+    https_url = str(probe.get("httpsUrl", "")).strip()
+    http_url = str(probe.get("httpUrl", "")).strip()
+    https_parsed, detail = parse_probe_url(https_url, "https")
+    if https_parsed is None:
+        return False, detail
+    http_parsed, detail = parse_probe_url(http_url, "http")
+    if http_parsed is None:
+        return False, detail
+    if (
+        http_parsed.hostname != https_parsed.hostname
+        or http_parsed.path != https_parsed.path
+        or http_parsed.query != https_parsed.query
+    ):
+        return False, "signed HTTP and HTTPS ingress probes must address the same route"
+    https_status_codes = status_codes(probe.get("expectedHttpsStatusCodes"))
+    http_status_codes = status_codes(probe.get("expectedHttpStatusCodes"))
+    if (
+        https_status_codes is None
+        or not https_status_codes <= HTTPS_PROBE_STATUS_CODES
+        or http_status_codes is None
+        or not http_status_codes <= HTTP_REDIRECT_STATUS_CODES
+        or probe.get("requireHttpRedirect") is not True
+    ):
+        return False, "signed ingress probe status and redirect policy is incomplete"
+    ca_bundle = resolve_path(probe.get("caBundle"), config_dir)
+    if probe.get("caBundle") and not nonempty_file(ca_bundle):
+        return False, "the signed ingress probe CA bundle is missing"
+    https_ok, https_detail = probe_http_endpoint(
+        https_url,
+        ca_bundle=ca_bundle,
+        expected_status_codes=https_status_codes,
+    )
+    if not https_ok:
+        return False, https_detail
+    return probe_http_endpoint(
+        http_url,
+        ca_bundle=None,
+        expected_status_codes=http_status_codes,
+        redirect_target=https_parsed,
     )
 
 
@@ -639,6 +910,7 @@ def validate_live(
     base_values: Path | None = None,
     public_values: Path | None = None,
     private_values: Path | None = None,
+    config_dir: Path | None = None,
 ) -> tuple[bool, str]:
     live = mapping(config.get("liveCluster"))
     if live.get("required") is not True:
@@ -648,7 +920,8 @@ def validate_live(
     attestation_ok, attestation_detail = validate_attestation_window(config)
     if not attestation_ok:
         return False, attestation_detail
-    kubeconfig = resolve_path(live.get("kubeconfig"), ROOT)
+    evidence_base = config_dir or ROOT
+    kubeconfig = resolve_path(live.get("kubeconfig"), evidence_base)
     namespace = str(live.get("namespace", "urban-platform")).strip() or "urban-platform"
     if not nonempty_file(kubeconfig):
         return False, "private kubeconfig is missing"
@@ -657,9 +930,18 @@ def validate_live(
         return False, "kubectl is unavailable on the evidence runner"
     if not kafka_readiness.kubectl_api_ready(kubectl, kubeconfig):
         return False, "authenticated Kubernetes API readyz verification failed"
+    ingress_probe_ok, ingress_probe_detail = validate_ingress_probe(live, evidence_base)
+    if not ingress_probe_ok:
+        return False, ingress_probe_detail
     values = merged_production_values(base_values, public_values, private_values)
     if values is None:
         return False, "merged private production values are unavailable"
+    kafka_values = mapping(mapping(values.get("messaging")).get("kafka"))
+    strimzi_values = mapping(kafka_values.get("strimzi"))
+    expected_kafka_version = str(live.get("expectedKafkaVersion", "")).strip()
+    configured_kafka_version = str(strimzi_values.get("kafkaVersion", "")).strip()
+    if not expected_kafka_version or expected_kafka_version != configured_kafka_version:
+        return False, "signed expected Kafka version does not match the merged production configuration"
     release = mapping(config.get("release"))
     release_tag = str(release.get("tag", "")).strip()
     source_revision = str(release.get("sourceRevision", "")).strip().lower()
@@ -739,6 +1021,19 @@ def validate_live(
     if namespace_resource is None:
         return False, detail
     namespace_labels = mapping(mapping(namespace_resource.get("metadata")).get("labels"))
+    configured_psa_version = str(
+        mapping(mapping(values.get("namespace")).get("podSecurity")).get("version", "")
+    ).strip()
+    expected_psa_version = str(live.get("expectedPodSecurityVersion", "")).strip()
+    if (
+        not PSA_VERSION_RE.fullmatch(expected_psa_version)
+        or expected_psa_version != configured_psa_version
+        or any(
+            namespace_labels.get(f"pod-security.kubernetes.io/{mode}-version") != expected_psa_version
+            for mode in ("enforce", "audit", "warn")
+        )
+    ):
+        return False, "production namespace Pod Security version labels do not match the signed pinned version"
     if any(
         namespace_labels.get(f"pod-security.kubernetes.io/{mode}") != "restricted"
         for mode in ("enforce", "audit", "warn")
@@ -854,18 +1149,37 @@ def validate_live(
         return False, "production default-deny NetworkPolicy is missing or drifted"
 
     namespace_values = mapping(values.get("namespace"))
-    if mapping(namespace_values.get("resourceQuota")).get("enabled") is True:
-        quotas, detail = kubectl_json(kubectl, kubeconfig, namespace, "resourcequotas")
-        if quotas is None or not quotas.get("items"):
-            return False, "production ResourceQuota is missing"
-    if mapping(namespace_values.get("limitRange")).get("enabled") is True:
-        limit_ranges, detail = kubectl_json(kubectl, kubeconfig, namespace, "limitranges")
-        if limit_ranges is None or not limit_ranges.get("items"):
-            return False, "production LimitRange is missing"
+    quota_values = mapping(namespace_values.get("resourceQuota"))
+    limit_range_values = mapping(namespace_values.get("limitRange"))
+    if quota_values.get("enabled") is not True or limit_range_values.get("enabled") is not True:
+        return False, "production ResourceQuota and LimitRange must both be enabled"
+    quotas, detail = kubectl_json(kubectl, kubeconfig, namespace, "resourcequotas")
+    expected_hard = mapping(quota_values.get("hard"))
+    quota_items = [
+        item for item in ([] if quotas is None else quotas.get("items", []))
+        if isinstance(item, dict)
+    ]
+    if quotas is None or not any(resource_quota_matches(item, expected_hard) for item in quota_items):
+        return False, "production ResourceQuota is missing or drifted"
+    limit_ranges, detail = kubectl_json(kubectl, kubeconfig, namespace, "limitranges")
+    expected_default = mapping(limit_range_values.get("default"))
+    expected_default_request = mapping(limit_range_values.get("defaultRequest"))
+    limit_range_items = [
+        item for item in ([] if limit_ranges is None else limit_ranges.get("items", []))
+        if isinstance(item, dict)
+    ]
+    if limit_ranges is None or not any(
+        limit_range_matches(item, expected_default, expected_default_request)
+        for item in limit_range_items
+    ):
+        return False, "production LimitRange is missing or drifted"
 
     pdbs, detail = kubectl_json(kubectl, kubeconfig, namespace, "poddisruptionbudgets.policy")
     pdb_items = [] if pdbs is None else pdbs.get("items", [])
-    if pdbs is None or not pdb_items or any(
+    expected_pdb_names = signed_resource_names(live.get("expectedPodDisruptionBudgets"))
+    if expected_pdb_names is None:
+        return False, "signed expected PodDisruptionBudget inventory is missing or invalid"
+    if pdbs is None or resource_names(pdb_items) != expected_pdb_names or any(
         int(mapping(item.get("status")).get("currentHealthy", 0) or 0)
         < int(mapping(item.get("status")).get("desiredHealthy", 0) or 0)
         for item in pdb_items
@@ -880,7 +1194,10 @@ def validate_live(
             "horizontalpodautoscalers.autoscaling",
         )
         hpa_items = [] if hpas is None else hpas.get("items", [])
-        if hpas is None or not hpa_items or any(
+        expected_hpa_names = signed_resource_names(live.get("expectedAutoscalers"))
+        if expected_hpa_names is None:
+            return False, "signed expected autoscaler inventory is missing or invalid"
+        if hpas is None or resource_names(hpa_items) != expected_hpa_names or any(
             not condition_is_true(mapping(item.get("status")), "AbleToScale")
             or not condition_is_true(mapping(item.get("status")), "ScalingActive")
             for item in hpa_items
@@ -888,13 +1205,32 @@ def validate_live(
             return False, "one or more production autoscalers are absent or inactive"
 
     ingress_values = mapping(values.get("ingress"))
-    if ingress_values.get("enabled") is True:
-        ingresses, detail = kubectl_json(kubectl, kubeconfig, namespace, "ingresses.networking.k8s.io")
-        ingress_items = [] if ingresses is None else ingresses.get("items", [])
-        if ingresses is None or not ingress_items or any(
-            not mapping(item.get("spec")).get("tls") for item in ingress_items
-        ):
-            return False, "one or more production ingresses are absent or do not declare TLS"
+    ingress_items: list[dict[str, Any]] = []
+    if ingress_values.get("enabled") is not True:
+        return False, "production ingress is not enabled"
+    ingresses, detail = kubectl_json(kubectl, kubeconfig, namespace, "ingresses.networking.k8s.io")
+    ingress_items = [
+        item for item in ([] if ingresses is None else ingresses.get("items", []))
+        if isinstance(item, dict)
+    ]
+    if ingresses is None or not ingress_items:
+        return False, "production ingresses are absent"
+    expected_ingress_class = str(ingress_values.get("className", "")).strip()
+    if not expected_ingress_class or any(
+        str(mapping(item.get("spec")).get("ingressClassName", "")).strip() != expected_ingress_class
+        for item in ingress_items
+    ):
+        return False, "one or more production ingresses use the wrong ingress class"
+    secure_ingresses = [
+        item for item in ingress_items if mapping(item.get("spec")).get("tls")
+    ]
+    if not secure_ingresses:
+        return False, "production has no TLS-enabled ingress"
+    if any(
+        not mapping(item.get("spec")).get("tls") and not is_http_redirect_ingress(item)
+        for item in ingress_items
+    ):
+        return False, "a production ingress without TLS is not an explicit HTTP-to-HTTPS redirect"
 
     clusters, detail = kubectl_json(kubectl, kubeconfig, namespace, "clusters.postgresql.cnpg.io")
     expected_clusters = expected_postgres_clusters(values)
@@ -934,27 +1270,56 @@ def validate_live(
     external_secret_values = mapping(
         mapping(values.get("secretManagement")).get("externalSecrets")
     )
-    expected_external_secrets = {
-        (
-            str(secret.get("namespace", namespace)).strip() or namespace,
-            kubernetes_name(name),
+    expected_external_secrets: list[tuple[str, str, str, str, set[str]]] = []
+    for name, value in external_secret_values.items():
+        secret = mapping(value)
+        target_name = str(secret.get("targetName", "")).strip()
+        if secret.get("enabled") is not True or not target_name:
+            continue
+        required_keys = {
+            str(item.get("secretKey", "")).strip()
+            for item in secret.get("data", [])
+            if isinstance(item, dict) and str(item.get("secretKey", "")).strip()
+        }
+        expected_external_secrets.append(
+            (
+                str(secret.get("namespace", namespace)).strip() or namespace,
+                kubernetes_name(name),
+                target_name,
+                str(secret.get("type", "Opaque")).strip() or "Opaque",
+                required_keys,
+            )
         )
-        for name, secret in (
-            (name, mapping(value)) for name, value in external_secret_values.items()
-        )
-        if secret.get("enabled") is True and str(secret.get("targetName", "")).strip()
-    }
     if not expected_external_secrets:
         return False, "production ExternalSecret inventory is empty"
-    for secret_namespace, secret_name in expected_external_secrets:
+    for secret_namespace, external_secret_name, target_name, target_type, required_keys in expected_external_secrets:
         external_secret, detail = kubectl_json(
             kubectl,
             kubeconfig,
             secret_namespace,
-            f"externalsecret/{secret_name}",
+            f"externalsecret/{external_secret_name}",
         )
         if external_secret is None or not ready_condition(mapping(external_secret.get("status"))):
             return False, "one or more expected production ExternalSecrets are not Ready"
+        actual_target_name = str(
+            mapping(mapping(external_secret.get("spec")).get("target")).get("name", "")
+        ).strip()
+        if actual_target_name != target_name:
+            return False, "one or more production ExternalSecrets target the wrong Secret"
+        target_secret, detail = kubectl_json(
+            kubectl,
+            kubeconfig,
+            secret_namespace,
+            f"secret/{kubernetes_name(target_name)}",
+        )
+        target_data = mapping((target_secret or {}).get("data"))
+        if (
+            target_secret is None
+            or target_secret.get("type") != target_type
+            or not required_keys
+            or any(not valid_encoded_secret_data(target_data.get(key)) for key in required_keys)
+        ):
+            return False, "one or more production ExternalSecrets did not materialize complete target Secrets"
 
     ingress_tls = mapping(mapping(values.get("ingress")).get("tls"))
     external_tls = mapping(
@@ -963,7 +1328,38 @@ def validate_live(
     cert_manager = mapping(ingress_tls.get("certManager"))
     if ingress_tls.get("enabled") is not True:
         return False, "production ingress TLS is not enabled"
-    if external_tls.get("enabled") is not True:
+    tls_secret_name = str(ingress_tls.get("secretName", "urban-platform-tls")).strip()
+    if not tls_secret_name:
+        return False, "production ingress TLS Secret name is missing"
+    if any(
+        str(mapping(tls_entry).get("secretName", "")).strip() != tls_secret_name
+        for item in ingress_items
+        for tls_entry in mapping(item.get("spec")).get("tls", [])
+        if isinstance(tls_entry, dict)
+    ):
+        return False, "one or more production ingresses reference the wrong TLS Secret"
+    if external_tls.get("enabled") is True:
+        external_tls_name = str(external_tls.get("targetName", "")).strip()
+        external_tls_namespace = str(external_tls.get("namespace", namespace)).strip() or namespace
+        if external_tls_name != tls_secret_name:
+            return False, "production ingress TLS ExternalSecret target does not match the ingress Secret"
+        external_tls_resource, detail = kubectl_json(
+            kubectl,
+            kubeconfig,
+            external_tls_namespace,
+            f"externalsecret/{kubernetes_name('ingressTls')}",
+        )
+        if external_tls_resource is None or not ready_condition(mapping(external_tls_resource.get("status"))):
+            return False, "the production ingress TLS ExternalSecret is absent or not Ready"
+        tls_secret, detail = kubectl_json(
+            kubectl,
+            kubeconfig,
+            external_tls_namespace,
+            f"secret/{kubernetes_name(tls_secret_name)}",
+        )
+        if not valid_tls_secret(tls_secret):
+            return False, "the production ingress TLS Secret is absent, not a TLS Secret, or incomplete"
+    else:
         if cert_manager.get("enabled") is not True:
             return False, "production ingress TLS has no ExternalSecret or cert-manager owner"
         certificates, detail = kubectl_json(
@@ -973,7 +1369,6 @@ def validate_live(
             "certificates.cert-manager.io",
         )
         certificate_items = [] if certificates is None else certificates.get("items", [])
-        tls_secret_name = str(ingress_tls.get("secretName", "urban-platform-tls")).strip()
         owned_certificates = [
             item
             for item in certificate_items
@@ -983,6 +1378,14 @@ def validate_live(
             not ready_condition(mapping(item.get("status"))) for item in owned_certificates
         ):
             return False, "the production ingress TLS certificate is absent or not Ready"
+        tls_secret, detail = kubectl_json(
+            kubectl,
+            kubeconfig,
+            namespace,
+            f"secret/{kubernetes_name(tls_secret_name)}",
+        )
+        if not valid_tls_secret(tls_secret):
+            return False, "the production ingress TLS Secret is absent, not a TLS Secret, or incomplete"
 
     kafka_ok, kafka_detail = validate_kafka_data_path(
         base_values,
@@ -1103,12 +1506,15 @@ def main(argv: list[str] | None = None) -> int:
                 base_values=base_values,
                 public_values=public_values,
                 private_values=private_values,
+                config_dir=config_path.parent if config_path is not None else None,
             )
             checks.append(("Live cluster verification", 25, live_ok, live_detail))
+            live_contract = mapping(config.get("liveCluster"))
+            ingress_probe_contract = mapping(live_contract.get("ingressProbe"))
             contract_complete = all(
                 bool(config.get(section))
                 for section in ("attestation", "release", "registry", "disasterRecovery", "liveCluster")
-            ) and mapping(config.get("liveCluster")).get("required") is True and trust_ok and attestation_ok and source_ok
+            ) and live_contract.get("required") is True and ingress_probe_contract.get("required") is True and trust_ok and attestation_ok and source_ok
             checks.append(("Evidence contract integrity", 10, config_valid and contract_complete, "short-lived cluster-bound evidence, clean source identity, independent trust policy, and mandatory live verification are present" if config_valid and contract_complete else "signed evidence contract, trust policy, source identity, or mandatory live verification is incomplete"))
         except (OSError, ValueError, TypeError, KeyError) as exc:
             checks = [

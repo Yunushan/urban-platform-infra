@@ -90,6 +90,7 @@ def helm_render_check() -> Check:
 
 def documentation_check() -> Check:
     required = [
+        "Taskfile.yml",
         "docs/ci-validation.md",
         "docs/backup-restore.md",
         "docs/disaster-recovery.md",
@@ -102,19 +103,25 @@ def documentation_check() -> Check:
         "docs/production-readiness.md",
         "helm/urban-platform-infra/values-kafka-clickhouse-private.example.yaml",
         ".github/workflows/ci.yml",
+        ".github/workflows/load-test.yml",
         ".github/workflows/release.yml",
         ".github/workflows/version-update.yml",
+        ".github/actionlint.yaml",
         "config/image-policy.yaml",
         "config/version-policy.yaml",
         "config/production-evidence.example.yaml",
         "config/production-evidence-trust.example.yaml",
         "scripts/production_evidence_gate.py",
+        "scripts/validate_production_private_overlay.py",
         "scripts/kafka_clickhouse_readiness.py",
         "scripts/kafka_clickhouse_reconcile.py",
         "tests/policy/production_render.py",
         "helm/urban-platform-infra/templates/release-identity.yaml",
         "tests/policy/production_evidence_gate_test.py",
+        "tests/policy/production_private_overlay_test.py",
         "tests/policy/tool_inventory_test.py",
+        "tests/policy/version_policy_test.py",
+        "tests/policy/release_evidence_test.py",
         "tests/policy/kafka_clickhouse_readiness_test.py",
         "tests/policy/kafka_clickhouse_reconcile_test.py",
     ]
@@ -126,8 +133,10 @@ def documentation_check() -> Check:
         "scripts/validate_production_profile.py" not in workflow
         or "tests/policy/production_render.py" not in workflow
         or "values-production.yaml" not in workflow
+        or "python3 scripts/tools/validate_ci_contract.py" not in workflow
+        or "python3 scripts/validate.py" not in workflow
     ):
-        return Check("Operations and release evidence coverage", 10, False, "release workflow does not enforce the production contract")
+        return Check("Operations and release evidence coverage", 10, False, "release workflow does not enforce source and production contracts")
     evidence_example = (ROOT / "config/production-evidence.example.yaml").read_text(encoding="utf-8")
     for token in (
         "version: 4",
@@ -141,6 +150,14 @@ def documentation_check() -> Check:
         "required: true",
         "minimumReadyNodes: 3",
         "clusterUid:",
+        "expectedPodSecurityVersion:",
+        "expectedPodDisruptionBudgets:",
+        "expectedAutoscalers:",
+        "ingressProbe:",
+        "httpsUrl:",
+        "httpUrl:",
+        "requireHttpRedirect: true",
+        "tlsVerify: true",
     ):
         if token not in evidence_example:
             return Check("Operations and release evidence coverage", 10, False, "private evidence example does not enforce the signed version 4 live contract")
@@ -153,13 +170,28 @@ def documentation_check() -> Check:
         if token not in tooling_contract:
             return Check("Operations and release evidence coverage", 10, False, "production evidence tooling does not require patched Cosign")
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    if "TOOL_INVENTORY_SCOPE=production-evidence" not in makefile:
+    if "TOOL_INVENTORY_SCOPE=production-evidence" not in makefile or "production-private-preflight:" not in makefile or "validate_production_private_overlay.py" not in makefile:
         return Check("Operations and release evidence coverage", 10, False, "production evidence target does not verify its mandatory toolchain")
+    taskfile = (ROOT / "Taskfile.yml").read_text(encoding="utf-8")
+    if (
+        "make deploy" not in taskfile
+        or "CONFIRM_PROD" not in taskfile
+        or "DEPLOY_PRIVATE_VALUES" not in taskfile
+        or "pod-security.kubernetes.io/enforce-version=latest" in taskfile
+        or "dist/production-rendered.yaml" not in taskfile
+        or "python3 tests/policy/production_render.py dist/production-rendered.yaml" not in taskfile
+        or "--production-rendered dist/production-rendered.yaml" not in taskfile
+        or "scripts/release/verify_release_evidence.py" not in taskfile
+    ):
+        return Check("Operations and release evidence coverage", 10, False, "Taskfile deploy or release evidence does not use the guarded production path")
     for test in (
         "tests/policy/production_evidence_gate_test.py",
+        "tests/policy/production_private_overlay_test.py",
         "tests/policy/tool_inventory_test.py",
         "tests/policy/kafka_clickhouse_readiness_test.py",
         "tests/policy/kafka_clickhouse_reconcile_test.py",
+        "tests/policy/version_policy_test.py",
+        "tests/policy/release_evidence_test.py",
     ):
         passed, detail = command_result([PYTHON, test])
         if not passed:

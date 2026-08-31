@@ -42,6 +42,7 @@ policy:
   releaseArtifacts:
     chartPackage: dist/urban-platform-infra-<version>.tgz
     renderedManifest: dist/rendered.yaml
+    productionRenderedManifest: dist/production-rendered.yaml
     sbom: dist/urban-platform-infra.spdx.json
     releaseManifest: dist/release-evidence.json
     checksums: dist/SHA256SUMS

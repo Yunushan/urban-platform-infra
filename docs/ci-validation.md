@@ -18,6 +18,7 @@ The gate is implemented in `scripts/tools/validate_ci_contract.py` and uses only
 - Pip cache keys follow each matrix requirements file.
 - Ansible collection installs follow each matrix collection file.
 - GitHub Actions refs are pinned to reviewed commit SHAs and never use `main` or `master`.
+- GitHub and GitLab Helm jobs use the approved Helm `v4.2.1` toolchain pin.
 - Dependency review is required on pull requests.
 - GitLab validation uses pinned requirements rather than ad hoc package installs.
 - Production intent is validated against the public production overlay before rendering.

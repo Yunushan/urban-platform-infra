@@ -208,9 +208,9 @@ YAML_SKIP = {
     Path('deploy/helmfile.yaml.gotmpl'),
 }
 REQUIRED = [
-    'README.md', 'LICENSE', '.github/workflows/ci.yml', '.gitlab-ci.yml',
+    'README.md', 'LICENSE', '.github/actionlint.yaml', '.github/workflows/ci.yml', '.github/workflows/load-test.yml', '.gitlab-ci.yml',
     '.github/workflows/release.yml', '.github/workflows/version-update.yml', '.github/dependabot.yml', '.pre-commit-config.yaml',
-    'requirements-ci.txt', 'requirements-ci-modern.txt',
+    'requirements-ci.txt', 'requirements-ci-modern.txt', 'requirements-release.txt',
     '.env.standalone.example', 'compose/docker-compose.standalone.yml',
     'scripts/tools/setup_local.py', 'scripts/tools/doctor_local.py',
     'scripts/tools/validate_ci_contract.py', 'scripts/tools/private_data_audit.py',
@@ -284,6 +284,7 @@ REQUIRED = [
     'scripts/load_test.py', 'scripts/version_policy.py', 'scripts/tools/tool_inventory.py',
     'scripts/production_readiness_score.py',
     'scripts/validate_production_profile.py',
+    'scripts/validate_production_private_overlay.py',
     'scripts/import_project.py',
     'scripts/migrate_project.py',
     'scripts/tools/install-helm.sh', 'scripts/tools/install-helmfile.sh',
@@ -293,7 +294,7 @@ REQUIRED = [
     'scripts/tools/install-local-path-storage.sh', 'scripts/tools/recover-helm-release.sh',
     'scripts/tools/ensure-kubeconfig.sh', 'scripts/tools/standalone-docker-config.sh',
     'helm/urban-platform-infra/templates/release-identity.yaml',
-    'tests/policy/basic_policy.py', 'tests/policy/tool_inventory_test.py', 'docs/hld.md', 'docs/lld.md',
+    'tests/policy/basic_policy.py', 'tests/policy/tool_inventory_test.py', 'tests/policy/release_evidence_test.py', 'tests/policy/production_private_overlay_test.py', 'docs/hld.md', 'docs/lld.md',
     'docs/local-toolchain.md', 'docs/tool-inventory.md', 'docs/load-testing.md', 'docs/version-management.md', 'docs/database-topologies.md', 'docs/ci-validation.md',
     'docs/operator-workflows.md',
     'docs/bootstrap-safety.md', 'docs/secrets-management.md',
@@ -1045,14 +1046,11 @@ for sensitive_dir in SENSITIVE_DIRS:
     if unexpected:
         errors.append(f'{sensitive_dir} contains non-placeholder files: {", ".join(sorted(unexpected))}')
 
-workflow_text = '\n'.join(
-    path.read_text(encoding='utf-8')
-    for path in [
-        ROOT / '.github/workflows/ci.yml',
-        ROOT / '.github/workflows/release.yml',
-    ]
-    if path.exists()
+github_workflow_paths = sorted(
+    set((ROOT / '.github/workflows').glob('*.yml'))
+    | set((ROOT / '.github/workflows').glob('*.yaml'))
 )
+workflow_text = '\n'.join(path.read_text(encoding='utf-8') for path in github_workflow_paths)
 for action_ref in LEGACY_ACTION_REFS:
     if action_ref in workflow_text:
         errors.append(f'Workflow still uses Node 20-generation action: {action_ref}')
@@ -1080,6 +1078,20 @@ for release_token in [
     'PRODUCTION_RENDERED_MANIFEST',
     'values-production.yaml',
     'python3 tests/policy/basic_policy.py "${PRODUCTION_RENDERED_MANIFEST}"',
+    'scripts/release/verify_release_evidence.py',
+    'release-evidence-verification.md',
+    'python3 scripts/tools/validate_ci_contract.py',
+    'python3 scripts/tools/private_data_audit.py',
+    'python3 scripts/validate.py',
+    'python3 scripts/images/validate-images.py',
+    'python3 tests/policy/production_evidence_gate_test.py',
+    'python3 tests/policy/tool_inventory_test.py',
+    'python3 tests/policy/version_policy_test.py',
+    'python3 tests/policy/release_evidence_test.py',
+    'python3 tests/policy/kafka_clickhouse_readiness_test.py',
+    'python3 tests/policy/kafka_clickhouse_reconcile_test.py',
+    'python3 scripts/production_readiness_score.py',
+    'python3 scripts/version_policy.py check --config config/version-policy.yaml',
 ]:
     if release_token not in release_workflow_text:
         errors.append(f'Release workflow missing supply-chain control: {release_token}')
@@ -1128,6 +1140,10 @@ for modern_tool in ['PyYAML', 'yamllint']:
     if not re.search(rf'^{modern_tool}==[0-9][0-9A-Za-z.!+_-]*\b', modern_requirements_text, re.MULTILINE):
         errors.append(f'Modern CI requirements must keep {modern_tool} explicitly pinned.')
 
+release_requirements_text = (ROOT / 'requirements-release.txt').read_text(encoding='utf-8')
+if not re.search(r'^PyYAML==[0-9][0-9A-Za-z.!+_-]*\b', release_requirements_text, re.MULTILINE):
+    errors.append('Release requirements must keep PyYAML explicitly pinned for release evidence verification.')
+
 modern_ansible_requirements_text = (ROOT / 'ansible/requirements-modern.yml').read_text(encoding='utf-8')
 for modern_collection in [
     'version: "2.1.0"',
@@ -1156,7 +1172,7 @@ for dependabot_token in [
 gitlab_ci_text = (ROOT / '.gitlab-ci.yml').read_text(encoding='utf-8')
 for gitlab_token in [
     'aquasec/trivy:0.70.0',
-    'alpine/helm:3.19.0',
+    'HELM_VERSION=v4.2.1 HELM_INSTALL_DIR=/usr/local/bin bash scripts/tools/install-helm.sh',
     'pip install -r requirements-ci-modern.txt',
     'python3 scripts/tools/validate_ci_contract.py',
     'python3 scripts/tools/private_data_audit.py',
@@ -1164,11 +1180,21 @@ for gitlab_token in [
     'SHA256SUMS',
     'release-evidence.json',
     'urban-platform-infra.spdx.json',
+    'scripts/release/verify_release_evidence.py',
+    'release-evidence-verification.md',
+    'dist/production-rendered.yaml',
+    'python3 tests/policy/production_render.py dist/production-rendered.yaml',
 ]:
     if gitlab_token not in gitlab_ci_text:
         errors.append(f'GitLab CI missing release integrity control: {gitlab_token}')
 if 'aquasec/trivy:latest' in gitlab_ci_text:
     errors.append('GitLab CI must not use floating aquasec/trivy:latest')
+
+github_ci_text = (ROOT / '.github/workflows/ci.yml').read_text(encoding='utf-8')
+github_release_text = (ROOT / '.github/workflows/release.yml').read_text(encoding='utf-8')
+for github_helm_token in ['version: v4.2.1']:
+    if github_helm_token not in github_ci_text or github_helm_token not in github_release_text:
+        errors.append(f'GitHub Helm workflows must pin the approved Helm release: {github_helm_token}')
 
 ansible_cfg_text = (ROOT / 'ansible/ansible.cfg').read_text(encoding='utf-8')
 if re.search(r'(?m)^\s*host_key_checking\s*=\s*False\s*$', ansible_cfg_text):
@@ -1509,16 +1535,84 @@ for networkpolicy_token in [
 makefile_text = (ROOT / 'Makefile').read_text(encoding='utf-8')
 if 'CONFIRM_PROD' not in makefile_text:
     errors.append('Makefile mutating Ansible targets must require production confirmation')
+for production_profile_token in [
+    'ifeq ($(DEPLOY_PROFILE),prod)',
+    'override DEPLOY_PROFILE := production',
+    'DEPLOY_PROFILE must be either lab or production',
+    'ALLOW_LAB_ON_PROD ?= false',
+    'ENV=$(ENV) requires DEPLOY_PROFILE=production',
+    'PRODUCTION_MUTATING_GOALS :=',
+    'ifneq ($(filter $(PRODUCTION_MUTATING_GOALS),$(MAKECMDGOALS)),)',
+    'Production profile cannot enable DEPLOY_LAB_STORAGE',
+    'Production profile cannot use the node-local StorageClass',
+    'DEPLOY_POD_SECURITY_ENFORCE ?=',
+    'DEPLOY_POD_SECURITY_VERSION ?=',
+    'Production Pod Security labels require DEPLOY_POD_SECURITY_VERSION',
+    'DEPLOY_PRIVATE_VALUES ?=',
+    'Production deploy requires DEPLOY_PRIVATE_VALUES',
+    'Production deploy requires the committed values-production.yaml overlay',
+    'Production deploy requires a high-availability topology',
+    'Production deploy requires the selected topology\'s committed topology file',
+    '$(if $(DEPLOY_PRIVATE_VALUES),-f "$(DEPLOY_PRIVATE_VALUES)",)',
+    'Production requires DEPLOY_ENABLE_STRIMZI=true',
+    'Production requires DEPLOY_NAMESPACE_RESOURCE_QUOTA=true',
+    '$(call require_prod_confirmation)',
+    'Refusing to mutate the production profile without CONFIRM_PROD=true',
+    'Refusing deploy-auto against a production inventory without ALLOW_LAB_ON_PROD=true',
+]:
+    if production_profile_token not in makefile_text:
+        errors.append(f'Makefile missing production mutation guard token: {production_profile_token}')
+for production_mutating_goal in ['operator-kubeconfig', 'ensure-storageclass', 'cluster-repair']:
+    if not re.search(
+        rf'^PRODUCTION_MUTATING_GOALS :=.*\b{re.escape(production_mutating_goal)}\b',
+        makefile_text,
+        re.MULTILINE,
+    ):
+        errors.append(f'Makefile production mutation guard must cover {production_mutating_goal}')
 if 'bootstrap-check' not in makefile_text or 'install-cluster-check' not in makefile_text:
     errors.append('Makefile must expose Ansible check-mode targets')
 if re.search(r'^PROJECT_PATH\s*\?=\s*/', makefile_text, re.MULTILINE):
     errors.append('PROJECT_PATH must not have a committed machine-specific absolute default')
+taskfile_text = (ROOT / 'Taskfile.yml').read_text(encoding='utf-8')
+for taskfile_deploy_token in [
+    'make deploy',
+    'CONFIRM_PROD="{{.CONFIRM_PROD}}"',
+    'DEPLOY_PRIVATE_VALUES="{{.DEPLOY_PRIVATE_VALUES}}"',
+]:
+    if taskfile_deploy_token not in taskfile_text:
+        errors.append(f'Taskfile deploy must delegate to the guarded Makefile path: {taskfile_deploy_token}')
+for unsafe_taskfile_token in [
+    'pod-security.kubernetes.io/enforce-version=latest',
+    'pod-security.kubernetes.io/audit-version=latest',
+    'pod-security.kubernetes.io/warn-version=latest',
+]:
+    if unsafe_taskfile_token in taskfile_text:
+        errors.append(f'Taskfile deploy must not use an unpinned production Pod Security version: {unsafe_taskfile_token}')
+for taskfile_release_token in [
+    'release-evidence:',
+    'dist/production-rendered.yaml',
+    '--api-versions kafka.strimzi.io/v1/Kafka',
+    'python3 tests/policy/production_render.py dist/production-rendered.yaml',
+    '--production-rendered dist/production-rendered.yaml',
+    'scripts/release/verify_release_evidence.py',
+    '{{.RELEASE_TAG | default ""}}',
+]:
+    if taskfile_release_token not in taskfile_text:
+        errors.append(f'Taskfile release evidence is missing production integrity control: {taskfile_release_token}')
 for production_evidence_token in [
     'PRODUCTION_EVIDENCE_TRUST_POLICY ?=',
     '--trust-policy "$(PRODUCTION_EVIDENCE_TRUST_POLICY)"',
 ]:
     if production_evidence_token not in makefile_text:
         errors.append(f'Makefile missing signed production evidence token: {production_evidence_token}')
+for storage_safety_token in [
+    'INSTALL_LOCAL_PATH_STORAGE ?= $(if $(filter production,$(DEPLOY_PROFILE)),false,auto)',
+    'DEPLOY_DATABASE_STORAGE_CLASS ?= $(if $(filter production,$(DEPLOY_PROFILE)),production-durable,$(LOCAL_PATH_STORAGE_CLASS))',
+    'Refusing local-path storage installation for the production profile',
+    'refusing local-path fallback',
+]:
+    if storage_safety_token not in makefile_text:
+        errors.append(f'Makefile missing production storage safety token: {storage_safety_token}')
 production_evidence_gate_text = (ROOT / 'scripts/production_evidence_gate.py').read_text(encoding='utf-8')
 for production_evidence_gate_token in [
     'validate_attestation_window',
@@ -1527,9 +1621,18 @@ for production_evidence_gate_token in [
     'application/vnd.dev.sigstore.bundle.v0.3+json',
     'deploymentId',
     'clusterUid',
+    'expectedPodSecurityVersion',
+    'expectedPodDisruptionBudgets',
+    'expectedAutoscalers',
+    'signed_resource_names',
+    'resource_names',
     'configmap/urban-platform-release-identity',
     'approved_runtime_image_references',
     'runtime_digest != declared_digest',
+    'validate_ingress_probe',
+    'ProxyHandler({})',
+    'requireHttpRedirect',
+    'tlsVerify',
 ]:
     if production_evidence_gate_token not in production_evidence_gate_text:
         errors.append(f'Production evidence gate missing anti-replay or runtime binding: {production_evidence_gate_token}')
@@ -1550,7 +1653,8 @@ for makefile_helm_token in [
     'MIGRATION_PRIVATE_DIR ?=',
     'MIGRATION_FALLBACK_INVENTORY ?=',
     'MIGRATION_CLUSTER_DOMAIN ?=',
-    'MIGRATION_PROFILE ?= lab',
+    'MIGRATION_PROFILE ?= $(if $(filter prod production,$(ENV)),production,lab)',
+    'MIGRATION_VALUES ?= $(if $(filter production,$(MIGRATION_PROFILE)),helm/urban-platform-infra/values-production.yaml,helm/urban-platform-infra/values.yaml)',
     'MIGRATION_LAB_WORKLOAD_CPU_REQUEST ?=',
     'MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST ?=',
     'MIGRATION_LAB_WORKLOAD_CPU_LIMIT ?=',
@@ -1823,6 +1927,7 @@ for makefile_helm_token in [
     'scripts/import_project.py --project-path "$(PROJECT_PATH)"',
     'scripts/import_recovery_plan.py',
     'scripts/migrate_project.py --project-path "$(PROJECT_PATH)"',
+    '--values "$(MIGRATION_VALUES)"',
     '--redact-sensitive',
     'OPERATOR_KUBECONFIG ?=',
     'KUBECONFIG_SCRIPT ?= scripts/tools/ensure-kubeconfig.sh',
@@ -1839,16 +1944,24 @@ for makefile_helm_token in [
     'MIGRATION_KEEPALIVED_INTERFACE="$(MIGRATION_KEEPALIVED_INTERFACE)"',
     'MIGRATION_DEPLOY_PLATFORM ?= true',
     'MIGRATION_RELAX_RESOURCE_QUOTA ?=',
+    'ifneq ($(filter import-auto import-preflight,$(MAKECMDGOALS)),)',
+    'Production migration imports require MIGRATION_IMAGE_MODE=registry.',
+    'Production migration imports require strict database availability checks.',
+    'Production migration imports require MIGRATION_SECRET_PROVIDER=external-secrets or vault.',
+    'MIGRATION_SECRET_PROVIDER ?= $(if $(filter production,$(MIGRATION_PROFILE)),external-secrets,kubernetes)',
     'MIGRATION_TLS_MODE ?= auto',
     'MIGRATION_TLS_PFX_FILE ?=',
     'MIGRATION_TLS_LE_CREATE_ISSUER ?= true',
     'MIGRATION_IMPORT_SECURITY_CONTEXT ?= $(if $(filter production,$(MIGRATION_PROFILE)),restricted,compat)',
+    'MIGRATION_POD_SECURITY_VERSION ?= $(if $(filter production,$(MIGRATION_PROFILE)),v1.34,latest)',
     '--tls-mode "$(MIGRATION_TLS_MODE)"',
     '--tls-pfx-file "$(MIGRATION_TLS_PFX_FILE)"',
     '--tls-le-email "$(MIGRATION_TLS_LE_EMAIL)"',
     '--import-security-context "$(MIGRATION_IMPORT_SECURITY_CONTEXT)"',
+    'MIGRATION_POD_SECURITY_VERSION="$(MIGRATION_POD_SECURITY_VERSION)"',
     'Deploying/upgrading the platform chart before import',
     'Skipping platform Helm deploy because MIGRATION_DEPLOY_PLATFORM=',
+    '$(MAKE) deploy DEPLOY_PROFILE=production VALUES=helm/urban-platform-infra/values-production.yaml DEPLOY_PRIVATE_VALUES="$(DEPLOY_PRIVATE_VALUES)" NAMESPACE="$(MIGRATION_NAMESPACE)"',
     '$(MAKE) deploy-auto DEPLOY_PROFILE=lab VALUES=helm/urban-platform-infra/values.yaml NAMESPACE="$(MIGRATION_NAMESPACE)"',
     'DEPLOY_NAMESPACE_RESOURCE_QUOTA="$(if $(filter true,$(MIGRATION_RELAX_RESOURCE_QUOTA)),false,$(DEPLOY_NAMESPACE_RESOURCE_QUOTA))"',
     '--set namespace.resourceQuota.enabled=$(DEPLOY_NAMESPACE_RESOURCE_QUOTA)',
@@ -2009,13 +2122,20 @@ for makefile_helm_token in [
     'crd/elasticsearches.elasticsearch.k8s.elastic.co',
     'crd/kibanas.kibana.k8s.elastic.co',
     'ensure-namespace:',
+    'production-private-preflight:',
+    'validate_production_private_overlay.py',
+    'Production deploy does not accept HELM_EXTRA_ARGS',
+    'Production deploy requires DEPLOY_CONFIGURE_EDGE_PORTS=true',
+    '--ingress-host "$(DEPLOY_INGRESS_HOST)"',
+    '--cluster-domain "$(DEPLOY_CLUSTER_DOMAIN)"',
+    '--cluster-vip "$(DEPLOY_CLUSTER_VIP)"',
     'kubectl get namespace $(NAMESPACE)',
     'kubectl create namespace $(NAMESPACE)',
     'kubectl label namespace $(NAMESPACE)',
     'ResourceQuota disabled for this deploy; removing stale $(PROJECT)-quota if present.',
     'kubectl -n $(NAMESPACE) delete resourcequota $(PROJECT)-quota --ignore-not-found',
     '--set namespace.create=false',
-    'deploy: install-operators ensure-namespace',
+    'deploy: production-private-preflight install-operators ensure-namespace',
 ]:
     if makefile_helm_token not in makefile_text:
         errors.append(f'Makefile must prepare operator tooling before deploy: {makefile_helm_token}')
@@ -2232,6 +2352,7 @@ for migration_automation_token in [
     '"drop": ["ALL"]',
     'MIGRATION_IMPORT_SECURITY_CONTEXT',
     '--import-security-context',
+    '--pod-security-version',
     '--profile',
     '--lab-workload-cpu-request',
     '--preflight-min-node-memory',
@@ -4003,6 +4124,8 @@ for strimzi_installer_token in [
     'STRIMZI_WATCH_ANY_NAMESPACE',
     'STRIMZI_PRELOAD_IMAGES',
     'RKE2_IMAGE_PRELOAD_SCRIPT',
+    'profile="${DEPLOY_PROFILE:-lab}"',
+    'kafka_version="4.3.0"',
     'quay.io/strimzi/kafka',
     'rollout status deployment/strimzi-cluster-operator',
     'STRIMZI_OPERATOR_RETRIES',
@@ -4476,6 +4599,14 @@ for standalone_token in [
 ]:
     if standalone_token not in standalone_docker_surface_text:
         errors.append(f'Standalone Docker profile missing token: {standalone_token}')
+for insecure_compose_default in [
+    'POSTGRES_PASSWORD:-change-me',
+    'POSTGRES_PASSWORD=change-me',
+]:
+    if insecure_compose_default in standalone_docker_surface_text:
+        errors.append(f'Standalone Docker profile contains insecure password fallback: {insecure_compose_default}')
+if standalone_docker_surface_text.count('${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}') < 18:
+    errors.append('Standalone Docker profile must require POSTGRES_PASSWORD for every database service')
 
 slo_contract = safe_load((ROOT / 'config/slo.yaml').read_text(encoding='utf-8'))
 objectives = slo_contract.get('objectives', {})
@@ -4596,6 +4727,7 @@ for eck_template_token in [
     'name: elasticsearch',
     '.Values.observability.elasticsearch.resources',
     '$elasticsearchService',
+    'storageClassName: {{ $storageClass | quote }}',
     'nodePort: {{ . }}',
 ]:
     if eck_template_token not in eck_template_text:

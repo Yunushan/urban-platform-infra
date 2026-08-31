@@ -66,15 +66,41 @@ def main() -> int:
                         for index in range(18)
                     },
                 },
+                "messaging": {
+                    "kafka": {
+                        "enabled": True,
+                        "provider": "strimzi",
+                        "mode": "operator",
+                        "replicas": 3,
+                        "strimzi": {"kafkaVersion": "4.3.0"},
+                    }
+                },
                 "storageTiers": {"hot": {"storageClassName": "production-durable"}},
                 "networkPolicy": {"enabled": True, "defaultDeny": {"enabled": True}},
                 "namespace": {
-                    "resourceQuota": {"enabled": True},
-                    "limitRange": {"enabled": True},
+                    "podSecurity": {"version": "v1.34"},
+                    "resourceQuota": {
+                        "enabled": True,
+                        "hard": {
+                            "requests.cpu": "12",
+                            "requests.memory": "32Gi",
+                            "limits.cpu": "20",
+                            "limits.memory": "40Gi",
+                            "requests.storage": "2Ti",
+                            "persistentvolumeclaims": "100",
+                            "pods": "300",
+                        },
+                    },
+                    "limitRange": {
+                        "enabled": True,
+                        "default": {"cpu": "1", "memory": "1Gi", "ephemeral-storage": "2Gi"},
+                        "defaultRequest": {"cpu": "100m", "memory": "256Mi", "ephemeral-storage": "512Mi"},
+                    },
                 },
                 "autoscaling": {"enabled": True},
                 "ingress": {
                     "enabled": True,
+                    "className": "traefik",
                     "tls": {
                         "enabled": True,
                         "secretName": "synthetic-tls",
@@ -89,6 +115,8 @@ def main() -> int:
                             "enabled": True,
                             "targetName": "synthetic-secret",
                             "namespace": "urban-platform",
+                            "type": "Opaque",
+                            "data": [{"secretKey": "token"}],
                         }
                     },
                 },
@@ -176,7 +204,20 @@ def main() -> int:
                 "namespace": "urban-platform",
                 "minimumReadyNodes": 3,
                 "failureDomainLabel": "kubernetes.io/hostname",
+                "expectedPodSecurityVersion": "v1.34",
                 "expectedPostgresClusters": 18,
+                "expectedKafkaVersion": "4.3.0",
+                "expectedPodDisruptionBudgets": ["synthetic-pdb"],
+                "expectedAutoscalers": ["synthetic-hpa"],
+                "ingressProbe": {
+                    "required": True,
+                    "httpsUrl": "https://synthetic.example/login",
+                    "httpUrl": "http://synthetic.example/login",
+                    "expectedHttpsStatusCodes": [200],
+                    "expectedHttpStatusCodes": [308],
+                    "requireHttpRedirect": True,
+                    "tlsVerify": True,
+                },
             },
         }
         write_yaml(config_path, config)
@@ -424,6 +465,44 @@ def main() -> int:
         if not_requested_ok:
             raise SystemExit("production evidence gate passed without --live")
 
+        with patch.object(
+            gate.subprocess,
+            "run",
+            side_effect=gate.subprocess.TimeoutExpired(["kubectl"], 30),
+        ):
+            kubectl_result, kubectl_detail = gate.kubectl_json(
+                "kubectl",
+                kubeconfig,
+                "urban-platform",
+                "pods",
+            )
+        if kubectl_result is not None or kubectl_detail != "Kubernetes API query failed":
+            raise SystemExit("production evidence gate did not fail closed on a Kubernetes API timeout")
+
+        probe_results = [(True, "synthetic HTTPS probe"), (True, "synthetic HTTP redirect probe")]
+        with patch.object(gate, "probe_http_endpoint", side_effect=probe_results) as probe:
+            ingress_probe_ok, _ = gate.validate_ingress_probe(
+                loaded["liveCluster"],
+                root,
+            )
+        if not ingress_probe_ok or probe.call_count != 2:
+            raise SystemExit("production evidence gate did not execute both signed ingress probes")
+
+        insecure_probe = deepcopy(loaded["liveCluster"])
+        insecure_probe["ingressProbe"]["tlsVerify"] = False
+        insecure_probe_ok, _ = gate.validate_ingress_probe(insecure_probe, root)
+        if insecure_probe_ok:
+            raise SystemExit("production evidence gate accepted an ingress probe with TLS verification disabled")
+
+        with patch.object(
+            gate,
+            "probe_http_endpoint",
+            side_effect=[(True, "synthetic HTTPS probe"), (False, "synthetic redirect failure")],
+        ):
+            failed_redirect_ok, _ = gate.validate_ingress_probe(loaded["liveCluster"], root)
+        if failed_redirect_ok:
+            raise SystemExit("production evidence gate accepted an unavailable HTTP-to-HTTPS redirect")
+
         nodes = [
             {
                 "metadata": {
@@ -485,6 +564,9 @@ def main() -> int:
                             "pod-security.kubernetes.io/enforce": "restricted",
                             "pod-security.kubernetes.io/audit": "restricted",
                             "pod-security.kubernetes.io/warn": "restricted",
+                            "pod-security.kubernetes.io/enforce-version": "v1.34",
+                            "pod-security.kubernetes.io/audit-version": "v1.34",
+                            "pod-security.kubernetes.io/warn-version": "v1.34",
                         }
                     }
                 },
@@ -540,16 +622,49 @@ def main() -> int:
                         "policyTypes": ["Ingress", "Egress"],
                     }
                 },
-                "resourcequotas": {"items": [{"metadata": {"name": "quota"}}]},
-                "limitranges": {"items": [{"metadata": {"name": "limits"}}]},
+                "resourcequotas": {
+                    "items": [
+                        {
+                            "metadata": {"name": "quota"},
+                            "spec": {
+                                "hard": {
+                                    "requests.cpu": "12",
+                                    "requests.memory": "32Gi",
+                                    "limits.cpu": "20",
+                                    "limits.memory": "40Gi",
+                                    "requests.storage": "2Ti",
+                                    "persistentvolumeclaims": "100",
+                                    "pods": "300",
+                                }
+                            },
+                        }
+                    ]
+                },
+                "limitranges": {
+                    "items": [
+                        {
+                            "metadata": {"name": "limits"},
+                            "spec": {
+                                "limits": [
+                                    {
+                                        "type": "Container",
+                                        "default": {"cpu": "1", "memory": "1Gi", "ephemeral-storage": "2Gi"},
+                                        "defaultRequest": {"cpu": "100m", "memory": "256Mi", "ephemeral-storage": "512Mi"},
+                                    }
+                                ]
+                            },
+                        }
+                    ]
+                },
                 "poddisruptionbudgets.policy": {
                     "items": [
-                        {"status": {"currentHealthy": 3, "desiredHealthy": 2}}
+                        {"metadata": {"name": "synthetic-pdb"}, "status": {"currentHealthy": 3, "desiredHealthy": 2}}
                     ]
                 },
                 "horizontalpodautoscalers.autoscaling": {
                     "items": [
                         {
+                            "metadata": {"name": "synthetic-hpa"},
                             "status": {
                                 "conditions": [
                                     {"type": "AbleToScale", "status": "True"},
@@ -560,7 +675,27 @@ def main() -> int:
                     ]
                 },
                 "ingresses.networking.k8s.io": {
-                    "items": [{"spec": {"tls": [{"secretName": "synthetic-tls"}]}}]
+                    "items": [
+                        {
+                            "metadata": {
+                                "name": "webserver",
+                                "annotations": {
+                                    "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
+                                },
+                            },
+                            "spec": {"ingressClassName": "traefik", "tls": [{"secretName": "synthetic-tls"}]},
+                        },
+                        {
+                            "metadata": {
+                                "name": "webserver-redirect",
+                                "annotations": {
+                                    "traefik.ingress.kubernetes.io/router.entrypoints": "web",
+                                    "traefik.ingress.kubernetes.io/router.middlewares": "urban-platform-redirect-https@kubernetescrd",
+                                },
+                            },
+                            "spec": {"ingressClassName": "traefik", "rules": [{"http": {}}]},
+                        },
+                    ]
                 },
                 "clusters.postgresql.cnpg.io": {"items": clusters},
                 "scheduledbackups.postgresql.cnpg.io": {"items": scheduled_backups},
@@ -574,19 +709,149 @@ def main() -> int:
                         }
                     ]
                 },
+                "secret/synthetic-tls": {
+                    "type": "kubernetes.io/tls",
+                    "data": {"tls.crt": "c3ludGhldGlj", "tls.key": "c3ludGhldGlj"},
+                },
+                "secret/synthetic-secret": {
+                    "type": "Opaque",
+                    "data": {"token": "c3ludGhldGlj"},
+                },
             }
             if resource == "externalsecret/synthetic":
                 return {
+                    "spec": {"target": {"name": "synthetic-secret"}},
                     "status": {"conditions": [{"type": "Ready", "status": "True"}]}
                 }, "ok"
             value = resources.get(resource)
             return (value, "ok") if value is not None else (None, "unexpected synthetic query")
+
+        def fake_wrong_ingress_class(
+            kubectl: str,
+            kubeconfig_path: Path,
+            namespace: str | None,
+            resource: str,
+        ):
+            value, detail = fake_kubectl_json(kubectl, kubeconfig_path, namespace, resource)
+            if resource == "ingresses.networking.k8s.io" and value is not None:
+                drifted = deepcopy(value)
+                drifted["items"][0]["spec"]["ingressClassName"] = "nginx"
+                return drifted, detail
+            return value, detail
+
+        with (
+            patch.object(gate.shutil, "which", return_value="kubectl"),
+            patch.object(gate.kafka_readiness, "kubectl_api_ready", return_value=True),
+            patch.object(gate, "kubectl_json", side_effect=fake_wrong_ingress_class),
+            patch.object(gate, "validate_kafka_data_path", return_value=(True, "synthetic pass")),
+            patch.object(gate, "validate_ingress_probe", return_value=(True, "synthetic ingress pass")),
+        ):
+            wrong_ingress_class_ok, _ = gate.validate_live(
+                loaded,
+                run_live=True,
+                base_values=base_values,
+                public_values=public_values,
+                private_values=private_values,
+            )
+        if wrong_ingress_class_ok:
+            raise SystemExit("production evidence gate accepted an ingress using the wrong class")
+
+        def fake_drifted_quota(
+            kubectl: str,
+            kubeconfig_path: Path,
+            namespace: str | None,
+            resource: str,
+        ):
+            value, detail = fake_kubectl_json(kubectl, kubeconfig_path, namespace, resource)
+            if resource == "resourcequotas" and value is not None:
+                drifted = deepcopy(value)
+                drifted["items"][0]["spec"]["hard"]["pods"] = "299"
+                return drifted, detail
+            return value, detail
+
+        with (
+            patch.object(gate.shutil, "which", return_value="kubectl"),
+            patch.object(gate.kafka_readiness, "kubectl_api_ready", return_value=True),
+            patch.object(gate, "kubectl_json", side_effect=fake_drifted_quota),
+            patch.object(gate, "validate_kafka_data_path", return_value=(True, "synthetic pass")),
+            patch.object(gate, "validate_ingress_probe", return_value=(True, "synthetic ingress pass")),
+        ):
+            drifted_quota_ok, _ = gate.validate_live(
+                loaded,
+                run_live=True,
+                base_values=base_values,
+                public_values=public_values,
+                private_values=private_values,
+            )
+        if drifted_quota_ok:
+            raise SystemExit("production evidence gate accepted a drifted production ResourceQuota")
+
+        def fake_extra_quota(
+            kubectl: str,
+            kubeconfig_path: Path,
+            namespace: str | None,
+            resource: str,
+        ):
+            value, detail = fake_kubectl_json(kubectl, kubeconfig_path, namespace, resource)
+            if resource == "resourcequotas" and value is not None:
+                drifted = deepcopy(value)
+                drifted["items"][0]["spec"]["hard"]["services"] = "1"
+                return drifted, detail
+            return value, detail
+
+        with (
+            patch.object(gate.shutil, "which", return_value="kubectl"),
+            patch.object(gate.kafka_readiness, "kubectl_api_ready", return_value=True),
+            patch.object(gate, "kubectl_json", side_effect=fake_extra_quota),
+            patch.object(gate, "validate_kafka_data_path", return_value=(True, "synthetic pass")),
+            patch.object(gate, "validate_ingress_probe", return_value=(True, "synthetic ingress pass")),
+        ):
+            extra_quota_ok, _ = gate.validate_live(
+                loaded,
+                run_live=True,
+                base_values=base_values,
+                public_values=public_values,
+                private_values=private_values,
+            )
+        if extra_quota_ok:
+            raise SystemExit("production evidence gate accepted an unreviewed ResourceQuota ceiling")
+
+        def fake_extra_limit(
+            kubectl: str,
+            kubeconfig_path: Path,
+            namespace: str | None,
+            resource: str,
+        ):
+            value, detail = fake_kubectl_json(kubectl, kubeconfig_path, namespace, resource)
+            if resource == "limitranges" and value is not None:
+                drifted = deepcopy(value)
+                drifted["items"][0]["spec"]["limits"][0]["default"]["hugepages-2Mi"] = "1Gi"
+                return drifted, detail
+            return value, detail
+
+        with (
+            patch.object(gate.shutil, "which", return_value="kubectl"),
+            patch.object(gate.kafka_readiness, "kubectl_api_ready", return_value=True),
+            patch.object(gate, "kubectl_json", side_effect=fake_extra_limit),
+            patch.object(gate, "validate_kafka_data_path", return_value=(True, "synthetic pass")),
+            patch.object(gate, "validate_ingress_probe", return_value=(True, "synthetic ingress pass")),
+        ):
+            extra_limit_ok, _ = gate.validate_live(
+                loaded,
+                run_live=True,
+                base_values=base_values,
+                public_values=public_values,
+                private_values=private_values,
+            )
+        if extra_limit_ok:
+            raise SystemExit("production evidence gate accepted an unreviewed LimitRange default")
 
         with (
             patch.object(gate.shutil, "which", return_value="kubectl"),
             patch.object(gate.kafka_readiness, "kubectl_api_ready", return_value=True),
             patch.object(gate, "kubectl_json", side_effect=fake_kubectl_json),
             patch.object(gate, "validate_kafka_data_path", return_value=(True, "synthetic pass")),
+            patch.object(gate, "validate_ingress_probe", return_value=(True, "synthetic ingress pass")),
         ):
             live_ok, _ = gate.validate_live(
                 loaded,
@@ -595,6 +860,94 @@ def main() -> int:
                 public_values=public_values,
                 private_values=private_values,
             )
+        if not live_ok:
+            raise SystemExit("production evidence gate rejected a healthy TLS-backed synthetic cluster")
+
+        def fake_missing_tls_secret(
+            kubectl: str,
+            kubeconfig_path: Path,
+            namespace: str | None,
+            resource: str,
+        ):
+            if resource == "secret/synthetic-tls":
+                return None, "synthetic TLS Secret is missing"
+            return fake_kubectl_json(kubectl, kubeconfig_path, namespace, resource)
+
+        with (
+            patch.object(gate.shutil, "which", return_value="kubectl"),
+            patch.object(gate.kafka_readiness, "kubectl_api_ready", return_value=True),
+            patch.object(gate, "kubectl_json", side_effect=fake_missing_tls_secret),
+            patch.object(gate, "validate_kafka_data_path", return_value=(True, "synthetic pass")),
+            patch.object(gate, "validate_ingress_probe", return_value=(True, "synthetic ingress pass")),
+        ):
+            missing_tls_secret_ok, _ = gate.validate_live(
+                loaded,
+                run_live=True,
+                base_values=base_values,
+                public_values=public_values,
+                private_values=private_values,
+            )
+        if missing_tls_secret_ok:
+            raise SystemExit("production evidence gate accepted an ingress with a missing TLS Secret")
+
+        def fake_missing_external_target_secret(
+            kubectl: str,
+            kubeconfig_path: Path,
+            namespace: str | None,
+            resource: str,
+        ):
+            if resource == "secret/synthetic-secret":
+                return None, "synthetic target Secret is missing"
+            return fake_kubectl_json(kubectl, kubeconfig_path, namespace, resource)
+
+        with (
+            patch.object(gate.shutil, "which", return_value="kubectl"),
+            patch.object(gate.kafka_readiness, "kubectl_api_ready", return_value=True),
+            patch.object(gate, "kubectl_json", side_effect=fake_missing_external_target_secret),
+            patch.object(gate, "validate_kafka_data_path", return_value=(True, "synthetic pass")),
+            patch.object(gate, "validate_ingress_probe", return_value=(True, "synthetic ingress pass")),
+        ):
+            missing_external_target_ok, _ = gate.validate_live(
+                loaded,
+                run_live=True,
+                base_values=base_values,
+                public_values=public_values,
+                private_values=private_values,
+            )
+        if missing_external_target_ok:
+            raise SystemExit("production evidence gate accepted an ExternalSecret without its target Secret")
+
+        def fake_unprotected_plaintext_ingress(
+            kubectl: str,
+            kubeconfig_path: Path,
+            namespace: str | None,
+            resource: str,
+        ):
+            value, detail = fake_kubectl_json(kubectl, kubeconfig_path, namespace, resource)
+            if resource == "ingresses.networking.k8s.io" and value is not None:
+                unprotected = deepcopy(value)
+                unprotected["items"][1]["metadata"]["annotations"][
+                    "traefik.ingress.kubernetes.io/router.middlewares"
+                ] = "urban-platform-some-other-middleware@kubernetescrd"
+                return unprotected, detail
+            return value, detail
+
+        with (
+            patch.object(gate.shutil, "which", return_value="kubectl"),
+            patch.object(gate.kafka_readiness, "kubectl_api_ready", return_value=True),
+            patch.object(gate, "kubectl_json", side_effect=fake_unprotected_plaintext_ingress),
+            patch.object(gate, "validate_kafka_data_path", return_value=(True, "synthetic pass")),
+            patch.object(gate, "validate_ingress_probe", return_value=(True, "synthetic ingress pass")),
+        ):
+            unprotected_plaintext_ok, _ = gate.validate_live(
+                loaded,
+                run_live=True,
+                base_values=base_values,
+                public_values=public_values,
+                private_values=private_values,
+            )
+        if unprotected_plaintext_ok:
+            raise SystemExit("production evidence gate accepted an unprotected plaintext ingress")
 
         def fake_wrong_release_identity(
             kubectl: str,
@@ -614,6 +967,7 @@ def main() -> int:
             patch.object(gate.kafka_readiness, "kubectl_api_ready", return_value=True),
             patch.object(gate, "kubectl_json", side_effect=fake_wrong_release_identity),
             patch.object(gate, "validate_kafka_data_path", return_value=(True, "synthetic pass")),
+            patch.object(gate, "validate_ingress_probe", return_value=(True, "synthetic ingress pass")),
         ):
             wrong_release_identity_ok, _ = gate.validate_live(
                 loaded,
@@ -645,6 +999,7 @@ def main() -> int:
             patch.object(gate.kafka_readiness, "kubectl_api_ready", return_value=True),
             patch.object(gate, "kubectl_json", side_effect=fake_unapproved_pod_image),
             patch.object(gate, "validate_kafka_data_path", return_value=(True, "synthetic pass")),
+            patch.object(gate, "validate_ingress_probe", return_value=(True, "synthetic ingress pass")),
         ):
             unapproved_pod_image_ok, _ = gate.validate_live(
                 loaded,
@@ -676,6 +1031,7 @@ def main() -> int:
             patch.object(gate.kafka_readiness, "kubectl_api_ready", return_value=True),
             patch.object(gate, "kubectl_json", side_effect=fake_substituted_runtime_image),
             patch.object(gate, "validate_kafka_data_path", return_value=(True, "synthetic pass")),
+            patch.object(gate, "validate_ingress_probe", return_value=(True, "synthetic ingress pass")),
         ):
             substituted_runtime_image_ok, _ = gate.validate_live(
                 loaded,
@@ -705,6 +1061,7 @@ def main() -> int:
             patch.object(gate.kafka_readiness, "kubectl_api_ready", return_value=True),
             patch.object(gate, "kubectl_json", side_effect=fake_wrong_cluster_uid),
             patch.object(gate, "validate_kafka_data_path", return_value=(True, "synthetic pass")),
+            patch.object(gate, "validate_ingress_probe", return_value=(True, "synthetic ingress pass")),
         ):
             wrong_cluster_uid_ok, _ = gate.validate_live(
                 loaded,
@@ -734,6 +1091,7 @@ def main() -> int:
             patch.object(gate.kafka_readiness, "kubectl_api_ready", return_value=True),
             patch.object(gate, "kubectl_json", side_effect=fake_missing_container_status),
             patch.object(gate, "validate_kafka_data_path", return_value=(True, "synthetic pass")),
+            patch.object(gate, "validate_ingress_probe", return_value=(True, "synthetic ingress pass")),
         ):
             missing_container_status_ok, _ = gate.validate_live(
                 loaded,
@@ -763,6 +1121,7 @@ def main() -> int:
             patch.object(gate.kafka_readiness, "kubectl_api_ready", return_value=True),
             patch.object(gate, "kubectl_json", side_effect=fake_unrelated_certificate),
             patch.object(gate, "validate_kafka_data_path", return_value=(True, "synthetic pass")),
+            patch.object(gate, "validate_ingress_probe", return_value=(True, "synthetic ingress pass")),
         ):
             unrelated_certificate_ok, _ = gate.validate_live(
                 loaded,
@@ -790,6 +1149,7 @@ def main() -> int:
             patch.object(gate.kafka_readiness, "kubectl_api_ready", return_value=True),
             patch.object(gate, "kubectl_json", side_effect=fake_two_node_kubectl_json),
             patch.object(gate, "validate_kafka_data_path", return_value=(True, "synthetic pass")),
+            patch.object(gate, "validate_ingress_probe", return_value=(True, "synthetic ingress pass")),
         ):
             two_node_ok, _ = gate.validate_live(
                 loaded,
@@ -808,6 +1168,7 @@ def main() -> int:
             patch.object(gate.kafka_readiness, "kubectl_api_ready", return_value=True),
             patch.object(gate, "kubectl_json", side_effect=fake_kubectl_json),
             patch.object(gate, "validate_kafka_data_path", return_value=(True, "synthetic pass")),
+            patch.object(gate, "validate_ingress_probe", return_value=(True, "synthetic ingress pass")),
         ):
             wrong_count_ok, _ = gate.validate_live(
                 wrong_count,
@@ -819,11 +1180,50 @@ def main() -> int:
         if wrong_count_ok:
             raise SystemExit("production evidence gate trusted a lowered PostgreSQL cluster count")
 
+        wrong_kafka_version = gate.load_yaml(config_path)
+        wrong_kafka_version["liveCluster"]["expectedKafkaVersion"] = "4.2.0"
+        with (
+            patch.object(gate.shutil, "which", return_value="kubectl"),
+            patch.object(gate.kafka_readiness, "kubectl_api_ready", return_value=True),
+            patch.object(gate, "kubectl_json", side_effect=fake_kubectl_json),
+            patch.object(gate, "validate_kafka_data_path", return_value=(True, "synthetic pass")),
+            patch.object(gate, "validate_ingress_probe", return_value=(True, "synthetic ingress pass")),
+        ):
+            wrong_kafka_version_ok, _ = gate.validate_live(
+                wrong_kafka_version,
+                run_live=True,
+                base_values=base_values,
+                public_values=public_values,
+                private_values=private_values,
+            )
+        if wrong_kafka_version_ok:
+            raise SystemExit("production evidence gate trusted a mismatched Kafka version claim")
+
+        wrong_psa_version = gate.load_yaml(config_path)
+        wrong_psa_version["liveCluster"]["expectedPodSecurityVersion"] = "v1.35"
+        with (
+            patch.object(gate.shutil, "which", return_value="kubectl"),
+            patch.object(gate.kafka_readiness, "kubectl_api_ready", return_value=True),
+            patch.object(gate, "kubectl_json", side_effect=fake_kubectl_json),
+            patch.object(gate, "validate_kafka_data_path", return_value=(True, "synthetic pass")),
+            patch.object(gate, "validate_ingress_probe", return_value=(True, "synthetic ingress pass")),
+        ):
+            wrong_psa_version_ok, _ = gate.validate_live(
+                wrong_psa_version,
+                run_live=True,
+                base_values=base_values,
+                public_values=public_values,
+                private_values=private_values,
+            )
+        if wrong_psa_version_ok:
+            raise SystemExit("production evidence gate trusted a mismatched Pod Security version claim")
+
         with (
             patch.object(gate.shutil, "which", return_value="kubectl"),
             patch.object(gate.kafka_readiness, "kubectl_api_ready", return_value=True),
             patch.object(gate, "kubectl_json", side_effect=fake_kubectl_json),
             patch.object(gate, "validate_kafka_data_path", return_value=(False, "synthetic failure")),
+            patch.object(gate, "validate_ingress_probe", return_value=(True, "synthetic ingress pass")),
         ):
             failed_data_path_ok, _ = gate.validate_live(
                 loaded,

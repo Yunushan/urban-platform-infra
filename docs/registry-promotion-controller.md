@@ -40,7 +40,7 @@ For constrained labs, keep the import path on preload mode:
 
 ```bash
 make registry-promotion-plan REGISTRY_PROMOTION_PROFILE=lab-preload IMPORT_REDACT=true
-make import-auto PROJECT_PATH=/path/to/compose-project MIGRATION_PROFILE=lab MIGRATION_IMAGE_MODE=preload
+make import-auto PROJECT_PATH=/path/to/compose-project ENV=lab MIGRATION_PROFILE=lab MIGRATION_IMAGE_MODE=preload
 ```
 
 ## Production Use

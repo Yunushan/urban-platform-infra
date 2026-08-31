@@ -57,7 +57,7 @@ line.
 Install the operator first:
 
 ```bash
-make install-operators DEPLOY_ENABLE_STRIMZI=true
+make install-operators DEPLOY_ENABLE_STRIMZI=true CONFIRM_PROD=true
 ```
 
 For lab or import clusters, prefer the one-command wrapper:
@@ -82,6 +82,7 @@ enabled:
 ```bash
 make install-operators \
   DEPLOY_ENABLE_STRIMZI=true \
+  CONFIRM_PROD=true \
   STRIMZI_OPERATOR_IMAGE_REGISTRY=registry.production.example/platform \
   STRIMZI_OPERATOR_IMAGE_REPOSITORY=quay.io/strimzi \
   STRIMZI_OPERATOR_IMAGE_DIGEST=sha256:<reviewed-strimzi-operator-image-digest> \

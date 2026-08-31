@@ -495,9 +495,9 @@ def reconcile_import_namespace_pod_security(args: argparse.Namespace) -> None:
                 f"pod-security.kubernetes.io/enforce={enforce_level}",
                 "pod-security.kubernetes.io/audit=restricted",
                 f"pod-security.kubernetes.io/warn={warn_level}",
-                "pod-security.kubernetes.io/enforce-version=latest",
-                "pod-security.kubernetes.io/audit-version=latest",
-                "pod-security.kubernetes.io/warn-version=latest",
+                f"pod-security.kubernetes.io/enforce-version={args.pod_security_version}",
+                f"pod-security.kubernetes.io/audit-version={args.pod_security_version}",
+                f"pod-security.kubernetes.io/warn-version={args.pod_security_version}",
                 "--overwrite",
             ],
         )
@@ -5664,6 +5664,7 @@ def generate_bundle(
         f'MIGRATION_TLS_LE_CREATE_ISSUER="${{MIGRATION_TLS_LE_CREATE_ISSUER:-{str(args.tls_le_create_issuer).lower()}}}"\n'
         f'MIGRATION_PROFILE="${{MIGRATION_PROFILE:-{args.profile}}}"\n'
         f'MIGRATION_IMPORT_SECURITY_CONTEXT="${{MIGRATION_IMPORT_SECURITY_CONTEXT:-{args.import_security_context}}}"\n'
+        f'MIGRATION_POD_SECURITY_VERSION="${{MIGRATION_POD_SECURITY_VERSION:-{args.pod_security_version}}}"\n'
         f'MIGRATION_LAB_WORKLOAD_CPU_REQUEST="${{MIGRATION_LAB_WORKLOAD_CPU_REQUEST:-{args.lab_workload_cpu_request}}}"\n'
         f'MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST="${{MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST:-{args.lab_workload_memory_request}}}"\n'
         f'MIGRATION_LAB_WORKLOAD_CPU_LIMIT="${{MIGRATION_LAB_WORKLOAD_CPU_LIMIT:-{args.lab_workload_cpu_limit}}}"\n'
@@ -5756,6 +5757,7 @@ def generate_bundle(
         '--tls-le-private-key-secret "$MIGRATION_TLS_LE_PRIVATE_KEY_SECRET" $TLS_LE_ISSUER_FLAG '
         '--profile "$MIGRATION_PROFILE" '
         '--import-security-context "$MIGRATION_IMPORT_SECURITY_CONTEXT" '
+        '--pod-security-version "$MIGRATION_POD_SECURITY_VERSION" '
         '--lab-workload-cpu-request "$MIGRATION_LAB_WORKLOAD_CPU_REQUEST" '
         '--lab-workload-memory-request "$MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST" '
         '--lab-workload-cpu-limit "$MIGRATION_LAB_WORKLOAD_CPU_LIMIT" '
@@ -8834,6 +8836,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--dotnet-image-registry", default=os.environ.get("MIGRATION_DOTNET_IMAGE_REGISTRY", "mcr.microsoft.com/dotnet"))
     parser.add_argument("--dotnet-roll-forward", default=os.environ.get("MIGRATION_DOTNET_ROLL_FORWARD", "LatestMajor"))
     parser.add_argument("--import-security-context", choices=["restricted", "compat"], default=os.environ.get("MIGRATION_IMPORT_SECURITY_CONTEXT", ""))
+    parser.add_argument("--pod-security-version", default=os.environ.get("MIGRATION_POD_SECURITY_VERSION", "latest"))
     parser.add_argument(
         "--import-probe-mode",
         choices=["auto", "tcp", "readiness-only", "disabled"],
@@ -8923,6 +8926,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         args.preflight_require_ingress_endpoint = args.profile == "production"
     if not args.import_security_context:
         args.import_security_context = "restricted" if args.profile == "production" else "compat"
+    if args.profile == "production" and not re.fullmatch(r"v1\.[0-9]+", str(args.pod_security_version).strip()):
+        parser.error("argument --pod-security-version must be pinned as v1.<minor> for production")
     if args.runtime_validation_timeout is None:
         args.runtime_validation_timeout = 600 if args.profile == "lab" else 900
     args.runtime_validation_interval = max(1, args.runtime_validation_interval)

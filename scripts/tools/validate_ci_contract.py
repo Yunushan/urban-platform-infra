@@ -80,6 +80,9 @@ GITHUB_REQUIRED_TOKENS = {
     "python3 scripts/production_readiness_score.py": "CI must enforce the repository production readiness score.",
     "python3 tests/policy/kafka_clickhouse_readiness_test.py": "CI must exercise Kafka-to-ClickHouse readiness scoring without live traffic.",
     "python3 tests/policy/kafka_clickhouse_reconcile_test.py": "CI must exercise fail-closed Kafka-to-ClickHouse reconciliation without a live cluster.",
+    "python3 tests/policy/version_policy_test.py": "CI must exercise lifecycle freshness boundary validation.",
+    "python3 tests/policy/release_evidence_test.py": "CI must exercise fail-closed release evidence generation and verification.",
+    "version: v4.2.1": "GitHub Helm jobs must use the approved Helm 4.2.1 pin.",
     "--api-versions kafka.strimzi.io/v1/Kafka": "Production rendering must model the Strimzi Kafka CRD API.",
     "--api-versions kafka.strimzi.io/v1/KafkaConnect": "Production rendering must model the Strimzi Kafka Connect CRD API.",
     "--api-versions kafka.strimzi.io/v1/KafkaConnector": "Production rendering must model the Strimzi KafkaConnector CRD API.",
@@ -96,11 +99,14 @@ GITLAB_REQUIRED_TOKENS = {
     "pip install -r requirements-ci-modern.txt": "GitLab validation must use the modern pinned requirements file.",
     "python3 scripts/tools/validate_ci_contract.py": "GitLab validation must run the CI contract gate.",
     "python3 scripts/validate.py": "GitLab validation must run repository validation.",
+    "python3 scripts/validate_production_profile.py": "GitLab validation must enforce the production profile contract.",
     "python3 scripts/images/validate-images.py": "GitLab validation must run image policy validation.",
     "python3 scripts/version_policy.py check --config config/version-policy.yaml": "GitLab validation must enforce the approval-only version policy.",
     "python3 tests/policy/kafka_clickhouse_reconcile_test.py": "GitLab validation must exercise fail-closed Kafka-to-ClickHouse reconciliation.",
-    "alpine/helm:3.19.0": "GitLab render and release jobs must use a pinned Helm image.",
+    "python3 tests/policy/version_policy_test.py": "GitLab validation must exercise lifecycle freshness boundary validation.",
+    "HELM_VERSION=v4.2.1 HELM_INSTALL_DIR=/usr/local/bin bash scripts/tools/install-helm.sh": "GitLab Helm jobs must use the checksum-verified approved Helm 4.2.1 installer.",
     "aquasec/trivy:0.70.0": "GitLab security job must use a pinned Trivy image.",
+    "python3 scripts/production_readiness_score.py": "GitLab release jobs must enforce the repository production readiness score.",
 }
 
 VERSION_UPDATE_REQUIRED_TOKENS = {
@@ -108,6 +114,21 @@ VERSION_UPDATE_REQUIRED_TOKENS = {
     "python3 scripts/version_policy.py check --config config/version-policy.yaml": "Version workflow must validate the committed policy.",
     "python3 scripts/version_policy.py request": "Version workflow must generate a request instead of deploying directly.",
     "contents: read": "Version workflow must not receive repository write access.",
+}
+
+RELEASE_SOURCE_CONTRACT_TOKENS = {
+    "python3 scripts/tools/validate_ci_contract.py": "Release jobs must revalidate the source CI contract.",
+    "python3 scripts/tools/private_data_audit.py": "Release jobs must rerun the private-data audit.",
+    "python3 scripts/validate.py": "Release jobs must rerun repository validation.",
+    "python3 scripts/images/validate-images.py": "Release jobs must rerun image policy validation.",
+    "python3 tests/policy/production_evidence_gate_test.py": "Release jobs must exercise the production evidence gate.",
+    "python3 tests/policy/tool_inventory_test.py": "Release jobs must exercise tool-inventory boundary validation.",
+    "python3 tests/policy/version_policy_test.py": "Release jobs must exercise lifecycle boundary validation.",
+    "python3 tests/policy/release_evidence_test.py": "Release jobs must exercise fail-closed release evidence generation and verification.",
+    "python3 tests/policy/kafka_clickhouse_readiness_test.py": "Release jobs must exercise Kafka-to-ClickHouse readiness validation.",
+    "python3 tests/policy/kafka_clickhouse_reconcile_test.py": "Release jobs must exercise fail-closed reconciliation validation.",
+    "python3 scripts/production_readiness_score.py": "Release jobs must enforce the repository production readiness score.",
+    "python3 scripts/version_policy.py check --config config/version-policy.yaml": "Release jobs must validate lifecycle policy freshness.",
 }
 
 
@@ -170,18 +191,25 @@ def collect_findings() -> list[Finding]:
     github_text = read_text(GITHUB_CI)
     gitlab_text = read_text(GITLAB_CI)
     version_update_text = read_text(VERSION_UPDATE_WORKFLOW)
+    github_release_text = read_text(ROOT / ".github/workflows/release.yml")
+    github_workflow_paths = sorted(
+        set((ROOT / ".github/workflows").glob("*.yml"))
+        | set((ROOT / ".github/workflows").glob("*.yaml"))
+    )
     findings: list[Finding] = []
     findings.extend(check_tokens("GitHub CI", github_text, GITHUB_REQUIRED_TOKENS))
     findings.extend(check_lanes("GitHub static matrix", github_text, STATIC_LANES))
     findings.extend(check_lanes("GitHub validate matrix", github_text, VALIDATE_LANES))
-    findings.extend(check_action_refs(github_text))
     findings.extend(check_tokens("Version update workflow", version_update_text, VERSION_UPDATE_REQUIRED_TOKENS))
-    findings.extend(check_action_refs(version_update_text))
+    findings.extend(check_tokens("GitHub release", github_release_text, RELEASE_SOURCE_CONTRACT_TOKENS))
+    for workflow_path in github_workflow_paths:
+        findings.extend(check_action_refs(read_text(workflow_path)))
     if "helm upgrade" in version_update_text or "kubectl apply" in version_update_text:
         findings.append(Finding("ERROR", "Version update workflow", "Version request workflow must not deploy to a cluster."))
     else:
         findings.append(Finding("OK", "Version update workflow", "Manual workflow only generates review evidence."))
     findings.extend(check_tokens("GitLab CI", gitlab_text, GITLAB_REQUIRED_TOKENS))
+    findings.extend(check_tokens("GitLab release", gitlab_text, RELEASE_SOURCE_CONTRACT_TOKENS))
     if "pip install pyyaml" in gitlab_text.lower():
         findings.append(
             Finding(

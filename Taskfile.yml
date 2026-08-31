@@ -58,39 +58,55 @@ tasks:
         -f helm/urban-platform-infra/values.yaml
         > dist/rendered.yaml
       - >-
+        helm template urban-platform-infra helm/urban-platform-infra
+        --namespace urban-platform
+        -f helm/urban-platform-infra/values.yaml
+        -f helm/urban-platform-infra/values-production.yaml
+        --api-versions kafka.strimzi.io/v1/Kafka
+        --api-versions kafka.strimzi.io/v1/KafkaNodePool
+        --api-versions kafka.strimzi.io/v1/KafkaTopic
+        --api-versions kafka.strimzi.io/v1/KafkaUser
+        --api-versions kafka.strimzi.io/v1/KafkaConnect
+        --api-versions kafka.strimzi.io/v1/KafkaConnector
+        --api-versions monitoring.coreos.com/v1/PodMonitor
+        --api-versions cert-manager.io/v1/Certificate
+        --api-versions cert-manager.io/v1/ClusterIssuer
+        > dist/production-rendered.yaml
+      - python3 tests/policy/basic_policy.py dist/production-rendered.yaml
+      - python3 tests/policy/production_render.py dist/production-rendered.yaml
+      - >-
         python3 scripts/release/generate_sbom.py
         --chart helm/urban-platform-infra
         --dist dist
         --rendered dist/rendered.yaml
+        --production-rendered dist/production-rendered.yaml
         --sbom dist/urban-platform-infra.spdx.json
+        --manifest dist/release-evidence.json
         --checksums dist/SHA256SUMS
+      - >-
+        test -n "{{.RELEASE_TAG | default ""}}"
+        && python3 scripts/release/verify_release_evidence.py
+        --chart helm/urban-platform-infra
+        --policy config/supply-chain-policy.yaml
+        --tag "{{.RELEASE_TAG | default ""}}"
+        --report reports/release-evidence-verification.md
   deploy:
     vars:
       ENV: '{{.ENV | default "prod"}}'
       ENGINE: '{{.ENGINE | default "rke2"}}'
-      INVENTORY: '{{.INVENTORY | default "inventories/prod/hosts.yml"}}'
+      INVENTORY: 'inventories/{{.ENV}}/hosts.yml'
       TOPOLOGY: '{{.TOPOLOGY | default "three-node-ha"}}'
+      CONFIRM_PROD: '{{.CONFIRM_PROD | default "false"}}'
+      DEPLOY_PRIVATE_VALUES: '{{.DEPLOY_PRIVATE_VALUES | default ""}}'
     cmds:
-      - ENV={{.ENV}} ENGINE={{.ENGINE}} INVENTORY={{.INVENTORY}} bash scripts/tools/ensure-kubeconfig.sh
       - >-
-        kubectl create namespace urban-platform --dry-run=client -o yaml
-        | kubectl apply -f -
-      - >-
-        kubectl label namespace urban-platform
-        pod-security.kubernetes.io/enforce=baseline
-        pod-security.kubernetes.io/audit=restricted
-        pod-security.kubernetes.io/warn=restricted
-        pod-security.kubernetes.io/enforce-version=latest
-        pod-security.kubernetes.io/audit-version=latest
-        pod-security.kubernetes.io/warn-version=latest
-        --overwrite
-      - >-
-        helm upgrade --install urban-platform-infra helm/urban-platform-infra
-        --namespace urban-platform
-        --cleanup-on-fail
-        --set namespace.create=false
-        -f helm/urban-platform-infra/values.yaml
-        -f helm/urban-platform-infra/topologies/{{.TOPOLOGY}}.yaml
+        make deploy
+        ENV="{{.ENV}}"
+        ENGINE="{{.ENGINE}}"
+        INVENTORY="{{.INVENTORY}}"
+        TOPOLOGY="{{.TOPOLOGY}}"
+        CONFIRM_PROD="{{.CONFIRM_PROD}}"
+        DEPLOY_PRIVATE_VALUES="{{.DEPLOY_PRIVATE_VALUES}}"
   observability-status:
     cmds:
       - kubectl -n urban-platform get prometheusrules.monitoring.coreos.com,servicemonitors.monitoring.coreos.com 2>/dev/null || true

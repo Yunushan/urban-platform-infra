@@ -12,7 +12,7 @@ Release integrity depends on five controls:
 4. Every packaged chart release must include a public-safe machine-readable release evidence manifest.
 5. GitHub releases must produce artifact attestations with OIDC-backed signing.
 
-The GitHub release workflow packages the Helm chart, renders the default manifest, generates `dist/SHA256SUMS`, generates `dist/urban-platform-infra.spdx.json`, generates `dist/release-evidence.json`, and attests the evidence with GitHub artifact attestations. The GitLab tag pipeline mirrors the checksum, SBOM, and release manifest evidence path for private GitLab users.
+The GitHub release workflow packages the Helm chart, renders both the default and production manifests, generates `dist/SHA256SUMS`, generates `dist/urban-platform-infra.spdx.json`, generates `dist/release-evidence.json`, verifies those artifacts with `scripts/release/verify_release_evidence.py`, and attests the evidence with GitHub artifact attestations. The GitLab tag pipeline mirrors the checksum, SBOM, release manifest, production-render policy, and offline verification path for private GitLab users.
 
 The local Article 6 verifier is `scripts/release/verify_release_evidence.py`.
 `make release-evidence` now runs it after generating artifacts, and
@@ -29,6 +29,7 @@ Expected release evidence:
 ```text
 dist/urban-platform-infra-<version>.tgz
 dist/rendered.yaml
+dist/production-rendered.yaml
 dist/urban-platform-infra.spdx.json
 dist/release-evidence.json
 dist/SHA256SUMS

@@ -130,8 +130,14 @@ overlay before importing application batches.
 
 ## Import Profiles
 
-`MIGRATION_PROFILE=lab` is the default. It is designed for constrained clusters
-and writes `reports/import-migration/lab-profile-values.yaml` plus
+`MIGRATION_PROFILE` follows `ENV`: it defaults to `production` for the
+production inventory (`ENV=prod` or `ENV=production`) and to `lab` otherwise.
+Use `ENV=lab` for a lab inventory. A lab import against a production-named
+inventory requires `ALLOW_LAB_ON_PROD=true` as an explicit acknowledgement.
+For a lab import, set `MIGRATION_PROFILE=lab` together with `ENV=lab` (or the
+explicit acknowledgement above). The lab profile is designed for constrained
+clusters and writes
+`reports/import-migration/lab-profile-values.yaml` plus
 `reports/import-migration/import-profile.md` into the migration bundle. The lab
 profile also writes `reports/import-migration/import-preflight.md` and
 `reports/import-migration/import-capacity.md` when the preflight stage runs,

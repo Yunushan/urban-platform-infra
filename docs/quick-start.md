@@ -9,8 +9,8 @@ make bootstrap-check ENV=prod ENGINE=rke2
 make install-cluster-check ENV=prod ENGINE=rke2
 make bootstrap ENV=prod ENGINE=rke2 CONFIRM_PROD=true
 make install-cluster ENV=prod ENGINE=rke2 CONFIRM_PROD=true
-make install-operators
-make deploy ENV=prod
+make install-operators CONFIRM_PROD=true
+make deploy ENV=prod CONFIRM_PROD=true
 ```
 
 `make deploy` installs Helm and Helmfile on the operator machine if they are

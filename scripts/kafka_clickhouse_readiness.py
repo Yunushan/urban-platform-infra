@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import ipaddress
 import json
 import re
@@ -328,6 +330,51 @@ def condition_ready_if_observed(resource: dict[str, Any]) -> bool:
         except (TypeError, ValueError):
             return False
     return condition_ready(resource) and not has_active_warning(resource)
+
+
+def valid_encoded_secret_data(value: Any) -> bool:
+    """Check non-empty base64 Secret data without exposing its decoded value."""
+    encoded = str(value or "").strip()
+    if not encoded:
+        return False
+    try:
+        decoded = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error):
+        return False
+    return bool(decoded)
+
+
+def external_secret_resource_name(value: Any) -> str:
+    """Mirror Helm's kebabcase naming for ExternalSecret metadata."""
+    text = str(value).strip()
+    text = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1-\2", text)
+    text = re.sub(r"([a-z0-9])([A-Z])", r"\1-\2", text)
+    return re.sub(r"[^A-Za-z0-9]+", "-", text).strip("-").lower()
+
+
+def external_secret_target_matches(
+    external_secret: dict[str, Any] | None,
+    target_name: str,
+) -> bool:
+    return (
+        external_secret is not None
+        and str(get(external_secret, "spec", "target", "name", default="")).strip()
+        == target_name
+    )
+
+
+def target_secret_matches(
+    secret: dict[str, Any] | None,
+    target_name: str,
+    target_type: str,
+    required_keys: set[str],
+) -> bool:
+    if secret is None or str(get(secret, "metadata", "name", default="")).strip() != target_name:
+        return False
+    if secret.get("type") != target_type or not required_keys:
+        return False
+    data = mapping(secret.get("data"))
+    return all(valid_encoded_secret_data(data.get(key)) for key in required_keys)
 
 
 def kubernetes_name(value: Any) -> str:
@@ -715,12 +762,30 @@ def live_checks(values: dict[str, Any], kubeconfig: Path | None, namespace: str,
     connector = kubectl_json(kubectl, kubeconfig, namespace, f"kafkaconnector/{connector_name}")
     user = kubectl_json(kubectl, kubeconfig, namespace, f"kafkauser/{user_name}")
     external_secrets = mapping(get(values, "secretManagement", "externalSecrets", default={}))
-    credential_external_secret_name = str(
-        get(external_secrets, "clickhouseSinkCredentials", "targetName", default="")
-    )
-    registry_external_secret_name = str(
-        get(external_secrets, "registryCredentials", "targetName", default="")
-    )
+    credential_secret_config = mapping(external_secrets.get("clickhouseSinkCredentials"))
+    registry_secret_config = mapping(external_secrets.get("registryCredentials"))
+    credential_target_name = str(credential_secret_config.get("targetName", "")).strip()
+    registry_target_name = str(registry_secret_config.get("targetName", "")).strip()
+    credential_target_type = str(credential_secret_config.get("type", "Opaque")).strip() or "Opaque"
+    registry_target_type = str(
+        registry_secret_config.get("type", "kubernetes.io/dockerconfigjson")
+    ).strip() or "kubernetes.io/dockerconfigjson"
+    credential_required_keys = {
+        str(item.get("secretKey", "")).strip()
+        for item in credential_secret_config.get("data", [])
+        if isinstance(item, dict) and str(item.get("secretKey", "")).strip()
+    }
+    registry_required_keys = {
+        str(item.get("secretKey", "")).strip()
+        for item in registry_secret_config.get("data", [])
+        if isinstance(item, dict) and str(item.get("secretKey", "")).strip()
+    }
+    credential_secret_namespace = str(
+        credential_secret_config.get("namespace", namespace)
+    ).strip() or namespace
+    registry_secret_namespace = str(
+        registry_secret_config.get("namespace", namespace)
+    ).strip() or namespace
     secret_store_name = str(get(values, "secretManagement", "secretStoreRef", "name", default=""))
     secret_store_kind = str(get(values, "secretManagement", "secretStoreRef", "kind", default=""))
     secret_store_resource = (
@@ -735,14 +800,26 @@ def live_checks(values: dict[str, Any], kubeconfig: Path | None, namespace: str,
     credential_external_secret = kubectl_json(
         kubectl,
         kubeconfig,
-        namespace,
-        f"externalsecret/{credential_external_secret_name}",
+        credential_secret_namespace,
+        f"externalsecret/{external_secret_resource_name('clickhouseSinkCredentials')}",
     )
     registry_external_secret = kubectl_json(
         kubectl,
         kubeconfig,
-        namespace,
-        f"externalsecret/{registry_external_secret_name}",
+        registry_secret_namespace,
+        f"externalsecret/{external_secret_resource_name('registryCredentials')}",
+    )
+    credential_target_secret = kubectl_json(
+        kubectl,
+        kubeconfig,
+        credential_secret_namespace,
+        f"secret/{kubernetes_name(credential_target_name)}",
+    )
+    registry_target_secret = kubectl_json(
+        kubectl,
+        kubeconfig,
+        registry_secret_namespace,
+        f"secret/{kubernetes_name(registry_target_name)}",
     )
     connect_monitor = kubectl_json(kubectl, kubeconfig, namespace, f"podmonitor/{connect_name}")
     prometheus_rule = kubectl_json(kubectl, kubeconfig, namespace, "prometheusrule/urban-platform-slo")
@@ -901,8 +978,22 @@ def live_checks(values: dict[str, Any], kubeconfig: Path | None, namespace: str,
         and reconciled_ready(user)
         and credential_external_secret
         and condition_ready_if_observed(credential_external_secret)
+        and external_secret_target_matches(credential_external_secret, credential_target_name)
+        and target_secret_matches(
+            credential_target_secret,
+            credential_target_name,
+            credential_target_type,
+            credential_required_keys,
+        )
         and registry_external_secret
         and condition_ready_if_observed(registry_external_secret)
+        and external_secret_target_matches(registry_external_secret, registry_target_name)
+        and target_secret_matches(
+            registry_target_secret,
+            registry_target_name,
+            registry_target_type,
+            registry_required_keys,
+        )
         and secret_store
         and condition_ready_if_observed(secret_store)
         and connect_spec_matches

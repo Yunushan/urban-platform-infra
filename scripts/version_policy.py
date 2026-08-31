@@ -154,6 +154,8 @@ def validate_policy(policy: dict[str, Any]) -> list[str]:
                     review_date = None
                 if review_date is None:
                     errors.append(f"component {name} must declare a valid lifecycle lastReviewed date")
+                elif review_date > today:
+                    errors.append(f"component {name} lifecycle lastReviewed date is in the future")
                 elif (today - review_date).days > review_max_age_days:
                     errors.append(f"component {name} lifecycle review is older than {review_max_age_days} days")
             eol_date = component_lifecycle.get("eolDate") if isinstance(component_lifecycle, dict) else None

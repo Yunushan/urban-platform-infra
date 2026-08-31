@@ -417,8 +417,22 @@ def main() -> int:
                 "authorization": {"type": "simple", "acls": kafka_user_acls},
             }
         ),
-        "externalsecret/clickhouse-sink-credentials": ready_resource(),
-        "externalsecret/registry-credentials": ready_resource(),
+        "externalsecret/clickhouse-sink-credentials": ready_resource(
+            spec={"target": {"name": "clickhouse-sink-credentials"}}
+        ),
+        "externalsecret/registry-credentials": ready_resource(
+            spec={"target": {"name": "registry-credentials"}}
+        ),
+        "secret/clickhouse-sink-credentials": {
+            "metadata": {"name": "clickhouse-sink-credentials"},
+            "type": "Opaque",
+            "data": {"username": "dXNlcg==", "password": "cGFzcw=="},
+        },
+        "secret/registry-credentials": {
+            "metadata": {"name": "registry-credentials"},
+            "type": "kubernetes.io/dockerconfigjson",
+            "data": {".dockerconfigjson": "e30="},
+        },
         "clustersecretstore/vault": ready_resource(),
         "podmonitor/clickhouse-connect": {"metadata": {"name": "clickhouse-connect"}},
         "prometheusrule/urban-platform-slo": {
@@ -515,6 +529,16 @@ def main() -> int:
         if readiness.live_checks(readiness.merge(public_values, private_overlay), Path(__file__), "urban-platform", True)[1].passed:
             raise SystemExit("an unready ClickHouse credential ExternalSecret was accepted as ready")
         resources["externalsecret/clickhouse-sink-credentials"]["status"]["conditions"][0]["status"] = "True"
+
+        resources["secret/clickhouse-sink-credentials"]["data"]["password"] = "not-base64"
+        if readiness.live_checks(readiness.merge(public_values, private_overlay), Path(__file__), "urban-platform", True)[1].passed:
+            raise SystemExit("an incomplete materialized ClickHouse credential Secret was accepted as ready")
+        resources["secret/clickhouse-sink-credentials"]["data"]["password"] = "cGFzcw=="
+
+        resources["externalsecret/registry-credentials"]["spec"]["target"]["name"] = "wrong-target"
+        if readiness.live_checks(readiness.merge(public_values, private_overlay), Path(__file__), "urban-platform", True)[1].passed:
+            raise SystemExit("an ExternalSecret targeting the wrong registry Secret was accepted as ready")
+        resources["externalsecret/registry-credentials"]["spec"]["target"]["name"] = "registry-credentials"
 
         resources["clustersecretstore/vault"]["status"]["conditions"][0]["status"] = "False"
         if readiness.live_checks(readiness.merge(public_values, private_overlay), Path(__file__), "urban-platform", True)[1].passed:

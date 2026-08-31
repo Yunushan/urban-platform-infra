@@ -9,6 +9,12 @@ global:
     deploymentId: 123e4567-e89b-42d3-a456-426614174000
   imagePullSecrets:
     - registry-credentials
+  cluster:
+    vip: 192.0.2.10
+    domain: platform.example.invalid
+
+ingress:
+  host: platform.example.invalid
 
 # Use the reviewed replicated CSI class deployed in the real environment.
 # The reconciler requires volume expansion and reclaimPolicy Retain.

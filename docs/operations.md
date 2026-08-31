@@ -4,9 +4,13 @@
 
 ```bash
 make operator-ready
-make install-operators
-make deploy
+make install-operators CONFIRM_PROD=true
+make deploy CONFIRM_PROD=true
 ```
+
+The default `ENV=prod` selects the production profile. Mutating production
+targets fail closed unless `CONFIRM_PROD=true` is supplied; use
+`DEPLOY_PROFILE=lab` or `make deploy-auto` for lab/import work.
 
 For the common one-command readiness and operator flows, start with
 [`docs/operator-workflows.md`](operator-workflows.md). It keeps the local
@@ -43,10 +47,16 @@ default StorageClass fallback for stateful chart workloads when their explicit
 storage class is empty. Warm and cold tiers are public-safe contracts for
 compressed history, backups, import dumps, snapshots, and release evidence; see
 [`docs/storage-tiers.md`](storage-tiers.md).
-`make install-operators` checks for a StorageClass before installing stateful
-workloads. When no StorageClass exists, `INSTALL_LOCAL_PATH_STORAGE=auto`
-installs Rancher local-path provisioner as a default lab StorageClass. Set
-`INSTALL_LOCAL_PATH_STORAGE=false` when production storage is managed separately.
+`make install-operators` checks for the StorageClass named by
+`DEPLOY_DATABASE_STORAGE_CLASS` before installing stateful workloads. Lab
+profiles default to `local-path` with `INSTALL_LOCAL_PATH_STORAGE=auto`; use
+`ENV=lab` for a lab inventory. Running a lab against a production-named
+inventory requires both `DEPLOY_PROFILE=lab` and the explicit
+`ALLOW_LAB_ON_PROD=true` acknowledgement. Production profiles default to
+`production-durable`, refuse the
+node-local local-path fallback, and stop until that durable CSI-backed class is
+present. Override `DEPLOY_DATABASE_STORAGE_CLASS` for the approved private
+production class.
 When the `local-path` StorageClass already exists, `deploy-auto` still
 reconciles the provisioner and prepares `LOCAL_PATH_STORAGE_PATH`
 (`/opt/local-path-provisioner` by default) on the RKE2 nodes over SSH. This
@@ -90,11 +100,14 @@ together in one public-safe report.
 before cluster mutation when the selected lab/production assumptions exceed
 CPU, memory, pod-count, batch, or evidence guardrails. `make lab-deploy-plan`
 writes `reports/lab-deploy-values.yaml` for the first bounded lab wave.
-`import-auto` also defaults to `MIGRATION_PROFILE=lab`. That profile writes
-`reports/import-migration/lab-profile-values.yaml` and applies small resource
-requests/limits to generated imported workloads. Keep this profile for
-4 GiB/node labs; switch to `MIGRATION_PROFILE=production` only after capacity,
-backup, storage, and database cutover plans are reviewed.
+`MIGRATION_PROFILE` follows `ENV`: it defaults to `production` for `ENV=prod` or
+`ENV=production`, and to `lab` for other inventories. Lab imports write
+`reports/import-migration/lab-profile-values.yaml` and apply small resource
+requests/limits to generated imported workloads. Use `ENV=lab` for a lab
+inventory. A lab operation against a production-named inventory requires the
+explicit `ALLOW_LAB_ON_PROD=true` acknowledgement. Keep the lab profile for
+4 GiB/node labs; use `MIGRATION_PROFILE=production` only after capacity, backup,
+storage, and database cutover plans are reviewed.
 Before running a large image import, run `make image-cache-plan`. It writes
 `reports/image-cache-plan.md` with the selected registry or preload strategy,
 RKE2 node count, running containerd import behavior, and operator cache cleanup

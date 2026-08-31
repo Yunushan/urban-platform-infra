@@ -14,6 +14,7 @@ spec:
   nodeSets:
     {{- range .Values.observability.elasticsearch.nodeSets }}
     {{- $resources := .resources | default $.Values.observability.elasticsearch.resources }}
+    {{- $storageClass := include "cip.storageClassName" (list $ (.storageClassName | default "") "hot") }}
     - name: {{ .name }}
       count: {{ include "cip.replicaCount" (list $ .count) }}
       config:
@@ -31,6 +32,9 @@ spec:
             name: elasticsearch-data
           spec:
             accessModes: ["ReadWriteOnce"]
+            {{- if $storageClass }}
+            storageClassName: {{ $storageClass | quote }}
+            {{- end }}
             resources:
               requests:
                 storage: {{ .storage | default "100Gi" }}

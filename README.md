@@ -101,13 +101,14 @@ make bootstrap-check ENV=prod ENGINE=rke2
 make install-cluster-check ENV=prod ENGINE=rke2
 make bootstrap ENV=prod ENGINE=rke2 CONFIRM_PROD=true
 make install-cluster ENV=prod ENGINE=rke2 CONFIRM_PROD=true
-make install-operators
-make deploy ENV=prod
+make install-operators CONFIRM_PROD=true
+make deploy ENV=prod CONFIRM_PROD=true
 make status
 ```
 
-`ENV=prod` selects the public production overlay automatically. Before using
-it for a real environment, add a private overlay with promoted digest-pinned
+`ENV=prod` selects the public production overlay automatically. The production
+workflow requires a durable CSI-backed StorageClass and will not install the
+node-local `local-path` fallback. Before using it for a real environment, add a private overlay with promoted digest-pinned
 images, real durable StorageClasses, External Secrets backend references,
 trusted TLS/issuer settings, and tested backup and disaster-recovery evidence.
 Run `make production-readiness-gate` from a private operator or release runner
@@ -248,10 +249,14 @@ readiness before generated route candidates are applied.
 intent across topology, Helm values, import profile, image mode, database
 migration strictness, edge routing, backups, observability, smoke tests, cutover gates, and
 release requirements before any mutating command runs.
-`MIGRATION_PROFILE=lab` is the default and writes a
-lab-safe values overlay plus small imported workload resource limits for
-constrained clusters; use `MIGRATION_PROFILE=production` only after capacity and
-cutover plans are ready. `import-auto` runs a cluster preflight before migration
+`MIGRATION_PROFILE` follows `ENV`: it defaults to `production` for the
+production inventory (`ENV=prod` or `ENV=production`) and to `lab` otherwise.
+Use `ENV=lab` for a lab inventory. Running an intentional lab migration against
+a production-named inventory requires the explicit `ALLOW_LAB_ON_PROD=true`
+acknowledgement. The lab profile writes a lab-safe values overlay plus small
+imported workload resource limits for constrained clusters; use
+`MIGRATION_PROFILE=production` only after capacity and cutover plans are ready.
+`import-auto` runs a cluster preflight before migration
 actions and writes `reports/import-migration/import-preflight.md` plus
 `reports/import-migration/import-capacity.md`, `import-batches.md`, and
 `import-batches.yaml`. Lab imports default to `MIGRATION_IMPORT_BATCH=auto`, so
@@ -362,7 +367,7 @@ python3 scripts/configure.py --database postgresql --ingress-controller nginx --
 
 # Or use Makefile wrappers
 make configure ENGINE=k3s INGRESS=traefik WEB=traefik DB=postgresql OBS=loki
-make deploy ENV=prod
+make deploy ENV=prod CONFIRM_PROD=true
 ```
 
 Supported cluster profiles are defined in [`config/cluster-profiles.yaml`](config/cluster-profiles.yaml):

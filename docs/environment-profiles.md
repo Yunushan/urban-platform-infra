@@ -76,16 +76,34 @@ observation owners, release approval indexes, and release owner reviews are repr
 
 ## Overlay Use
 
-After reviewing the generated overlay, use it with Helm:
+After reviewing the generated overlay, use it with Helm for a lab deployment:
 
 ```bash
 make deploy-auto HELM_EXTRA_ARGS="-f reports/environment-profile-values.yaml"
 ```
 
+For production, use the production deployment target and confirm the change
+explicitly; `deploy-auto` is intentionally lab-only:
+
+```bash
+make deploy DEPLOY_PROFILE=production \
+  VALUES=helm/urban-platform-infra/values-production.yaml \
+  DEPLOY_PRIVATE_VALUES=/var/lib/urban-platform/private/values-production-private.yaml \
+  HELM_EXTRA_ARGS="-f reports/environment-profile-values.yaml" \
+  CONFIRM_PROD=true
+```
+
+`DEPLOY_PRIVATE_VALUES` is mandatory for production, must exist outside the
+repository checkout, and is applied after every public values file. It must
+contain the signed release identity and promoted digest-pinned private image
+references described in the production evidence runbook. A production
+`import-auto` run passes the same variable to its platform deployment.
+
 For imports, keep the Make variables aligned with the selected profile:
 
 ```bash
 make import-auto PROJECT_PATH=/path/to/compose-project \
+  ENV=lab \
   MIGRATION_PROFILE=lab \
   MIGRATION_IMAGE_MODE=preload
 ```
@@ -98,3 +116,10 @@ scaling policy plan, network connectivity plan, access governance plan,
 compliance evidence plan, incident response plan, change management plan,
 smoke-test plan, release runbook plan, cluster upgrade plan, disaster recovery plan, cutover gate plan, environment evidence bundle, and
 release evidence first.
+
+The migration target selects its values file from `MIGRATION_PROFILE`, which
+follows the inventory environment by default. Use `ENV=lab` for lab imports.
+For an intentional lab operation against a production-named inventory, add
+`ALLOW_LAB_ON_PROD=true`; otherwise the Makefile fails closed. Override the
+values selection with `MIGRATION_VALUES=/path/to/private-or-reviewed-values.yaml`
+only when a reviewed custom overlay is required.

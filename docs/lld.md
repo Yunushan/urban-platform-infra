@@ -118,6 +118,8 @@ Common Make variables:
 | `PROJECT_PATH` | External Compose project path | `/path/to/compose-project` |
 | `INVENTORY` | Ansible inventory | `inventories/prod/hosts.yml` |
 | `VALUES` | Platform Helm values | `helm/urban-platform-infra/values.yaml` |
+| `DEPLOY_PRIVATE_VALUES` | Required external private overlay for production deploys; applied last | `/var/lib/urban-platform/private/values-production-private.yaml` |
+| `MIGRATION_VALUES` | Values file selected by the migration profile | `helm/urban-platform-infra/values.yaml` for lab, production values for production |
 | `MIGRATION_RKE2_NODES` | RKE2 node addresses or names | `node-01,node-02,node-03` |
 | `MIGRATION_SSH_USER` | SSH user for node operations | `ansible` |
 | `MIGRATION_IMAGE_MODE` | Image movement mode | `registry`, `preload`, or `skip` |

@@ -20,14 +20,20 @@ validate:
     - python3 scripts/tools/validate_ci_contract.py
     - python3 scripts/tools/private_data_audit.py
     - python3 scripts/validate.py
+    - python3 scripts/validate_production_profile.py
     - python3 scripts/images/validate-images.py
     - python3 tests/policy/kafka_clickhouse_readiness_test.py
     - python3 tests/policy/kafka_clickhouse_reconcile_test.py
+    - python3 tests/policy/release_evidence_test.py
+    - python3 tests/policy/version_policy_test.py
     - python3 scripts/version_policy.py check --config config/version-policy.yaml --output reports/version-policy.md
 
 render:
   stage: render
-  image: alpine/helm:3.19.0
+  image: alpine:3.22
+  before_script:
+    - apk add --no-cache bash curl gzip openssl tar
+    - HELM_VERSION=v4.2.1 HELM_INSTALL_DIR=/usr/local/bin bash scripts/tools/install-helm.sh
   script:
     - helm lint helm/urban-platform-infra
     - helm template urban-platform-infra helm/urban-platform-infra -n urban-platform -f helm/urban-platform-infra/values.yaml > rendered.yaml
@@ -51,12 +57,29 @@ security:
 
 release-evidence:
   stage: release
-  image: alpine/helm:3.19.0
+  image: python:3.12-slim
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
   before_script:
-    - apk add --no-cache python3
+    - apt-get update
+    - apt-get install --no-install-recommends -y bash ca-certificates curl git gzip openssl tar
+    - rm -rf /var/lib/apt/lists/*
+    - python3 -m pip install --disable-pip-version-check --no-cache-dir -r requirements-release.txt
+    - HELM_VERSION=v4.2.1 HELM_INSTALL_DIR=/usr/local/bin bash scripts/tools/install-helm.sh
   script:
+    - mkdir -p reports
+    - python3 scripts/tools/validate_ci_contract.py
+    - python3 scripts/tools/private_data_audit.py --report reports/release-private-data-audit.md
+    - python3 scripts/validate.py
+    - python3 scripts/validate_production_profile.py
+    - python3 scripts/images/validate-images.py
+    - python3 tests/policy/production_evidence_gate_test.py
+    - python3 tests/policy/tool_inventory_test.py
+    - python3 tests/policy/version_policy_test.py
+    - python3 tests/policy/release_evidence_test.py
+    - python3 tests/policy/kafka_clickhouse_readiness_test.py
+    - python3 tests/policy/kafka_clickhouse_reconcile_test.py
+    - python3 scripts/version_policy.py check --config config/version-policy.yaml --output reports/release-version-policy.md
     - chart_version="$(python3 scripts/release/generate_sbom.py --chart helm/urban-platform-infra --print-chart-version)"
     - test "${CI_COMMIT_TAG#v}" = "${chart_version}"
     - mkdir -p dist
@@ -69,17 +92,46 @@ release-evidence:
       -f helm/urban-platform-infra/values.yaml
       > dist/rendered.yaml
     - >-
+      helm template urban-platform-infra helm/urban-platform-infra
+      -n urban-platform
+      -f helm/urban-platform-infra/values.yaml
+      -f helm/urban-platform-infra/values-production.yaml
+      --api-versions kafka.strimzi.io/v1/Kafka
+      --api-versions kafka.strimzi.io/v1/KafkaNodePool
+      --api-versions kafka.strimzi.io/v1/KafkaTopic
+      --api-versions kafka.strimzi.io/v1/KafkaUser
+      --api-versions kafka.strimzi.io/v1/KafkaConnect
+      --api-versions kafka.strimzi.io/v1/KafkaConnector
+      --api-versions monitoring.coreos.com/v1/PodMonitor
+      --api-versions cert-manager.io/v1/Certificate
+      --api-versions cert-manager.io/v1/ClusterIssuer
+      > dist/production-rendered.yaml
+    - python3 tests/policy/basic_policy.py dist/production-rendered.yaml
+    - python3 tests/policy/production_render.py dist/production-rendered.yaml
+    - python3 scripts/production_readiness_score.py
+    - >-
       python3 scripts/release/generate_sbom.py
       --chart helm/urban-platform-infra
       --dist dist
       --rendered dist/rendered.yaml
+      --production-rendered dist/production-rendered.yaml
       --sbom dist/urban-platform-infra.spdx.json
       --manifest dist/release-evidence.json
       --checksums dist/SHA256SUMS
+    - mkdir -p reports
+    - >-
+      python3 scripts/release/verify_release_evidence.py
+      --chart helm/urban-platform-infra
+      --tag "${CI_COMMIT_TAG}"
+      --report reports/release-evidence-verification.md
   artifacts:
     paths:
       - dist/*.tgz
       - dist/rendered.yaml
+      - dist/production-rendered.yaml
       - dist/urban-platform-infra.spdx.json
       - dist/release-evidence.json
       - dist/SHA256SUMS
+      - reports/release-evidence-verification.md
+      - reports/release-private-data-audit.md
+      - reports/release-version-policy.md

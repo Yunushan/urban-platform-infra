@@ -13,6 +13,7 @@ import yaml
 
 
 KUBERNETES_NAME = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$")
+PSA_VERSION = re.compile(r"^v1\.[0-9]+$")
 MIN_DATABASE_BYTES = 20 * 1024**3
 
 
@@ -52,9 +53,69 @@ def main(argv: list[str] | None = None) -> int:
         for mode in ("enforce", "audit", "warn"):
             if labels.get(f"pod-security.kubernetes.io/{mode}") != "restricted":
                 errors.append(f"Namespace: pod-security {mode} must be restricted")
+            version = labels.get(f"pod-security.kubernetes.io/{mode}-version")
+            if not PSA_VERSION.fullmatch(str(version or "")):
+                errors.append(f"Namespace: pod-security {mode} version must be pinned as v1.<minor>")
 
     if by_kind.get("Secret"):
         errors.append("plain Kubernetes Secret manifests must not be rendered")
+
+    ingresses = by_kind.get("Ingress", [])
+    secure_ingresses = [
+        item for item in ingresses if item.get("spec", {}).get("tls")
+    ]
+    if not ingresses or not secure_ingresses:
+        errors.append("Ingress: production must render at least one TLS-enabled route")
+    for ingress in ingresses:
+        spec = ingress.get("spec", {})
+        if spec.get("ingressClassName") != "traefik":
+            errors.append(f"Ingress/{ingress.get('metadata', {}).get('name', '<unknown>')}: production must use the Traefik ingress class")
+        if spec.get("tls"):
+            if any(
+                item.get("secretName") != "urban-platform-tls"
+                for item in spec.get("tls", [])
+                if isinstance(item, dict)
+            ):
+                errors.append(f"Ingress/{ingress.get('metadata', {}).get('name', '<unknown>')}: wrong TLS Secret is referenced")
+            continue
+        annotations = ingress.get("metadata", {}).get("annotations", {})
+        if (
+            annotations.get("traefik.ingress.kubernetes.io/router.entrypoints") != "web"
+            or "redirect-https@kubernetescrd"
+            not in str(annotations.get("traefik.ingress.kubernetes.io/router.middlewares", ""))
+        ):
+            errors.append(f"Ingress/{ingress.get('metadata', {}).get('name', '<unknown>')}: plaintext route is not an explicit HTTPS redirect")
+
+    expected_quota = {
+        "requests.cpu": "12",
+        "requests.memory": "32Gi",
+        "limits.cpu": "20",
+        "limits.memory": "40Gi",
+        "requests.storage": "2Ti",
+        "persistentvolumeclaims": "100",
+        "pods": "300",
+    }
+    quota_items = by_kind.get("ResourceQuota", [])
+    if not any(
+        all(str(item.get("spec", {}).get("hard", {}).get(key, "")).strip() == value for key, value in expected_quota.items())
+        for item in quota_items
+    ):
+        errors.append("ResourceQuota: production quota must enforce the reviewed CPU, memory, storage, PVC, and pod ceilings")
+
+    expected_limit_default = {"cpu": "1", "memory": "1Gi", "ephemeral-storage": "2Gi"}
+    expected_limit_request = {"cpu": "100m", "memory": "256Mi", "ephemeral-storage": "512Mi"}
+    limit_range_items = by_kind.get("LimitRange", [])
+    if not any(
+        any(
+            entry.get("type") == "Container"
+            and all(str(entry.get("default", {}).get(key, "")).strip() == value for key, value in expected_limit_default.items())
+            and all(str(entry.get("defaultRequest", {}).get(key, "")).strip() == value for key, value in expected_limit_request.items())
+            for entry in item.get("spec", {}).get("limits", [])
+            if isinstance(entry, dict)
+        )
+        for item in limit_range_items
+    ):
+        errors.append("LimitRange: production default container requests and limits are missing or drifted")
 
     release_identity = next(
         (
@@ -111,6 +172,14 @@ def main(argv: list[str] | None = None) -> int:
     if len(scheduled_backups) != len(database_clusters) or backup_cluster_names != cluster_names:
         errors.append("every CNPG cluster must have exactly one ScheduledBackup")
 
+    for elasticsearch in by_kind.get("Elasticsearch", []):
+        name = elasticsearch.get("metadata", {}).get("name", "<unknown>")
+        for node_set in elasticsearch.get("spec", {}).get("nodeSets", []):
+            for volume_claim in node_set.get("volumeClaimTemplates", []):
+                storage_class = volume_claim.get("spec", {}).get("storageClassName")
+                if storage_class != "production-durable":
+                    errors.append(f"Elasticsearch/{name}: durable storage class is missing")
+
     pdb_names = {item.get("metadata", {}).get("name") for item in by_kind.get("PodDisruptionBudget", [])}
     for name in ("redis", "webserver-nginx", "zabbix-agent2"):
         if name not in pdb_names:
@@ -123,9 +192,23 @@ def main(argv: list[str] | None = None) -> int:
     external_secret_names = {
         item.get("metadata", {}).get("name") for item in by_kind.get("ExternalSecret", [])
     }
-    for name in ("database-backup-credentials", "velero-backup-credentials", "clickhouse-sink-credentials"):
+    for name in ("database-backup-credentials", "velero-backup-credentials", "clickhouse-sink-credentials", "registry-credentials", "ingress-tls"):
         if name not in external_secret_names:
             errors.append(f"ExternalSecret/{name}: production credential delivery is missing")
+    ingress_tls_external = next(
+        (item for item in by_kind.get("ExternalSecret", []) if item.get("metadata", {}).get("name") == "ingress-tls"),
+        None,
+    )
+    if ingress_tls_external:
+        target = ingress_tls_external.get("spec", {}).get("target", {})
+        if target.get("name") != "urban-platform-tls" or target.get("template", {}).get("type") != "kubernetes.io/tls":
+            errors.append("ExternalSecret/ingress-tls: TLS target Secret contract is incomplete")
+        tls_keys = {
+            item.get("secretKey") for item in ingress_tls_external.get("spec", {}).get("data", [])
+            if isinstance(item, dict)
+        }
+        if tls_keys < {"tls.crt", "tls.key"}:
+            errors.append("ExternalSecret/ingress-tls: both TLS key material fields are required")
 
     pod_monitor_names = {item.get("metadata", {}).get("name") for item in by_kind.get("PodMonitor", [])}
     for name in ("kafka", "clickhouse-connect"):

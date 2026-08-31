@@ -146,7 +146,9 @@ def images_from_loaded_yaml(source: str, loaded: Any) -> list[ImageObject]:
                 )
             )
         image = value.get("image")
-        if isinstance(image, str):
+        # Disabled build outputs and optional image slots may be represented by
+        # an empty string. They are not runtime image references.
+        if isinstance(image, str) and image.strip():
             repository, tag, digest = parse_image_ref(image)
             images.append(ImageObject(source=source, path=f"{path}.image", repository=repository, tag=tag, digest=digest))
     return images

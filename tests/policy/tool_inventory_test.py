@@ -31,6 +31,20 @@ def check(version_output: str) -> dict[str, str]:
         return tool_inventory.check_tool("cosign", contract, True)
 
 
+def check_expected(version_output: str) -> dict[str, str]:
+    contract = {
+        "displayName": "Helm 4.2.1",
+        "commands": ["helm"],
+        "versionArgs": ["version", "--short"],
+        "expectedVersion": "4.2.1",
+    }
+    with (
+        patch.object(tool_inventory, "command_for", return_value=("helm", "/usr/bin/helm")),
+        patch.object(tool_inventory, "run_version", return_value=(True, version_output)),
+    ):
+        return tool_inventory.check_tool("helm", contract, True)
+
+
 def main() -> int:
     if check('{"gitVersion":"v3.1.3"}')["status"] != "OK":
         raise AssertionError("minimum Cosign version must be accepted")
@@ -42,6 +56,12 @@ def main() -> int:
         raise AssertionError("vulnerable Cosign version must be rejected")
     if check("unparseable")["status"] != "VERSION-MISMATCH":
         raise AssertionError("unparseable mandatory version must fail closed")
+    if check_expected("v4.2.1+gd591a19")["status"] != "OK":
+        raise AssertionError("exact expected version must accept build metadata")
+    if check_expected("v4.2.10")["status"] != "VERSION-MISMATCH":
+        raise AssertionError("exact expected version must reject a later patch")
+    if check_expected("v14.2.1")["status"] != "VERSION-MISMATCH":
+        raise AssertionError("exact expected version must reject a different major")
     print("Tool inventory semantic-version boundary tests passed.")
     return 0
 

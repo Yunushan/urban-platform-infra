@@ -116,6 +116,7 @@ Example operator install flags:
 
 ```bash
 make install-operators \
+  CONFIRM_PROD=true \
   DEPLOY_ENABLE_VELERO=true \
   VELERO_USE_SECRET=true \
   VELERO_EXISTING_SECRET=velero-object-store \

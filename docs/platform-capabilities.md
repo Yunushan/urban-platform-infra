@@ -76,18 +76,18 @@ standard Helm chart paths in this workspace. They install only when the matching
 flag is set intentionally.
 
 ```bash
-make install-operators DEPLOY_ENABLE_MINIO=true
-make install-operators DEPLOY_ENABLE_RABBITMQ=true
-make install-operators DEPLOY_ENABLE_KEYCLOAK=true
-make install-operators DEPLOY_ENABLE_EMQX=true
-make install-operators DEPLOY_ENABLE_NATS=true
-make install-operators DEPLOY_ENABLE_STRIMZI=true
-make install-operators DEPLOY_ENABLE_VAULT=true
-make install-operators DEPLOY_ENABLE_KYVERNO=true
-make install-operators DEPLOY_ENABLE_TEMPORAL=true
-make install-operators DEPLOY_ENABLE_ARGO_WORKFLOWS=true
-make install-operators DEPLOY_ENABLE_LINKERD=true
-make install-operators DEPLOY_ENABLE_ISTIO=true
+make install-operators DEPLOY_ENABLE_MINIO=true CONFIRM_PROD=true
+make install-operators DEPLOY_ENABLE_RABBITMQ=true CONFIRM_PROD=true
+make install-operators DEPLOY_ENABLE_KEYCLOAK=true CONFIRM_PROD=true
+make install-operators DEPLOY_ENABLE_EMQX=true CONFIRM_PROD=true
+make install-operators DEPLOY_ENABLE_NATS=true CONFIRM_PROD=true
+make install-operators DEPLOY_ENABLE_STRIMZI=true CONFIRM_PROD=true
+make install-operators DEPLOY_ENABLE_VAULT=true CONFIRM_PROD=true
+make install-operators DEPLOY_ENABLE_KYVERNO=true CONFIRM_PROD=true
+make install-operators DEPLOY_ENABLE_TEMPORAL=true CONFIRM_PROD=true
+make install-operators DEPLOY_ENABLE_ARGO_WORKFLOWS=true CONFIRM_PROD=true
+make install-operators DEPLOY_ENABLE_LINKERD=true CONFIRM_PROD=true
+make install-operators DEPLOY_ENABLE_ISTIO=true CONFIRM_PROD=true
 ```
 
 Strimzi is available as an opt-in operator install path for Apache Kafka 4.x

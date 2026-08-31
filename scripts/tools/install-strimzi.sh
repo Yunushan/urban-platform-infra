@@ -16,7 +16,14 @@ watch_any_namespace="${STRIMZI_WATCH_ANY_NAMESPACE:-false}"
 kubeconfig_path="${OPERATOR_KUBECONFIG:-${KUBECONFIG:-${HOME}/.kube/config}}"
 preload_images="${STRIMZI_PRELOAD_IMAGES:-auto}"
 preload_script="${RKE2_IMAGE_PRELOAD_SCRIPT:-scripts/tools/preload-rke2-images.sh}"
-kafka_version="${STRIMZI_KAFKA_VERSION:-4.2.0}"
+profile="${DEPLOY_PROFILE:-lab}"
+if [ -n "${STRIMZI_KAFKA_VERSION:-}" ]; then
+  kafka_version="${STRIMZI_KAFKA_VERSION}"
+elif [ "${profile}" = "production" ]; then
+  kafka_version="4.3.0"
+else
+  kafka_version="4.2.0"
+fi
 operator_image_registry="${STRIMZI_OPERATOR_IMAGE_REGISTRY:-quay.io}"
 operator_image_repository="${STRIMZI_OPERATOR_IMAGE_REPOSITORY:-strimzi}"
 operator_image_name="${STRIMZI_OPERATOR_IMAGE_NAME:-operator}"

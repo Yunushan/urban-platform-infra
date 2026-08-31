@@ -76,11 +76,13 @@ def release_artifacts(
     sbom: Path | None,
     checksums: Path | None,
     manifest: Path | None = None,
+    additional_rendered: list[Path] | None = None,
 ) -> list[Path]:
     excluded = {path.resolve() for path in [sbom, checksums, manifest] if path is not None}
     artifacts = sorted(dist.glob('*.tgz'))
-    if rendered is not None and rendered.exists():
-        artifacts.append(rendered)
+    for candidate in [rendered, *(additional_rendered or [])]:
+        if candidate is not None and candidate.exists():
+            artifacts.append(candidate)
     if not artifacts:
         raise SystemExit(f'No release artifacts found in {relative_path(dist)}')
     return [path for path in artifacts if path.resolve() not in excluded]
@@ -106,9 +108,10 @@ def build_sbom(
     sbom: Path,
     checksums: Path | None,
     manifest: Path | None = None,
+    additional_rendered: list[Path] | None = None,
 ) -> None:
     metadata = read_chart_metadata(chart)
-    artifacts = release_artifacts(dist, rendered, sbom, checksums, manifest)
+    artifacts = release_artifacts(dist, rendered, sbom, checksums, manifest, additional_rendered)
     packages = [
         {
             'name': metadata['name'],
@@ -170,10 +173,19 @@ def build_release_manifest(
     sbom: Path,
     checksums: Path | None,
     manifest: Path,
+    additional_rendered: list[Path] | None = None,
 ) -> None:
     metadata = read_chart_metadata(chart)
-    artifacts = release_artifacts(dist, rendered, sbom, checksums, manifest)
-    records = [artifact_record(path, 'chartPackage' if path.suffix == '.tgz' else 'renderedManifest') for path in artifacts]
+    artifacts = release_artifacts(dist, rendered, sbom, checksums, manifest, additional_rendered)
+    records = []
+    for path in artifacts:
+        if path.suffix == '.tgz':
+            kind = 'chartPackage'
+        elif path.name == 'production-rendered.yaml':
+            kind = 'productionRenderedManifest'
+        else:
+            kind = 'renderedManifest'
+        records.append(artifact_record(path, kind))
     if sbom.exists():
         records.append(artifact_record(sbom, 'spdxSbom'))
     document = {
@@ -196,6 +208,7 @@ def main() -> int:
     parser.add_argument('--chart', default='helm/urban-platform-infra')
     parser.add_argument('--dist', default='dist')
     parser.add_argument('--rendered')
+    parser.add_argument('--production-rendered')
     parser.add_argument('--sbom')
     parser.add_argument('--checksums')
     parser.add_argument('--manifest')
@@ -213,6 +226,7 @@ def main() -> int:
 
     dist = (ROOT / args.dist).resolve()
     rendered = (ROOT / args.rendered).resolve() if args.rendered else None
+    production_rendered = (ROOT / args.production_rendered).resolve() if args.production_rendered else None
     sbom = (ROOT / args.sbom).resolve()
     checksums = (ROOT / args.checksums).resolve()
     manifest = (ROOT / args.manifest).resolve() if args.manifest else None
@@ -221,10 +235,11 @@ def main() -> int:
     if manifest is not None:
         manifest.parent.mkdir(parents=True, exist_ok=True)
 
-    build_sbom(chart, dist, rendered, sbom, checksums, manifest)
+    additional_rendered = [production_rendered] if production_rendered is not None else None
+    build_sbom(chart, dist, rendered, sbom, checksums, manifest, additional_rendered)
     if manifest is not None:
-        build_release_manifest(chart, dist, rendered, sbom, checksums, manifest)
-    artifacts = release_artifacts(dist, rendered, sbom, checksums, manifest)
+        build_release_manifest(chart, dist, rendered, sbom, checksums, manifest, additional_rendered)
+    artifacts = release_artifacts(dist, rendered, sbom, checksums, manifest, additional_rendered)
     write_checksums(artifacts, sbom, manifest, checksums)
     return 0
 

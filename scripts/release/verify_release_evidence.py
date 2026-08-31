@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RELEASE_ARTIFACTS = {
     "chartPackage": "dist/urban-platform-infra-<version>.tgz",
     "renderedManifest": "dist/rendered.yaml",
+    "productionRenderedManifest": "dist/production-rendered.yaml",
     "sbom": "dist/urban-platform-infra.spdx.json",
     "releaseManifest": "dist/release-evidence.json",
     "checksums": "dist/SHA256SUMS",
@@ -179,6 +180,7 @@ def verify_release_manifest(
     required_manifest_artifacts = {
         "chartPackage": expected_artifacts["chartPackage"],
         "renderedManifest": expected_artifacts["renderedManifest"],
+        "productionRenderedManifest": expected_artifacts["productionRenderedManifest"],
         "spdxSbom": expected_artifacts["sbom"],
     }
     for kind, path in required_manifest_artifacts.items():
@@ -215,6 +217,7 @@ def main() -> int:
     expected = release_artifact_contract(policy, version)
     chart_package = expected["chartPackage"]
     rendered = expected["renderedManifest"]
+    production_rendered = expected["productionRenderedManifest"]
     sbom = expected["sbom"]
     manifest = expected["releaseManifest"]
     checksums = expected["checksums"]
@@ -248,6 +251,7 @@ def main() -> int:
     required = {
         "chart package": chart_package,
         "rendered manifest": rendered,
+        "production rendered manifest": production_rendered,
         "SPDX SBOM": sbom,
         "release manifest": manifest,
         "checksums": checksums,
@@ -275,7 +279,7 @@ def main() -> int:
             errors.append(f"Checksum mismatch for `{relative_path(path)}`.")
 
     if sbom.exists():
-        verify_sbom(sbom, [chart_package, rendered], errors, warnings)
+        verify_sbom(sbom, [chart_package, rendered, production_rendered], errors, warnings)
     if manifest.exists():
         verify_release_manifest(manifest, metadata, expected, errors)
 

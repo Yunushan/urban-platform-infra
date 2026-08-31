@@ -1607,6 +1607,7 @@ observability:
     - name: default
       count: 1
       storage: 2Gi
+      storageClassName: ''
     service:
       type: NodePort
       port: 9200

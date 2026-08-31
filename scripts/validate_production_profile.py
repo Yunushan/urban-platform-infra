@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ipaddress
+import re
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - CI installs the pinned 
 
 
 ROOT = Path(__file__).resolve().parents[1]
+PSA_VERSION_RE = re.compile(r"^v1\.[0-9]+$")
 
 
 def load_mapping(path: Path) -> dict[str, Any]:
@@ -88,10 +90,69 @@ def validate_values(values: dict[str, Any]) -> list[str]:
     require(errors, get(values, "secretManagement", "enabled") is True, "external secret management must be enabled")
     require(errors, get(values, "secretManagement", "provider") in {"external-secrets", "vault"}, "production secrets must use an external provider")
     require(errors, get(values, "secretManagement", "providerAdapters", "kubernetesDirect", "enabled") is False, "direct Kubernetes secret import must be disabled in production")
+    external_secrets = get(values, "secretManagement", "externalSecrets", default={})
+    require(errors, isinstance(external_secrets, dict), "production must define ExternalSecret resources")
+
+    ingress = get(values, "ingress", default={})
+    ingress_tls = get(ingress, "tls", default={})
+    require(errors, get(values, "ingress", "enabled") is True, "production ingress must be enabled")
+    require(errors, get(values, "ingress", "className") == "traefik", "production ingress must use Traefik")
+    require(errors, get(values, "ingress", "sslRedirect") is True, "production ingress must redirect HTTP to HTTPS")
+    require(errors, get(values, "ingress", "forceSslRedirect") is True, "production ingress must force HTTPS")
+    require(errors, get(ingress_tls, "enabled") is True, "production ingress TLS must be enabled")
+    require(errors, get(ingress_tls, "createSecret") is False, "production ingress TLS must be delivered by the approved secret provider")
+    tls_secret_name = str(get(ingress_tls, "secretName", default="")).strip()
+    require(errors, tls_secret_name == "urban-platform-tls", "production ingress TLS Secret name must be urban-platform-tls")
+    require(errors, get(ingress_tls, "certManager", "enabled") is False, "production ingress TLS must have one owner: External Secrets")
+    ingress_tls_external = get(external_secrets, "ingressTls", default={}) if isinstance(external_secrets, dict) else {}
+    require(errors, get(ingress_tls_external, "enabled") is True, "ExternalSecret/ingressTls must be enabled")
+    require(errors, get(ingress_tls_external, "targetName") == tls_secret_name, "ExternalSecret/ingressTls must target the ingress TLS Secret")
+    require(errors, get(ingress_tls_external, "type") == "kubernetes.io/tls", "ExternalSecret/ingressTls must materialize a TLS Secret")
+    tls_secret_keys = {
+        item.get("secretKey") for item in get(ingress_tls_external, "data", default=[])
+        if isinstance(item, dict)
+    }
+    require(errors, tls_secret_keys >= {"tls.crt", "tls.key"}, "ExternalSecret/ingressTls must deliver both TLS key material fields")
 
     require(errors, get(values, "namespace", "podSecurity", "enforce") == "restricted", "namespace PSA enforce level must be restricted")
     require(errors, get(values, "namespace", "podSecurity", "audit") == "restricted", "namespace PSA audit level must be restricted")
     require(errors, get(values, "namespace", "podSecurity", "warn") == "restricted", "namespace PSA warn level must be restricted")
+    psa_version = str(get(values, "namespace", "podSecurity", "version", default="")).strip()
+    require(errors, bool(PSA_VERSION_RE.fullmatch(psa_version)), "namespace PSA version must be pinned as v1.<minor>, not latest")
+    require(errors, get(values, "namespace", "resourceQuota", "enabled") is True, "production ResourceQuota must be enabled")
+    require(errors, get(values, "namespace", "limitRange", "enabled") is True, "production LimitRange must be enabled")
+    expected_quota = {
+        "requests.cpu": "12",
+        "requests.memory": "32Gi",
+        "limits.cpu": "20",
+        "limits.memory": "40Gi",
+        "requests.storage": "2Ti",
+        "persistentvolumeclaims": "100",
+        "pods": "300",
+    }
+    configured_quota = get(values, "namespace", "resourceQuota", "hard", default={})
+    require(
+        errors,
+        isinstance(configured_quota, dict)
+        and all(str(configured_quota.get(key, "")).strip() == value for key, value in expected_quota.items()),
+        "production ResourceQuota must use the reviewed CPU, memory, storage, PVC, and pod ceilings",
+    )
+    expected_limit_default = {"cpu": "1", "memory": "1Gi", "ephemeral-storage": "2Gi"}
+    expected_limit_request = {"cpu": "100m", "memory": "256Mi", "ephemeral-storage": "512Mi"}
+    configured_limit_default = get(values, "namespace", "limitRange", "default", default={})
+    configured_limit_request = get(values, "namespace", "limitRange", "defaultRequest", default={})
+    require(
+        errors,
+        isinstance(configured_limit_default, dict)
+        and all(str(configured_limit_default.get(key, "")).strip() == value for key, value in expected_limit_default.items()),
+        "production LimitRange default container limits must use the reviewed values",
+    )
+    require(
+        errors,
+        isinstance(configured_limit_request, dict)
+        and all(str(configured_limit_request.get(key, "")).strip() == value for key, value in expected_limit_request.items()),
+        "production LimitRange default container requests must use the reviewed values",
+    )
     require(errors, get(values, "storageTiers", "hot", "enabled") is True, "durable hot storage tier must be enabled")
     hot_storage_class = get(values, "storageTiers", "hot", "storageClassName")
     require(errors, bool(hot_storage_class), "production must name a durable hot StorageClass")
@@ -113,8 +174,6 @@ def validate_values(values: dict[str, Any]) -> list[str]:
     require(errors, get(values, "databases", "backup", "objectStore", "secretRef", "name") == "production-backup-credentials", "CNPG backups must use the production backup credential target")
     require(errors, get(values, "databases", "backup", "schedule", "enabled") is True, "CNPG scheduled backups must be enabled")
 
-    external_secrets = get(values, "secretManagement", "externalSecrets", default={})
-    require(errors, isinstance(external_secrets, dict), "production must define ExternalSecret resources")
     for name in ("databaseBackupCredentials", "veleroBackupCredentials"):
         secret = external_secrets.get(name, {}) if isinstance(external_secrets, dict) else {}
         require(errors, secret.get("enabled") is True, f"ExternalSecret/{name} must be enabled")

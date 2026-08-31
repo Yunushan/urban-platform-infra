@@ -6,12 +6,12 @@ INGRESS ?= traefik
 WEB ?= nginx
 DB ?= postgresql
 DATABASE_TOPOLOGY ?= per-service
-DEPLOY_CPU_REQUEST ?= 50m
-DEPLOY_MEMORY_REQUEST ?= 128Mi
-DEPLOY_CPU_LIMIT ?= 500m
-DEPLOY_MEMORY_LIMIT ?= 512Mi
-DEPLOY_EPHEMERAL_STORAGE_REQUEST ?= 256Mi
-DEPLOY_EPHEMERAL_STORAGE_LIMIT ?= 1Gi
+DEPLOY_CPU_REQUEST ?= $(if $(filter production,$(DEPLOY_PROFILE)),100m,50m)
+DEPLOY_MEMORY_REQUEST ?= $(if $(filter production,$(DEPLOY_PROFILE)),256Mi,128Mi)
+DEPLOY_CPU_LIMIT ?= $(if $(filter production,$(DEPLOY_PROFILE)),1,500m)
+DEPLOY_MEMORY_LIMIT ?= $(if $(filter production,$(DEPLOY_PROFILE)),1Gi,512Mi)
+DEPLOY_EPHEMERAL_STORAGE_REQUEST ?= $(if $(filter production,$(DEPLOY_PROFILE)),512Mi,256Mi)
+DEPLOY_EPHEMERAL_STORAGE_LIMIT ?= $(if $(filter production,$(DEPLOY_PROFILE)),2Gi,1Gi)
 DEPLOY_IO_COST_ENABLED ?= true
 DEPLOY_IO_MEASUREMENT ?= cgroup-v2
 DEPLOY_IO_READ_BPS ?= 0
@@ -21,7 +21,39 @@ DEPLOY_IO_WRITE_IOPS ?= 0
 OBS ?= disabled
 NAMESPACE ?= urban-platform
 DEPLOY_PROFILE ?= $(if $(filter prod production,$(ENV)),production,lab)
+ifeq ($(DEPLOY_PROFILE),prod)
+override DEPLOY_PROFILE := production
+endif
+ifneq ($(filter-out lab production,$(DEPLOY_PROFILE)),)
+$(error DEPLOY_PROFILE must be either lab or production; received '$(DEPLOY_PROFILE)')
+endif
+ALLOW_LAB_ON_PROD ?= false
+ifneq ($(filter prod production,$(ENV)),)
+ifneq ($(DEPLOY_PROFILE),production)
+ifneq ($(ALLOW_LAB_ON_PROD),true)
+$(error ENV=$(ENV) requires DEPLOY_PROFILE=production; set ALLOW_LAB_ON_PROD=true only for an explicitly acknowledged lab operation against a production-named inventory.)
+endif
+endif
+endif
+# Check mutating production goals while parsing, before their prerequisites run.
+PRODUCTION_MUTATING_GOALS := bootstrap install-cluster install-operators operator-kubeconfig ensure-storageclass ensure-namespace recover-helm-release configure-edge-ports install-local-path-storage cluster-repair deploy
+ifneq ($(filter $(PRODUCTION_MUTATING_GOALS),$(MAKECMDGOALS)),)
+ifeq ($(DEPLOY_PROFILE),production)
+ifneq ($(CONFIRM_PROD),true)
+$(error Refusing to mutate the production profile without CONFIRM_PROD=true. Run preflight/check targets first.)
+endif
+endif
+endif
+LAB_ON_PROD_MUTATING_GOALS := deploy-auto deploy-strimzi-kafka
+ifneq ($(filter $(LAB_ON_PROD_MUTATING_GOALS),$(MAKECMDGOALS)),)
+ifneq ($(filter prod production,$(ENV)),)
+ifneq ($(ALLOW_LAB_ON_PROD),true)
+$(error Refusing lab mutation against a production inventory without ALLOW_LAB_ON_PROD=true; use a lab ENV or acknowledge the operation explicitly.)
+endif
+endif
+endif
 VALUES ?= $(if $(filter production,$(DEPLOY_PROFILE)),helm/urban-platform-infra/values-production.yaml,helm/urban-platform-infra/values.yaml)
+DEPLOY_PRIVATE_VALUES ?=
 TOPOLOGY ?= three-node-ha
 TOPOLOGY_VALUES ?= helm/urban-platform-infra/topologies/$(TOPOLOGY).yaml
 INVENTORY ?= inventories/$(ENV)/hosts.yml
@@ -74,7 +106,7 @@ HELMFILE_SYNC_RETRY_DELAY ?= 20
 HELMFILE_SYNC_ATTEMPT_TIMEOUT ?= 240
 SKIP_HELMFILE_SYNC ?= auto
 LOCAL_PATH_INSTALL_SCRIPT ?= scripts/tools/install-local-path-storage.sh
-INSTALL_LOCAL_PATH_STORAGE ?= auto
+INSTALL_LOCAL_PATH_STORAGE ?= $(if $(filter production,$(DEPLOY_PROFILE)),false,auto)
 LOCAL_PATH_PROVISIONER_VERSION ?= v0.0.35
 LOCAL_PATH_STORAGE_CLASS ?= local-path
 LOCAL_PATH_STORAGE_DEFAULT ?= true
@@ -132,7 +164,7 @@ STRIMZI_OPERATOR_TIMEOUT ?= 10m
 STRIMZI_WATCH_NAMESPACES ?= $(NAMESPACE)
 STRIMZI_WATCH_ANY_NAMESPACE ?= false
 STRIMZI_PRELOAD_IMAGES ?= auto
-STRIMZI_KAFKA_VERSION ?= 4.2.0
+STRIMZI_KAFKA_VERSION ?= $(if $(filter production,$(DEPLOY_PROFILE)),4.3.0,4.2.0)
 STRIMZI_KAFKA_IMAGE ?=
 STRIMZI_OPERATOR_IMAGE_REGISTRY ?= quay.io
 STRIMZI_OPERATOR_IMAGE_REPOSITORY ?= strimzi
@@ -165,7 +197,7 @@ DEPLOY_LOKI_NODE_PORT ?= 30310
 DEPLOY_CLICKHOUSE_HTTP_NODE_PORT ?= 30812
 DEPLOY_CLICKHOUSE_TCP_NODE_PORT ?= 30900
 DEPLOY_DATABASE_STORAGE_SIZE ?= 1Gi
-DEPLOY_DATABASE_STORAGE_CLASS ?= $(LOCAL_PATH_STORAGE_CLASS)
+DEPLOY_DATABASE_STORAGE_CLASS ?= $(if $(filter production,$(DEPLOY_PROFILE)),production-durable,$(LOCAL_PATH_STORAGE_CLASS))
 DEPLOY_ELASTICSEARCH_STORAGE ?= 2Gi
 DEPLOY_KAFKA_STORAGE ?= 2Gi
 DEPLOY_ZOOKEEPER_STORAGE ?= 1Gi
@@ -177,6 +209,127 @@ DEPLOY_CLUSTER_VIP ?= $(MIGRATION_CLUSTER_VIP)
 DEPLOY_TLS_SECRET_NAME ?=
 DEPLOY_TLS_CREATE_SECRET ?=
 DEPLOY_NAMESPACE_RESOURCE_QUOTA ?= true
+DEPLOY_POD_SECURITY_ENFORCE ?= $(if $(filter production,$(DEPLOY_PROFILE)),restricted,baseline)
+DEPLOY_POD_SECURITY_AUDIT ?= restricted
+DEPLOY_POD_SECURITY_WARN ?= restricted
+# Kubernetes Pod Security labels must be pinned to the cluster's minor version
+# for production. v1.34 is the public baseline; override it for another cluster.
+DEPLOY_POD_SECURITY_VERSION ?= $(if $(filter production,$(DEPLOY_PROFILE)),v1.34,latest)
+ifeq ($(DEPLOY_PROFILE),production)
+ifneq ($(DEPLOY_LAB_STORAGE),false)
+$(error Production profile cannot enable DEPLOY_LAB_STORAGE; use DEPLOY_PROFILE=lab for lab overrides.)
+endif
+ifeq ($(DEPLOY_DATABASE_STORAGE_CLASS),$(LOCAL_PATH_STORAGE_CLASS))
+$(error Production profile cannot use the node-local StorageClass $(LOCAL_PATH_STORAGE_CLASS); configure a durable CSI-backed class.)
+endif
+endif
+ifneq ($(filter $(PRODUCTION_MUTATING_GOALS),$(MAKECMDGOALS)),)
+ifeq ($(DEPLOY_PROFILE),production)
+ifneq ($(filter deploy,$(MAKECMDGOALS)),)
+ifneq ($(abspath $(VALUES)),$(abspath helm/urban-platform-infra/values-production.yaml))
+$(error Production deploy requires the committed values-production.yaml overlay; use DEPLOY_PRIVATE_VALUES for private settings.)
+endif
+ifneq ($(filter three-node-ha multi-node-ha,$(TOPOLOGY)),$(TOPOLOGY))
+$(error Production deploy requires a high-availability topology: TOPOLOGY=three-node-ha or multi-node-ha.)
+endif
+ifneq ($(abspath $(TOPOLOGY_VALUES)),$(abspath helm/urban-platform-infra/topologies/$(TOPOLOGY).yaml))
+$(error Production deploy requires the selected topology's committed topology file.)
+endif
+ifeq ($(strip $(DEPLOY_PRIVATE_VALUES)),)
+$(error Production deploy requires DEPLOY_PRIVATE_VALUES=/private/production/values-production-private.yaml.)
+else
+ifeq ($(abspath $(DEPLOY_PRIVATE_VALUES)),$(abspath helm/urban-platform-infra/values-production.yaml))
+$(error DEPLOY_PRIVATE_VALUES must be a private overlay, not the committed public production values file.)
+endif
+ifeq ($(wildcard $(DEPLOY_PRIVATE_VALUES)),)
+$(error Production deploy private values file does not exist: $(DEPLOY_PRIVATE_VALUES).)
+endif
+ifneq ($(filter $(abspath $(CURDIR))/%,$(abspath $(DEPLOY_PRIVATE_VALUES))),)
+$(error Production deploy private values must be stored outside the repository checkout.)
+endif
+endif
+ifneq ($(strip $(HELM_EXTRA_ARGS)),)
+$(error Production deploy does not accept HELM_EXTRA_ARGS; put reviewed overrides in the signed private values overlay.)
+endif
+ifneq ($(DEPLOY_CONFIGURE_EDGE_PORTS),true)
+$(error Production deploy requires DEPLOY_CONFIGURE_EDGE_PORTS=true so the HA edge path is reconciled.)
+endif
+endif
+ifneq ($(DEPLOY_POD_SECURITY_ENFORCE),restricted)
+$(error Production Pod Security enforce level must be restricted.)
+endif
+ifneq ($(DEPLOY_POD_SECURITY_AUDIT),restricted)
+$(error Production Pod Security audit level must be restricted.)
+endif
+ifneq ($(DEPLOY_POD_SECURITY_WARN),restricted)
+$(error Production Pod Security warn level must be restricted.)
+endif
+ifeq ($(DEPLOY_POD_SECURITY_VERSION),latest)
+$(error Production Pod Security labels require DEPLOY_POD_SECURITY_VERSION=v1.<cluster-minor>; latest is not allowed.)
+endif
+ifneq ($(shell printf '%s\n' '$(DEPLOY_POD_SECURITY_VERSION)' | grep -Eq '^v1\.[0-9]+$$' && printf true),true)
+$(error DEPLOY_POD_SECURITY_VERSION must use the Kubernetes minor form v1.<minor>.)
+endif
+ifneq ($(DEPLOY_ENABLE_ECK),true)
+$(error Production requires DEPLOY_ENABLE_ECK=true.)
+endif
+ifneq ($(DEPLOY_ENABLE_CERT_MANAGER),true)
+$(error Production requires DEPLOY_ENABLE_CERT_MANAGER=true.)
+endif
+ifneq ($(DEPLOY_ENABLE_CNPG),true)
+$(error Production requires DEPLOY_ENABLE_CNPG=true.)
+endif
+ifneq ($(DEPLOY_ENABLE_EXTERNAL_SECRETS),true)
+$(error Production requires DEPLOY_ENABLE_EXTERNAL_SECRETS=true.)
+endif
+ifneq ($(DEPLOY_ENABLE_PROMETHEUS),true)
+$(error Production requires DEPLOY_ENABLE_PROMETHEUS=true.)
+endif
+ifneq ($(DEPLOY_ENABLE_GRAFANA),true)
+$(error Production requires DEPLOY_ENABLE_GRAFANA=true.)
+endif
+ifneq ($(DEPLOY_ENABLE_VELERO),true)
+$(error Production requires DEPLOY_ENABLE_VELERO=true.)
+endif
+ifneq ($(DEPLOY_ENABLE_STRIMZI),true)
+$(error Production requires DEPLOY_ENABLE_STRIMZI=true.)
+endif
+ifneq ($(INSTALL_LOCAL_PATH_STORAGE),false)
+$(error Production requires INSTALL_LOCAL_PATH_STORAGE=false; use a durable CSI-backed StorageClass.)
+endif
+ifneq ($(DEPLOY_NAMESPACE_RESOURCE_QUOTA),true)
+$(error Production requires DEPLOY_NAMESPACE_RESOURCE_QUOTA=true.)
+endif
+ifneq ($(DEPLOY_CPU_REQUEST),100m)
+$(error Production requires DEPLOY_CPU_REQUEST=100m.)
+endif
+ifneq ($(DEPLOY_MEMORY_REQUEST),256Mi)
+$(error Production requires DEPLOY_MEMORY_REQUEST=256Mi.)
+endif
+ifneq ($(DEPLOY_EPHEMERAL_STORAGE_REQUEST),512Mi)
+$(error Production requires DEPLOY_EPHEMERAL_STORAGE_REQUEST=512Mi.)
+endif
+ifneq ($(DEPLOY_CPU_LIMIT),1)
+$(error Production requires DEPLOY_CPU_LIMIT=1.)
+endif
+ifneq ($(DEPLOY_MEMORY_LIMIT),1Gi)
+$(error Production requires DEPLOY_MEMORY_LIMIT=1Gi.)
+endif
+ifneq ($(DEPLOY_EPHEMERAL_STORAGE_LIMIT),2Gi)
+$(error Production requires DEPLOY_EPHEMERAL_STORAGE_LIMIT=2Gi.)
+endif
+ifneq ($(DEPLOY_SKIP_PLACEHOLDER_WORKLOADS),true)
+$(error Production requires DEPLOY_SKIP_PLACEHOLDER_WORKLOADS=true.)
+endif
+endif
+endif
+ifneq ($(filter deploy-auto,$(MAKECMDGOALS)),)
+ifneq ($(filter prod production,$(ENV)),)
+ifneq ($(ALLOW_LAB_ON_PROD),true)
+$(error Refusing deploy-auto against a production inventory without ALLOW_LAB_ON_PROD=true; use a lab ENV or acknowledge the lab operation explicitly.)
+endif
+endif
+endif
 PROJECT_PATH ?=
 IMPORT_REPORT ?=
 IMPORT_STRICT ?= false
@@ -206,8 +359,9 @@ MIGRATION_TLS_LE_ISSUER_NAME ?= urban-platform-letsencrypt
 MIGRATION_TLS_LE_ISSUER_KIND ?= ClusterIssuer
 MIGRATION_TLS_LE_PRIVATE_KEY_SECRET ?= urban-platform-letsencrypt-account
 MIGRATION_TLS_LE_CREATE_ISSUER ?= true
-MIGRATION_PROFILE ?= lab
+MIGRATION_PROFILE ?= $(if $(filter prod production,$(ENV)),production,lab)
 MIGRATION_IMPORT_SECURITY_CONTEXT ?= $(if $(filter production,$(MIGRATION_PROFILE)),restricted,compat)
+MIGRATION_POD_SECURITY_VERSION ?= $(if $(filter production,$(MIGRATION_PROFILE)),v1.34,latest)
 MIGRATION_IMPORT_PROBE_MODE ?= auto
 MIGRATION_LAB_WORKLOAD_CPU_REQUEST ?= 25m
 MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST ?= 64Mi
@@ -254,7 +408,98 @@ MIGRATION_SKIP_DOCKER_SOCKET_SERVICES ?= true
 MIGRATION_SKIP_UNAVAILABLE_DATABASES ?= $(if $(filter production,$(MIGRATION_PROFILE)),false,true)
 MIGRATION_DEPLOY_PLATFORM ?= true
 MIGRATION_RELAX_RESOURCE_QUOTA ?= $(if $(filter lab,$(MIGRATION_PROFILE)),true,false)
-MIGRATION_SECRET_PROVIDER ?= kubernetes
+MIGRATION_SECRET_PROVIDER ?= $(if $(filter production,$(MIGRATION_PROFILE)),external-secrets,kubernetes)
+MIGRATION_VALUES ?= $(if $(filter production,$(MIGRATION_PROFILE)),helm/urban-platform-infra/values-production.yaml,helm/urban-platform-infra/values.yaml)
+
+ifneq ($(filter prod production,$(ENV)),)
+ifneq ($(MIGRATION_PROFILE),production)
+ifneq ($(ALLOW_LAB_ON_PROD),true)
+ifneq ($(filter import-auto import-preflight,$(MAKECMDGOALS)),)
+$(error ENV=$(ENV) requires MIGRATION_PROFILE=production for mutating import workflows; set ALLOW_LAB_ON_PROD=true only for an explicitly acknowledged lab operation.)
+endif
+ifneq ($(filter import-migrate,$(MAKECMDGOALS)),)
+ifeq ($(MIGRATION_EXECUTE),true)
+$(error ENV=$(ENV) requires MIGRATION_PROFILE=production for an executing import; set ALLOW_LAB_ON_PROD=true only for an explicitly acknowledged lab operation.)
+endif
+endif
+endif
+endif
+endif
+
+# Production imports are mutating workflows too. Keep their profile-specific
+# safety checks close to the migration defaults so recursive make calls cannot
+# silently downgrade them to the lab path.
+ifneq ($(filter import-auto import-preflight,$(MAKECMDGOALS)),)
+ifeq ($(MIGRATION_PROFILE),production)
+ifneq ($(CONFIRM_PROD),true)
+$(error Refusing to mutate the production migration profile without CONFIRM_PROD=true.)
+endif
+ifneq ($(MIGRATION_IMPORT_SECURITY_CONTEXT),restricted)
+$(error Production migration imports require MIGRATION_IMPORT_SECURITY_CONTEXT=restricted.)
+endif
+ifneq ($(MIGRATION_IMAGE_MODE),registry)
+$(error Production migration imports require MIGRATION_IMAGE_MODE=registry.)
+endif
+ifeq ($(filter external-secrets vault,$(MIGRATION_SECRET_PROVIDER)),)
+$(error Production migration imports require MIGRATION_SECRET_PROVIDER=external-secrets or vault.)
+endif
+ifneq ($(MIGRATION_SKIP_UNAVAILABLE_DATABASES),false)
+$(error Production migration imports require strict database availability checks.)
+endif
+ifneq ($(MIGRATION_RELAX_RESOURCE_QUOTA),false)
+$(error Production migration imports cannot relax the resource quota.)
+endif
+ifneq ($(MIGRATION_PREFLIGHT_REQUIRE_INGRESS_ENDPOINT),true)
+$(error Production migration imports require an ingress endpoint preflight.)
+endif
+ifeq ($(MIGRATION_POD_SECURITY_VERSION),latest)
+$(error Production migration imports require MIGRATION_POD_SECURITY_VERSION=v1.<cluster-minor>.)
+endif
+ifneq ($(shell printf '%s\n' '$(MIGRATION_POD_SECURITY_VERSION)' | grep -Eq '^v1\.[0-9]+$$' && printf true),true)
+$(error MIGRATION_POD_SECURITY_VERSION must use the Kubernetes minor form v1.<minor>.)
+endif
+endif
+endif
+ifneq ($(filter import-migrate,$(MAKECMDGOALS)),)
+ifeq ($(MIGRATION_PROFILE),production)
+ifeq ($(MIGRATION_EXECUTE),true)
+ifneq ($(CONFIRM_PROD),true)
+$(error Refusing to mutate the production migration profile without CONFIRM_PROD=true.)
+endif
+ifneq ($(MIGRATION_IMPORT_SECURITY_CONTEXT),restricted)
+$(error Production migration imports require MIGRATION_IMPORT_SECURITY_CONTEXT=restricted.)
+endif
+ifneq ($(MIGRATION_IMAGE_MODE),registry)
+$(error Production migration imports require MIGRATION_IMAGE_MODE=registry.)
+endif
+ifeq ($(filter external-secrets vault,$(MIGRATION_SECRET_PROVIDER)),)
+$(error Production migration imports require MIGRATION_SECRET_PROVIDER=external-secrets or vault.)
+endif
+ifneq ($(MIGRATION_SKIP_UNAVAILABLE_DATABASES),false)
+$(error Production migration imports require strict database availability checks.)
+endif
+ifneq ($(MIGRATION_RELAX_RESOURCE_QUOTA),false)
+$(error Production migration imports cannot relax the resource quota.)
+endif
+ifneq ($(MIGRATION_PREFLIGHT_REQUIRE_INGRESS_ENDPOINT),true)
+$(error Production migration imports require an ingress endpoint preflight.)
+endif
+ifeq ($(MIGRATION_POD_SECURITY_VERSION),latest)
+$(error Production migration imports require MIGRATION_POD_SECURITY_VERSION=v1.<cluster-minor>.)
+endif
+ifneq ($(shell printf '%s\n' '$(MIGRATION_POD_SECURITY_VERSION)' | grep -Eq '^v1\.[0-9]+$$' && printf true),true)
+$(error MIGRATION_POD_SECURITY_VERSION must use the Kubernetes minor form v1.<minor>.)
+endif
+ifneq ($(filter import-auto,$(MAKECMDGOALS)),)
+ifeq ($(MIGRATION_DEPLOY_PLATFORM),true)
+ifeq ($(strip $(DEPLOY_PRIVATE_VALUES)),)
+$(error Production import-auto requires DEPLOY_PRIVATE_VALUES for its platform deployment.)
+endif
+endif
+endif
+endif
+endif
+endif
 MIGRATION_SECRET_REMOTE_PREFIX ?= example/urban-platform/import
 MIGRATION_SECRET_STORE_NAME ?= vault
 MIGRATION_SECRET_STORE_KIND ?= ClusterSecretStore
@@ -560,10 +805,14 @@ DISASTER_RECOVERY_POST_DRILL_REVIEW ?= false
 DISASTER_RECOVERY_OUTPUT ?= reports/disaster-recovery-plan.md
 DISASTER_RECOVERY_VALUES ?= reports/disaster-recovery-values.yaml
 
-.PHONY: help setup-local doctor-local ci-contract private-data-audit operator-ready tool-inventory version-policy-check version-update-plan version-update-request version-update-apply validate production-readiness kafka-clickhouse-readiness kafka-clickhouse-reconcile production-readiness-gate production-evidence-gate image-policy image-promotion-plan registry-promotion-plan runtime-hardening-plan gitops-delivery-plan progressive-delivery-plan scaling-policy-plan network-connectivity-plan access-governance-plan compliance-evidence-plan incident-response-plan change-management-plan cutover-gate-plan smoke-test-plan load-test-runners load-test-plan load-test release-runbook-plan cluster-upgrade-plan disaster-recovery-plan lint configure backup-plan observability-plan cluster-doctor cluster-repair lab-deploy-plan capacity-preflight image-cache-plan database-migration-plan edge-migration-plan environment-profile-plan import-check import-plan import-preflight import-recovery-plan import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig configure-edge-ports install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace recover-helm-release deploy deploy-auto deploy-strimzi-kafka deploy-dry-run package-chart release-evidence verify-release-evidence status observability-status docker-up docker-down docker-status docker-standalone-config docker-standalone-up docker-standalone-down docker-standalone-status policy clean
+.PHONY: help setup-local doctor-local ci-contract private-data-audit operator-ready tool-inventory version-policy-check version-update-plan version-update-request version-update-apply validate production-readiness kafka-clickhouse-readiness kafka-clickhouse-reconcile production-readiness-gate production-evidence-gate image-policy image-promotion-plan registry-promotion-plan runtime-hardening-plan gitops-delivery-plan progressive-delivery-plan scaling-policy-plan network-connectivity-plan access-governance-plan compliance-evidence-plan incident-response-plan change-management-plan cutover-gate-plan smoke-test-plan load-test-runners load-test-plan load-test release-runbook-plan cluster-upgrade-plan disaster-recovery-plan lint configure backup-plan observability-plan cluster-doctor cluster-repair lab-deploy-plan capacity-preflight image-cache-plan database-migration-plan edge-migration-plan environment-profile-plan import-check import-plan import-preflight import-recovery-plan import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig configure-edge-ports install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace recover-helm-release production-private-preflight deploy deploy-auto deploy-strimzi-kafka deploy-dry-run package-chart release-evidence verify-release-evidence status observability-status docker-up docker-down docker-status docker-standalone-config docker-standalone-up docker-standalone-down docker-standalone-status policy clean
 
 HELM_DEPLOY_SET_ARGS = \
 	--set namespace.create=false \
+	--set-string namespace.podSecurity.enforce=$(DEPLOY_POD_SECURITY_ENFORCE) \
+	--set-string namespace.podSecurity.audit=$(DEPLOY_POD_SECURITY_AUDIT) \
+	--set-string namespace.podSecurity.warn=$(DEPLOY_POD_SECURITY_WARN) \
+	--set-string namespace.podSecurity.version=$(DEPLOY_POD_SECURITY_VERSION) \
 	--set databases.topology.mode=$(DATABASE_TOPOLOGY) \
 	--set-string global.resourceDefaults.requests.cpu=$(DEPLOY_CPU_REQUEST) \
 	--set-string global.resourceDefaults.requests.memory=$(DEPLOY_MEMORY_REQUEST) \
@@ -610,11 +859,17 @@ HELM_DEPLOY_SET_ARGS = \
 	--set observability.elasticsearch.service.nodePort=$(DEPLOY_ELASTICSEARCH_NODE_PORT) \
 	--set observability.kibana.service.type=$(DEPLOY_OBSERVABILITY_SERVICE_TYPE) \
 	--set observability.kibana.service.nodePort=$(DEPLOY_KIBANA_NODE_PORT) \
-	$(if $(filter true,$(DEPLOY_LAB_STORAGE)),--set global.replicaOverride=$(DEPLOY_LAB_REPLICA_OVERRIDE) --set global.defaultReplicas=$(DEPLOY_LAB_REPLICA_OVERRIDE) --set autoscaling.enabled=$(DEPLOY_LAB_AUTOSCALING) --set global.scheduling.topologySpread=$(DEPLOY_LAB_TOPOLOGY_SPREAD) --set databases.storageOverride.size=$(DEPLOY_DATABASE_STORAGE_SIZE) --set databases.storageOverride.className=$(DEPLOY_DATABASE_STORAGE_CLASS) --set 'observability.elasticsearch.nodeSets[0].storage=$(DEPLOY_ELASTICSEARCH_STORAGE)' --set messaging.kafka.storage.size=$(DEPLOY_KAFKA_STORAGE) --set messaging.kafka.storage.className=$(DEPLOY_DATABASE_STORAGE_CLASS) --set messaging.kafka.zookeeper.storage.size=$(DEPLOY_ZOOKEEPER_STORAGE) --set messaging.kafka.zookeeper.storage.className=$(DEPLOY_DATABASE_STORAGE_CLASS) --set messaging.redis.storage.size=$(DEPLOY_REDIS_STORAGE) --set messaging.redis.storage.className=$(DEPLOY_DATABASE_STORAGE_CLASS) --set messaging.redis.sentinel.enabled=$(DEPLOY_REDIS_SENTINEL),)
+	--set-string storageTiers.hot.storageClassName=$(DEPLOY_DATABASE_STORAGE_CLASS) \
+	--set-string databases.storageOverride.className=$(DEPLOY_DATABASE_STORAGE_CLASS) \
+	--set-string messaging.kafka.storage.className=$(DEPLOY_DATABASE_STORAGE_CLASS) \
+	--set-string messaging.kafka.zookeeper.storage.className=$(DEPLOY_DATABASE_STORAGE_CLASS) \
+	--set-string messaging.redis.storage.className=$(DEPLOY_DATABASE_STORAGE_CLASS) \
+	--set-string 'observability.elasticsearch.nodeSets[0].storageClassName=$(DEPLOY_DATABASE_STORAGE_CLASS)' \
+	$(if $(filter true,$(DEPLOY_LAB_STORAGE)),--set global.replicaOverride=$(DEPLOY_LAB_REPLICA_OVERRIDE) --set global.defaultReplicas=$(DEPLOY_LAB_REPLICA_OVERRIDE) --set autoscaling.enabled=$(DEPLOY_LAB_AUTOSCALING) --set global.scheduling.topologySpread=$(DEPLOY_LAB_TOPOLOGY_SPREAD) --set databases.storageOverride.size=$(DEPLOY_DATABASE_STORAGE_SIZE) --set 'observability.elasticsearch.nodeSets[0].storage=$(DEPLOY_ELASTICSEARCH_STORAGE)' --set messaging.kafka.storage.size=$(DEPLOY_KAFKA_STORAGE) --set messaging.kafka.zookeeper.storage.size=$(DEPLOY_ZOOKEEPER_STORAGE) --set messaging.redis.storage.size=$(DEPLOY_REDIS_STORAGE) --set messaging.redis.sentinel.enabled=$(DEPLOY_REDIS_SENTINEL),)
 
 define require_prod_confirmation
-	@if [ "$(ENV)" = "prod" ] && [ "$(CONFIRM_PROD)" != "true" ]; then \
-		echo "Refusing to mutate prod without CONFIRM_PROD=true. Run preflight/check targets first."; \
+	@if [ "$(DEPLOY_PROFILE)" = "production" ] && [ "$(CONFIRM_PROD)" != "true" ]; then \
+		echo "Refusing to mutate the production profile without CONFIRM_PROD=true. Run preflight/check targets first."; \
 		exit 2; \
 	fi
 endef
@@ -642,6 +897,14 @@ ci-contract: ## Validate GitHub/GitLab CI lane pins, actions, and gate commands.
 
 production-readiness: ## Score repository-level production readiness (100-point static contract).
 	$(PYTHON) scripts/production_readiness_score.py
+
+production-private-preflight: ## Validate the private production overlay before any cluster mutation.
+	@if [ "$(DEPLOY_PROFILE)" = "production" ]; then \
+		$(MAKE) python-deps; \
+		$(PYTHON) scripts/validate_production_private_overlay.py --base-values "helm/urban-platform-infra/values.yaml" --production-values "helm/urban-platform-infra/values-production.yaml" --private-values "$(DEPLOY_PRIVATE_VALUES)" --environment-profiles "config/environment-profiles.yaml" --ingress-host "$(DEPLOY_INGRESS_HOST)" --cluster-domain "$(DEPLOY_CLUSTER_DOMAIN)" --cluster-vip "$(DEPLOY_CLUSTER_VIP)"; \
+	else \
+		echo "Skipping production private overlay preflight for the lab profile."; \
+	fi
 
 kafka-clickhouse-readiness: ## Score private and live Kafka-to-ClickHouse readiness; requires 100/100.
 	mkdir -p reports
@@ -869,17 +1132,22 @@ import-migrate: python-deps ## Generate or execute guarded migration automation 
 		echo "Set PROJECT_PATH=/path/to/compose-project, for example: make import-migrate PROJECT_PATH=/path/to/compose-project"; \
 		exit 2; \
 	fi
-	$(PYTHON) scripts/migrate_project.py --project-path "$(PROJECT_PATH)" --values "$(VALUES)" --output "$(MIGRATION_OUTPUT)" --private-dir "$(MIGRATION_PRIVATE_DIR)" --namespace "$(MIGRATION_NAMESPACE)" --kubeconfig "$(MIGRATION_KUBECONFIG)" --ingress-host "$(MIGRATION_INGRESS_HOST)" --cluster-vip "$(MIGRATION_CLUSTER_VIP)" --tls-mode "$(MIGRATION_TLS_MODE)" --tls-cert-file "$(MIGRATION_TLS_CERT_FILE)" --tls-key-file "$(MIGRATION_TLS_KEY_FILE)" --tls-extra-hosts "$(MIGRATION_TLS_EXTRA_HOSTS)" --tls-pfx-file "$(MIGRATION_TLS_PFX_FILE)" --tls-pfx-password-file "$(MIGRATION_TLS_PFX_PASSWORD_FILE)" --tls-duration-days "$(MIGRATION_TLS_DURATION_DAYS)" --tls-le-email "$(MIGRATION_TLS_LE_EMAIL)" --tls-le-server "$(MIGRATION_TLS_LE_SERVER)" --tls-le-issuer-name "$(MIGRATION_TLS_LE_ISSUER_NAME)" --tls-le-issuer-kind "$(MIGRATION_TLS_LE_ISSUER_KIND)" --tls-le-private-key-secret "$(MIGRATION_TLS_LE_PRIVATE_KEY_SECRET)" $(if $(filter false,$(MIGRATION_TLS_LE_CREATE_ISSUER)),--tls-le-existing-issuer,--tls-le-create-issuer) --ingress-controller "$(INGRESS)" --webserver "$(WEB)" --database "$(DB)" --profile "$(MIGRATION_PROFILE)" --runtime-validation-timeout "$(MIGRATION_RUNTIME_VALIDATION_TIMEOUT)" --runtime-validation-interval "$(MIGRATION_RUNTIME_VALIDATION_INTERVAL)" --kafka-bootstrap-servers "$(MIGRATION_KAFKA_BOOTSTRAP_SERVERS)" --dotnet-version-mode "$(MIGRATION_DOTNET_VERSION_MODE)" --dotnet-target-version "$(MIGRATION_DOTNET_TARGET_VERSION)" --dotnet-sdk-target-version "$(MIGRATION_DOTNET_SDK_TARGET_VERSION)" --dotnet-image-registry "$(MIGRATION_DOTNET_IMAGE_REGISTRY)" --dotnet-roll-forward "$(MIGRATION_DOTNET_ROLL_FORWARD)" --import-security-context "$(MIGRATION_IMPORT_SECURITY_CONTEXT)" --import-probe-mode "$(MIGRATION_IMPORT_PROBE_MODE)" --lab-workload-cpu-request "$(MIGRATION_LAB_WORKLOAD_CPU_REQUEST)" --lab-workload-memory-request "$(MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST)" --lab-workload-cpu-limit "$(MIGRATION_LAB_WORKLOAD_CPU_LIMIT)" --lab-workload-memory-limit "$(MIGRATION_LAB_WORKLOAD_MEMORY_LIMIT)" --preflight-min-node-memory "$(MIGRATION_PREFLIGHT_MIN_NODE_MEMORY)" --preflight-min-node-disk-free "$(MIGRATION_PREFLIGHT_MIN_NODE_DISK_FREE)" --preflight-max-imported-workloads "$(MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS)" --preflight-capacity-utilization-limit "$(MIGRATION_PREFLIGHT_CAPACITY_UTILIZATION_LIMIT)" --batch-size "$(MIGRATION_BATCH_SIZE)" --import-batch "$(MIGRATION_IMPORT_BATCH)" --service-filter "$(MIGRATION_SERVICE_FILTER)" --state-file "$(MIGRATION_STATE_FILE)" --image-mode "$(MIGRATION_IMAGE_MODE)" --image-output-dir "$(MIGRATION_IMAGE_OUTPUT_DIR)" --rke2-nodes "$(MIGRATION_RKE2_NODES)" --rke2-image-dir "$(MIGRATION_RKE2_IMAGE_DIR)" --ssh-user "$(MIGRATION_SSH_USER)" --ssh-key "$(MIGRATION_SSH_KEY)" --become-password-file "$(MIGRATION_BECOME_PASSWORD_FILE)" --container-tool "$(MIGRATION_CONTAINER_TOOL)" --postgres-client-image "$(MIGRATION_POSTGRES_CLIENT_IMAGE)" --registry "$(MIGRATION_REGISTRY)" --image-tag "$(MIGRATION_IMAGE_TAG)" --dump-dir "$(MIGRATION_DUMP_DIR)" --db-targets "$(MIGRATION_DB_TARGETS)" --secret-provider "$(MIGRATION_SECRET_PROVIDER)" --secret-remote-prefix "$(MIGRATION_SECRET_REMOTE_PREFIX)" --secret-store-name "$(MIGRATION_SECRET_STORE_NAME)" --secret-store-kind "$(MIGRATION_SECRET_STORE_KIND)" --secret-refresh-interval "$(MIGRATION_SECRET_REFRESH_INTERVAL)" --stage "$(MIGRATION_STAGE)" --cleanup-node-image-scope "$(MIGRATION_CLEANUP_NODE_IMAGE_SCOPE)" --node-archive-retention-hours "$(MIGRATION_NODE_ARCHIVE_RETENTION_HOURS)" $(if $(filter true,$(MIGRATION_PREFLIGHT_REQUIRE_INGRESS_ENDPOINT)),--preflight-require-ingress-endpoint,--no-preflight-require-ingress-endpoint) $(if $(filter false,$(MIGRATION_RESUME)),--no-resume,--resume) $(if $(filter true,$(MIGRATION_FORCE_RERUN)),--force-rerun,) $(if $(filter true,$(MIGRATION_AUTO_PREPARE)),--auto-prepare,) $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,) $(if $(filter true,$(MIGRATION_EXECUTE)),--execute,) $(if $(filter true,$(MIGRATION_ALLOW_SECRET_MATERIAL)),--allow-secret-material,) $(if $(filter false,$(MIGRATION_RKE2_IMPORT_IMAGES)),--no-rke2-import-images,--rke2-import-images) $(if $(filter false,$(MIGRATION_CLEANUP_OPERATOR_IMAGES)),--no-cleanup-operator-images,--cleanup-operator-images) $(if $(filter false,$(MIGRATION_PRUNE_OPERATOR_CACHE)),--no-prune-operator-cache,--prune-operator-cache) $(if $(filter false,$(MIGRATION_CLEANUP_NODE_IMPORT_IMAGES)),--no-cleanup-node-import-images,--cleanup-node-import-images) $(if $(filter false,$(MIGRATION_CLEANUP_NODE_CRI_IMAGES)),--no-cleanup-node-cri-images,--cleanup-node-cri-images) $(if $(filter false,$(MIGRATION_CLEANUP_NODE_CONTENT_PRUNE)),--no-cleanup-node-content-prune,--cleanup-node-content-prune) $(if $(filter false,$(MIGRATION_SKIP_DOCKER_SOCKET_SERVICES)),--include-docker-socket-services,--skip-docker-socket-services) $(if $(filter false,$(MIGRATION_SKIP_UNAVAILABLE_DATABASES)),--strict-database-migration,--skip-unavailable-databases)
+	MIGRATION_POD_SECURITY_VERSION="$(MIGRATION_POD_SECURITY_VERSION)" \
+	$(PYTHON) scripts/migrate_project.py --project-path "$(PROJECT_PATH)" --values "$(MIGRATION_VALUES)" --output "$(MIGRATION_OUTPUT)" --private-dir "$(MIGRATION_PRIVATE_DIR)" --namespace "$(MIGRATION_NAMESPACE)" --kubeconfig "$(MIGRATION_KUBECONFIG)" --ingress-host "$(MIGRATION_INGRESS_HOST)" --cluster-vip "$(MIGRATION_CLUSTER_VIP)" --tls-mode "$(MIGRATION_TLS_MODE)" --tls-cert-file "$(MIGRATION_TLS_CERT_FILE)" --tls-key-file "$(MIGRATION_TLS_KEY_FILE)" --tls-extra-hosts "$(MIGRATION_TLS_EXTRA_HOSTS)" --tls-pfx-file "$(MIGRATION_TLS_PFX_FILE)" --tls-pfx-password-file "$(MIGRATION_TLS_PFX_PASSWORD_FILE)" --tls-duration-days "$(MIGRATION_TLS_DURATION_DAYS)" --tls-le-email "$(MIGRATION_TLS_LE_EMAIL)" --tls-le-server "$(MIGRATION_TLS_LE_SERVER)" --tls-le-issuer-name "$(MIGRATION_TLS_LE_ISSUER_NAME)" --tls-le-issuer-kind "$(MIGRATION_TLS_LE_ISSUER_KIND)" --tls-le-private-key-secret "$(MIGRATION_TLS_LE_PRIVATE_KEY_SECRET)" $(if $(filter false,$(MIGRATION_TLS_LE_CREATE_ISSUER)),--tls-le-existing-issuer,--tls-le-create-issuer) --ingress-controller "$(INGRESS)" --webserver "$(WEB)" --database "$(DB)" --profile "$(MIGRATION_PROFILE)" --runtime-validation-timeout "$(MIGRATION_RUNTIME_VALIDATION_TIMEOUT)" --runtime-validation-interval "$(MIGRATION_RUNTIME_VALIDATION_INTERVAL)" --kafka-bootstrap-servers "$(MIGRATION_KAFKA_BOOTSTRAP_SERVERS)" --dotnet-version-mode "$(MIGRATION_DOTNET_VERSION_MODE)" --dotnet-target-version "$(MIGRATION_DOTNET_TARGET_VERSION)" --dotnet-sdk-target-version "$(MIGRATION_DOTNET_SDK_TARGET_VERSION)" --dotnet-image-registry "$(MIGRATION_DOTNET_IMAGE_REGISTRY)" --dotnet-roll-forward "$(MIGRATION_DOTNET_ROLL_FORWARD)" --import-security-context "$(MIGRATION_IMPORT_SECURITY_CONTEXT)" --import-probe-mode "$(MIGRATION_IMPORT_PROBE_MODE)" --lab-workload-cpu-request "$(MIGRATION_LAB_WORKLOAD_CPU_REQUEST)" --lab-workload-memory-request "$(MIGRATION_LAB_WORKLOAD_MEMORY_REQUEST)" --lab-workload-cpu-limit "$(MIGRATION_LAB_WORKLOAD_CPU_LIMIT)" --lab-workload-memory-limit "$(MIGRATION_LAB_WORKLOAD_MEMORY_LIMIT)" --preflight-min-node-memory "$(MIGRATION_PREFLIGHT_MIN_NODE_MEMORY)" --preflight-min-node-disk-free "$(MIGRATION_PREFLIGHT_MIN_NODE_DISK_FREE)" --preflight-max-imported-workloads "$(MIGRATION_PREFLIGHT_MAX_IMPORTED_WORKLOADS)" --preflight-capacity-utilization-limit "$(MIGRATION_PREFLIGHT_CAPACITY_UTILIZATION_LIMIT)" --batch-size "$(MIGRATION_BATCH_SIZE)" --import-batch "$(MIGRATION_IMPORT_BATCH)" --service-filter "$(MIGRATION_SERVICE_FILTER)" --state-file "$(MIGRATION_STATE_FILE)" --image-mode "$(MIGRATION_IMAGE_MODE)" --image-output-dir "$(MIGRATION_IMAGE_OUTPUT_DIR)" --rke2-nodes "$(MIGRATION_RKE2_NODES)" --rke2-image-dir "$(MIGRATION_RKE2_IMAGE_DIR)" --ssh-user "$(MIGRATION_SSH_USER)" --ssh-key "$(MIGRATION_SSH_KEY)" --become-password-file "$(MIGRATION_BECOME_PASSWORD_FILE)" --container-tool "$(MIGRATION_CONTAINER_TOOL)" --postgres-client-image "$(MIGRATION_POSTGRES_CLIENT_IMAGE)" --registry "$(MIGRATION_REGISTRY)" --image-tag "$(MIGRATION_IMAGE_TAG)" --dump-dir "$(MIGRATION_DUMP_DIR)" --db-targets "$(MIGRATION_DB_TARGETS)" --secret-provider "$(MIGRATION_SECRET_PROVIDER)" --secret-remote-prefix "$(MIGRATION_SECRET_REMOTE_PREFIX)" --secret-store-name "$(MIGRATION_SECRET_STORE_NAME)" --secret-store-kind "$(MIGRATION_SECRET_STORE_KIND)" --secret-refresh-interval "$(MIGRATION_SECRET_REFRESH_INTERVAL)" --stage "$(MIGRATION_STAGE)" --cleanup-node-image-scope "$(MIGRATION_CLEANUP_NODE_IMAGE_SCOPE)" --node-archive-retention-hours "$(MIGRATION_NODE_ARCHIVE_RETENTION_HOURS)" $(if $(filter true,$(MIGRATION_PREFLIGHT_REQUIRE_INGRESS_ENDPOINT)),--preflight-require-ingress-endpoint,--no-preflight-require-ingress-endpoint) $(if $(filter false,$(MIGRATION_RESUME)),--no-resume,--resume) $(if $(filter true,$(MIGRATION_FORCE_RERUN)),--force-rerun,) $(if $(filter true,$(MIGRATION_AUTO_PREPARE)),--auto-prepare,) $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,) $(if $(filter true,$(MIGRATION_EXECUTE)),--execute,) $(if $(filter true,$(MIGRATION_ALLOW_SECRET_MATERIAL)),--allow-secret-material,) $(if $(filter false,$(MIGRATION_RKE2_IMPORT_IMAGES)),--no-rke2-import-images,--rke2-import-images) $(if $(filter false,$(MIGRATION_CLEANUP_OPERATOR_IMAGES)),--no-cleanup-operator-images,--cleanup-operator-images) $(if $(filter false,$(MIGRATION_PRUNE_OPERATOR_CACHE)),--no-prune-operator-cache,--prune-operator-cache) $(if $(filter false,$(MIGRATION_CLEANUP_NODE_IMPORT_IMAGES)),--no-cleanup-node-import-images,--cleanup-node-import-images) $(if $(filter false,$(MIGRATION_CLEANUP_NODE_CRI_IMAGES)),--no-cleanup-node-cri-images,--cleanup-node-cri-images) $(if $(filter false,$(MIGRATION_CLEANUP_NODE_CONTENT_PRUNE)),--no-cleanup-node-content-prune,--cleanup-node-content-prune) $(if $(filter false,$(MIGRATION_SKIP_DOCKER_SOCKET_SERVICES)),--include-docker-socket-services,--skip-docker-socket-services) $(if $(filter false,$(MIGRATION_SKIP_UNAVAILABLE_DATABASES)),--strict-database-migration,--skip-unavailable-databases)
 
 import-auto: MIGRATION_AUTO_REPAIR_CLUSTER = true
 import-auto: operator-kubeconfig ## Run the full import migration workflow with preparation, execution, and validation.
 	@if [ "$(MIGRATION_DEPLOY_PLATFORM)" = "true" ]; then \
 		echo "Deploying/upgrading the platform chart before import so PostgreSQL 18 and platform services are reconciled."; \
-		$(MAKE) deploy-auto DEPLOY_PROFILE=lab VALUES=helm/urban-platform-infra/values.yaml NAMESPACE="$(MIGRATION_NAMESPACE)" DEPLOY_NAMESPACE_RESOURCE_QUOTA="$(if $(filter true,$(MIGRATION_RELAX_RESOURCE_QUOTA)),false,$(DEPLOY_NAMESPACE_RESOURCE_QUOTA))"; \
+		if [ "$(MIGRATION_PROFILE)" = "production" ]; then \
+			$(MAKE) deploy DEPLOY_PROFILE=production VALUES=helm/urban-platform-infra/values-production.yaml DEPLOY_PRIVATE_VALUES="$(DEPLOY_PRIVATE_VALUES)" NAMESPACE="$(MIGRATION_NAMESPACE)" DEPLOY_NAMESPACE_RESOURCE_QUOTA=true CONFIRM_PROD="$(CONFIRM_PROD)"; \
+		else \
+			$(MAKE) deploy-auto DEPLOY_PROFILE=lab VALUES=helm/urban-platform-infra/values.yaml NAMESPACE="$(MIGRATION_NAMESPACE)" DEPLOY_NAMESPACE_RESOURCE_QUOTA="$(if $(filter true,$(MIGRATION_RELAX_RESOURCE_QUOTA)),false,$(DEPLOY_NAMESPACE_RESOURCE_QUOTA))"; \
+		fi; \
 	else \
 		echo "Skipping platform Helm deploy because MIGRATION_DEPLOY_PLATFORM=$(MIGRATION_DEPLOY_PLATFORM)."; \
 	fi
-	$(MAKE) import-migrate PROJECT_PATH="$(PROJECT_PATH)" VALUES="$(VALUES)" INGRESS="$(INGRESS)" WEB="$(WEB)" DB="$(DB)" IMPORT_REDACT="$(IMPORT_REDACT)" IMPORT_STRICT="$(IMPORT_STRICT)" MIGRATION_STAGE=all MIGRATION_EXECUTE=true
+	$(MAKE) import-migrate PROJECT_PATH="$(PROJECT_PATH)" MIGRATION_VALUES="$(MIGRATION_VALUES)" INGRESS="$(INGRESS)" WEB="$(WEB)" DB="$(DB)" IMPORT_REDACT="$(IMPORT_REDACT)" IMPORT_STRICT="$(IMPORT_STRICT)" MIGRATION_PROFILE="$(MIGRATION_PROFILE)" MIGRATION_STAGE=all MIGRATION_EXECUTE=true
 
 $(ANSIBLE_COLLECTIONS_STAMP): $(ANSIBLE_COLLECTION_REQUIREMENTS) $(PYTHON_DEPS_STAMP)
 	mkdir -p .ansible/collections
@@ -906,6 +1174,7 @@ install-cluster: ansible-collections ## Install selected cluster engine: rke2, k
 	ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) $(ANSIBLE_PLAYBOOK) -i $(INVENTORY) ansible/playbooks/install-cluster.yml -e cluster_engine=$(ENGINE) -e deployment_environment=$(ENV) $(ANSIBLE_ARGS)
 
 operator-kubeconfig: ansible-collections ## Repair/write the operator kubeconfig to the cluster VIP when needed.
+	$(call require_prod_confirmation)
 	@ENV=$(ENV) ENGINE=$(ENGINE) INVENTORY=$(INVENTORY) ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) ANSIBLE_PLAYBOOK=$(ANSIBLE_PLAYBOOK) OPERATOR_KUBECONFIG=$(OPERATOR_KUBECONFIG) OPERATOR_KUBECONFIG_FORCE_REPAIR="$(OPERATOR_KUBECONFIG_FORCE_REPAIR)" ANSIBLE_ARGS="$(ANSIBLE_ARGS)" MIGRATION_RKE2_NODES="$(MIGRATION_RKE2_NODES)" MIGRATION_SSH_USER="$(MIGRATION_SSH_USER)" MIGRATION_SSH_KEY="$(MIGRATION_SSH_KEY)" MIGRATION_BECOME_PASSWORD_FILE="$(MIGRATION_BECOME_PASSWORD_FILE)" MIGRATION_BECOME_PASSWORD_PROMPT="$(MIGRATION_BECOME_PASSWORD_PROMPT)" MIGRATION_CLUSTER_VIP="$(if $(MIGRATION_CLUSTER_VIP),$(MIGRATION_CLUSTER_VIP),$(DEPLOY_CLUSTER_VIP))" MIGRATION_KUBERNETES_API_VIP_PORT="$(MIGRATION_KUBERNETES_API_VIP_PORT)" MIGRATION_CLUSTER_DOMAIN="$(MIGRATION_CLUSTER_DOMAIN)" MIGRATION_RKE2_VERSION="$(MIGRATION_RKE2_VERSION)" MIGRATION_AUTO_REPAIR_CLUSTER="$(MIGRATION_AUTO_REPAIR_CLUSTER)" MIGRATION_KEEPALIVED_AUTH_PASS="$(MIGRATION_KEEPALIVED_AUTH_PASS)" MIGRATION_KEEPALIVED_INTERFACE="$(MIGRATION_KEEPALIVED_INTERFACE)" bash $(KUBECONFIG_SCRIPT)
 
 configure-edge-ports: ansible-collections ## Configure HAProxy VIP forwarding for non-80/443 observability ports.
@@ -927,18 +1196,31 @@ install-helmfile: install-helm ## Install or align Helmfile on the operator mach
 	bash $(HELMFILE_INSTALL_SCRIPT)
 
 install-local-path-storage: operator-kubeconfig ## Install Rancher local-path dynamic storage for lab/small clusters.
+	@if [ "$(DEPLOY_PROFILE)" = "production" ]; then \
+		echo "Refusing local-path storage installation for the production profile; provide the durable production StorageClass $(DEPLOY_DATABASE_STORAGE_CLASS)." >&2; \
+		exit 2; \
+	fi
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) LOCAL_PATH_PROVISIONER_VERSION=$(LOCAL_PATH_PROVISIONER_VERSION) LOCAL_PATH_STORAGE_CLASS=$(LOCAL_PATH_STORAGE_CLASS) LOCAL_PATH_STORAGE_DEFAULT=$(LOCAL_PATH_STORAGE_DEFAULT) LOCAL_PATH_STORAGE_PATH=$(LOCAL_PATH_STORAGE_PATH) LOCAL_PATH_PREPARE_HOST_PATHS=$(LOCAL_PATH_PREPARE_HOST_PATHS) MIGRATION_RKE2_NODES="$(MIGRATION_RKE2_NODES)" MIGRATION_SSH_USER="$(MIGRATION_SSH_USER)" MIGRATION_SSH_KEY="$(MIGRATION_SSH_KEY)" MIGRATION_BECOME_PASSWORD_FILE="$(MIGRATION_BECOME_PASSWORD_FILE)" MIGRATION_BECOME_PASSWORD_PROMPT="$(MIGRATION_BECOME_PASSWORD_PROMPT)" bash $(LOCAL_PATH_INSTALL_SCRIPT)
 
 ensure-storageclass: operator-kubeconfig ## Ensure the cluster has a StorageClass before installing stateful workloads.
-	@if KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl get storageclass $(LOCAL_PATH_STORAGE_CLASS) >/dev/null 2>&1 && { [ "$(INSTALL_LOCAL_PATH_STORAGE)" = "auto" ] || [ "$(INSTALL_LOCAL_PATH_STORAGE)" = "true" ]; }; then \
-		echo "Local-path StorageClass already present; reconciling provisioner and host paths."; \
-		KUBECONFIG=$(OPERATOR_KUBECONFIG) LOCAL_PATH_PROVISIONER_VERSION=$(LOCAL_PATH_PROVISIONER_VERSION) LOCAL_PATH_STORAGE_CLASS=$(LOCAL_PATH_STORAGE_CLASS) LOCAL_PATH_STORAGE_DEFAULT=$(LOCAL_PATH_STORAGE_DEFAULT) LOCAL_PATH_STORAGE_PATH=$(LOCAL_PATH_STORAGE_PATH) LOCAL_PATH_PREPARE_HOST_PATHS=$(LOCAL_PATH_PREPARE_HOST_PATHS) MIGRATION_RKE2_NODES="$(MIGRATION_RKE2_NODES)" MIGRATION_SSH_USER="$(MIGRATION_SSH_USER)" MIGRATION_SSH_KEY="$(MIGRATION_SSH_KEY)" MIGRATION_BECOME_PASSWORD_FILE="$(MIGRATION_BECOME_PASSWORD_FILE)" MIGRATION_BECOME_PASSWORD_PROMPT="$(MIGRATION_BECOME_PASSWORD_PROMPT)" bash $(LOCAL_PATH_INSTALL_SCRIPT); \
-	elif KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl get storageclass -o name 2>/dev/null | grep -q .; then \
-		echo "StorageClass already present."; \
+	$(call require_prod_confirmation)
+	@if [ "$(DEPLOY_PROFILE)" = "production" ] && [ "$(DEPLOY_DATABASE_STORAGE_CLASS)" = "$(LOCAL_PATH_STORAGE_CLASS)" ]; then \
+		echo "Production profile cannot use the node-local StorageClass $(LOCAL_PATH_STORAGE_CLASS); configure a durable CSI-backed class." >&2; \
+		exit 2; \
+	elif KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl get storageclass "$(DEPLOY_DATABASE_STORAGE_CLASS)" >/dev/null 2>&1; then \
+		if [ "$(DEPLOY_DATABASE_STORAGE_CLASS)" = "$(LOCAL_PATH_STORAGE_CLASS)" ] && { [ "$(INSTALL_LOCAL_PATH_STORAGE)" = "auto" ] || [ "$(INSTALL_LOCAL_PATH_STORAGE)" = "true" ]; }; then \
+			echo "Local-path StorageClass already present; reconciling provisioner and host paths."; \
+			KUBECONFIG=$(OPERATOR_KUBECONFIG) LOCAL_PATH_PROVISIONER_VERSION=$(LOCAL_PATH_PROVISIONER_VERSION) LOCAL_PATH_STORAGE_CLASS=$(LOCAL_PATH_STORAGE_CLASS) LOCAL_PATH_STORAGE_DEFAULT=$(LOCAL_PATH_STORAGE_DEFAULT) LOCAL_PATH_STORAGE_PATH=$(LOCAL_PATH_STORAGE_PATH) LOCAL_PATH_PREPARE_HOST_PATHS=$(LOCAL_PATH_PREPARE_HOST_PATHS) MIGRATION_RKE2_NODES="$(MIGRATION_RKE2_NODES)" MIGRATION_SSH_USER="$(MIGRATION_SSH_USER)" MIGRATION_SSH_KEY="$(MIGRATION_SSH_KEY)" MIGRATION_BECOME_PASSWORD_FILE="$(MIGRATION_BECOME_PASSWORD_FILE)" MIGRATION_BECOME_PASSWORD_PROMPT="$(MIGRATION_BECOME_PASSWORD_PROMPT)" bash $(LOCAL_PATH_INSTALL_SCRIPT); \
+		else \
+			echo "Required StorageClass $(DEPLOY_DATABASE_STORAGE_CLASS) is present."; \
+		fi; \
+	elif [ "$(DEPLOY_DATABASE_STORAGE_CLASS)" != "$(LOCAL_PATH_STORAGE_CLASS)" ]; then \
+		echo "Required StorageClass $(DEPLOY_DATABASE_STORAGE_CLASS) is missing; refusing local-path fallback." >&2; \
+		exit 2; \
 	elif [ "$(INSTALL_LOCAL_PATH_STORAGE)" = "auto" ] || [ "$(INSTALL_LOCAL_PATH_STORAGE)" = "true" ]; then \
 		KUBECONFIG=$(OPERATOR_KUBECONFIG) LOCAL_PATH_PROVISIONER_VERSION=$(LOCAL_PATH_PROVISIONER_VERSION) LOCAL_PATH_STORAGE_CLASS=$(LOCAL_PATH_STORAGE_CLASS) LOCAL_PATH_STORAGE_DEFAULT=$(LOCAL_PATH_STORAGE_DEFAULT) LOCAL_PATH_STORAGE_PATH=$(LOCAL_PATH_STORAGE_PATH) LOCAL_PATH_PREPARE_HOST_PATHS=$(LOCAL_PATH_PREPARE_HOST_PATHS) MIGRATION_RKE2_NODES="$(MIGRATION_RKE2_NODES)" MIGRATION_SSH_USER="$(MIGRATION_SSH_USER)" MIGRATION_SSH_KEY="$(MIGRATION_SSH_KEY)" MIGRATION_BECOME_PASSWORD_FILE="$(MIGRATION_BECOME_PASSWORD_FILE)" MIGRATION_BECOME_PASSWORD_PROMPT="$(MIGRATION_BECOME_PASSWORD_PROMPT)" bash $(LOCAL_PATH_INSTALL_SCRIPT); \
 	else \
-		echo "No StorageClass exists. Install a CSI provisioner or rerun with INSTALL_LOCAL_PATH_STORAGE=true."; \
+		echo "Required StorageClass $(DEPLOY_DATABASE_STORAGE_CLASS) is missing. Install a CSI provisioner or explicitly configure a lab local-path profile." >&2; \
 		exit 2; \
 	fi
 
@@ -968,7 +1250,7 @@ install-operators: install-helmfile operator-kubeconfig ensure-storageclass ## I
 ensure-namespace: ## Create and label the target namespace before deploying the platform chart.
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl get namespace $(NAMESPACE) >/dev/null 2>&1 || \
 		KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl create namespace $(NAMESPACE)
-	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl label namespace $(NAMESPACE) pod-security.kubernetes.io/enforce=baseline pod-security.kubernetes.io/audit=restricted pod-security.kubernetes.io/warn=restricted pod-security.kubernetes.io/enforce-version=latest pod-security.kubernetes.io/audit-version=latest pod-security.kubernetes.io/warn-version=latest --overwrite
+	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl label namespace $(NAMESPACE) pod-security.kubernetes.io/enforce=$(DEPLOY_POD_SECURITY_ENFORCE) pod-security.kubernetes.io/audit=$(DEPLOY_POD_SECURITY_AUDIT) pod-security.kubernetes.io/warn=$(DEPLOY_POD_SECURITY_WARN) pod-security.kubernetes.io/enforce-version=$(DEPLOY_POD_SECURITY_VERSION) pod-security.kubernetes.io/audit-version=$(DEPLOY_POD_SECURITY_VERSION) pod-security.kubernetes.io/warn-version=$(DEPLOY_POD_SECURITY_VERSION) --overwrite
 	@if [ "$(DEPLOY_NAMESPACE_RESOURCE_QUOTA)" = "false" ]; then \
 		echo "ResourceQuota disabled for this deploy; removing stale $(PROJECT)-quota if present."; \
 		KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl -n $(NAMESPACE) delete resourcequota $(PROJECT)-quota --ignore-not-found; \
@@ -993,20 +1275,24 @@ package-chart: install-helm ## Package the Helm chart into dist/.
 
 release-evidence: package-chart ## Generate rendered manifest, SPDX SBOM, and checksums for a release.
 	$(HELM) template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f $(VALUES) > dist/rendered.yaml
-	$(PYTHON) scripts/release/generate_sbom.py --chart helm/urban-platform-infra --dist dist --rendered dist/rendered.yaml --sbom dist/urban-platform-infra.spdx.json --manifest dist/release-evidence.json --checksums dist/SHA256SUMS
+	$(HELM) template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f helm/urban-platform-infra/values.yaml -f helm/urban-platform-infra/values-production.yaml --api-versions kafka.strimzi.io/v1/Kafka --api-versions kafka.strimzi.io/v1/KafkaNodePool --api-versions kafka.strimzi.io/v1/KafkaTopic --api-versions kafka.strimzi.io/v1/KafkaUser --api-versions kafka.strimzi.io/v1/KafkaConnect --api-versions kafka.strimzi.io/v1/KafkaConnector --api-versions monitoring.coreos.com/v1/PodMonitor --api-versions cert-manager.io/v1/Certificate --api-versions cert-manager.io/v1/ClusterIssuer > dist/production-rendered.yaml
+	$(PYTHON) tests/policy/basic_policy.py dist/production-rendered.yaml
+	$(PYTHON) tests/policy/production_render.py dist/production-rendered.yaml
+	$(PYTHON) scripts/release/generate_sbom.py --chart helm/urban-platform-infra --dist dist --rendered dist/rendered.yaml --production-rendered dist/production-rendered.yaml --sbom dist/urban-platform-infra.spdx.json --manifest dist/release-evidence.json --checksums dist/SHA256SUMS
 	$(PYTHON) scripts/release/verify_release_evidence.py --chart helm/urban-platform-infra --policy config/supply-chain-policy.yaml --tag "$(RELEASE_TAG)" --report "$(RELEASE_VERIFY_REPORT)"
 
 verify-release-evidence: ## Verify existing release evidence without rebuilding artifacts.
 	$(PYTHON) scripts/release/verify_release_evidence.py --chart helm/urban-platform-infra --policy config/supply-chain-policy.yaml --tag "$(RELEASE_TAG)" --report "$(RELEASE_VERIFY_REPORT)"
 
-deploy: install-operators ensure-namespace recover-helm-release ## Deploy/upgrade the HA application platform.
+deploy: production-private-preflight install-operators ensure-namespace recover-helm-release ## Deploy/upgrade the HA application platform.
+	$(call require_prod_confirmation)
 	@if [ "$(DEPLOY_CONFIGURE_EDGE_PORTS)" = "true" ]; then \
 		$(MAKE) configure-edge-ports ENV=$(ENV) ENGINE=$(ENGINE) INVENTORY=$(INVENTORY) ANSIBLE_CONFIG=$(ANSIBLE_CONFIG) ANSIBLE_PLAYBOOK=$(ANSIBLE_PLAYBOOK) ANSIBLE_ARGS="$(ANSIBLE_ARGS)" DEPLOY_ALLOWED_CIDRS="$(DEPLOY_ALLOWED_CIDRS)"; \
 	fi
 	@attempt=1; \
 	while true; do \
 		echo "Running Helm upgrade/install (attempt $$attempt/$(HELM_DEPLOY_RETRIES))."; \
-		if KUBECONFIG=$(OPERATOR_KUBECONFIG) $(HELM) upgrade --install $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) --cleanup-on-fail --timeout $(HELM_TIMEOUT) $(HELM_DEPLOY_SET_ARGS) -f $(TOPOLOGY_VALUES) -f $(VALUES) $(HELM_EXTRA_ARGS); then \
+		if KUBECONFIG=$(OPERATOR_KUBECONFIG) $(HELM) upgrade --install $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) --cleanup-on-fail --timeout $(HELM_TIMEOUT) $(HELM_DEPLOY_SET_ARGS) -f $(TOPOLOGY_VALUES) -f $(VALUES) $(HELM_EXTRA_ARGS) $(if $(DEPLOY_PRIVATE_VALUES),-f "$(DEPLOY_PRIVATE_VALUES)",); then \
 			break; \
 		fi; \
 		status=$$?; \
@@ -1047,13 +1333,19 @@ observability-status: ## Show monitoring and observability resources.
 	KUBECONFIG=$(OPERATOR_KUBECONFIG) kubectl -n observability get pods,svc 2>/dev/null || true
 
 docker-up: ## Start Docker fallback profile. Use Docker Swarm for replicas.
-	docker compose -f compose/docker-compose.ha.yml up -d
+	@env_flag=""; \
+	if [ -f "$(STANDALONE_ENV_FILE)" ]; then env_flag="--env-file $(STANDALONE_ENV_FILE)"; fi; \
+	docker compose $$env_flag -f compose/docker-compose.ha.yml up -d
 
 docker-down: ## Stop Docker fallback profile.
-	docker compose -f compose/docker-compose.ha.yml down
+	@env_flag=""; \
+	if [ -f "$(STANDALONE_ENV_FILE)" ]; then env_flag="--env-file $(STANDALONE_ENV_FILE)"; fi; \
+	docker compose $$env_flag -f compose/docker-compose.ha.yml down
 
 docker-status: ## Show Docker fallback profile status.
-	docker compose -f compose/docker-compose.ha.yml ps
+	@env_flag=""; \
+	if [ -f "$(STANDALONE_ENV_FILE)" ]; then env_flag="--env-file $(STANDALONE_ENV_FILE)"; fi; \
+	docker compose $$env_flag -f compose/docker-compose.ha.yml ps
 
 docker-standalone-config: ## Generate private standalone Docker nginx/TLS runtime config from .env.standalone.
 	STANDALONE_ENV_FILE="$(STANDALONE_ENV_FILE)" bash scripts/tools/standalone-docker-config.sh

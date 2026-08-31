@@ -42,6 +42,9 @@ and `attestation.expiresAt` no more than 24 hours apart, generate a fresh UUIDv4
 for `release.deploymentId`, and bind `liveCluster.clusterUid` to the UID of the
 target cluster's `kube-system` Namespace. The gate also requires its repository
 checkout to be clean and exactly at the signed `release.sourceRevision`.
+Set `liveCluster.expectedPodSecurityVersion` to the same pinned Kubernetes minor
+used by `namespace.podSecurity.version`; the live gate verifies all three PSA
+version labels against that value.
 
 The private production overlay must also bind the deployment to the same
 release identity recorded in the signed evidence manifest:
@@ -122,14 +125,21 @@ make kafka-clickhouse-reconcile \
 ```
 
 The live portion is mandatory and cannot be disabled in a passing production
-evidence manifest. It performs an authenticated `/readyz` probe and read-only
-Kubernetes checks for three schedulable, pressure-free failure-domain nodes,
+evidence manifest. It performs an authenticated `/readyz` probe, a proxy-free
+GET against the signed production HTTPS endpoint, an HTTP-to-HTTPS redirect
+probe, and read-only Kubernetes checks for three schedulable, pressure-free failure-domain nodes,
 the signed in-cluster release identity, approved digest-only runtime images,
 restricted namespace policy, fully converged workloads, three-instance
-CloudNativePG clusters and scheduled backups, Ready ExternalSecrets and owned
-TLS material, and a full `100/100` Kafka-to-ClickHouse data-path result. It never
-prints kubeconfig contents, credentials, endpoints, node addresses, or private
-artifact paths.
+CloudNativePG clusters and scheduled backups, Ready ExternalSecrets with
+correctly materialized target Secret data, a TLS Ingress plus an explicit
+HTTP-to-HTTPS redirect, owned TLS material, and a full `100/100`
+Kafka-to-ClickHouse data-path result. The signed live manifest must enumerate
+the complete expected PodDisruptionBudget and autoscaler name sets; the gate
+rejects missing, unexpected, or unhealthy entries. It never prints kubeconfig contents,
+credentials, endpoint values, node addresses, or private artifact paths. The
+signed `liveCluster.ingressProbe` section must contain the HTTPS and HTTP URLs,
+expected response classes, and `tlsVerify: true`; a private `caBundle` may be
+provided for an enterprise CA.
 
 `kafka-clickhouse-reconcile` is plan-only unless `KAFKA_CLICKHOUSE_APPLY=true`.
 Apply mode stops before mutation when its static, CRD, exact digest-pinned operator, durable
@@ -142,3 +152,17 @@ artifact, unpinned image, unready workload, or unverified restore drill returns
 a non-zero exit code. A public repository score
 of `100/100` therefore means the repository is contract-ready; it is not a
 substitute for the private operational gate.
+
+The mutating Makefile deployment path also requires
+`DEPLOY_PRIVATE_VALUES=/path/outside/the/repository` and applies that file
+last. This prevents a production deployment from accidentally using only the
+public profile baseline, which contains sanitized placeholders and versioned
+reference tags for documentation.
+
+Before any production cluster mutation, `make deploy` automatically runs
+`production-private-preflight`. It validates the effective base, public, and
+private values, requires a real release identity and registry image pull
+Secret, rejects placeholder ExternalSecret paths, and requires every effective
+runtime image to carry a valid `sha256` digest. The preflight is skipped for
+the lab profile; the production evidence gate remains the required post-deploy
+check for signed image evidence and live runtime identity.

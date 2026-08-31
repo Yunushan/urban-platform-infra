@@ -3,10 +3,16 @@
 `docker-compose.ha.yml` is a compatibility profile for development, demos, and migration testing. It is not the preferred production HA path; use the RKE2/Kubernetes profile for enterprise production.
 
 ```bash
+cp .env.standalone.example .env.standalone
+$EDITOR .env.standalone
 make docker-up
 make docker-status
 make docker-down
 ```
+
+`POSTGRES_PASSWORD` is mandatory; the Compose compatibility profile has no
+fallback password. Keep `.env.standalone` private and replace the empty value
+with a strong randomly generated secret before starting the profile.
 
 For a single-host standalone run with private local IP, FQDN, TLS, nginx, and
 database image pins, use the variable-driven overlay. Keep `.env.standalone`
