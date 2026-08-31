@@ -49,9 +49,11 @@ tasks:
       - helm lint helm/urban-platform-infra
       - helm package helm/urban-platform-infra -d dist
   release-evidence:
-    deps:
-      - package-chart
     cmds:
+      - >-
+        test -n "{{.RELEASE_TAG | default ""}}"
+        || (echo "RELEASE_TAG is required and must match Chart.yaml version." >&2; exit 2)
+      - task package-chart
       - >-
         helm template urban-platform-infra helm/urban-platform-infra
         --namespace urban-platform
@@ -84,8 +86,7 @@ tasks:
         --manifest dist/release-evidence.json
         --checksums dist/SHA256SUMS
       - >-
-        test -n "{{.RELEASE_TAG | default ""}}"
-        && python3 scripts/release/verify_release_evidence.py
+        python3 scripts/release/verify_release_evidence.py
         --chart helm/urban-platform-infra
         --policy config/supply-chain-policy.yaml
         --tag "{{.RELEASE_TAG | default ""}}"
@@ -107,6 +108,86 @@ tasks:
         TOPOLOGY="{{.TOPOLOGY}}"
         CONFIRM_PROD="{{.CONFIRM_PROD}}"
         DEPLOY_PRIVATE_VALUES="{{.DEPLOY_PRIVATE_VALUES}}"
+  management-tools-list:
+    cmds:
+      - python3 scripts/management_tools.py --config config/management-tools.yaml list
+  management-tools-plan:
+    vars:
+      ENV: '{{.ENV | default "prod"}}'
+      SELECTED: '{{.SELECTED | default ""}}'
+      VALUES: '{{.VALUES | default "helm/urban-platform-infra/values.yaml"}}'
+    cmds:
+      - >-
+        make management-tools-plan
+        ENV="{{.ENV}}"
+        MANAGEMENT_TOOLS_SELECTED="{{.SELECTED}}"
+        MANAGEMENT_TOOLS_VALUES="{{.VALUES}}"
+  management-tools-install:
+    vars:
+      ENV: '{{.ENV | default "prod"}}'
+      CONFIRM_PROD: '{{.CONFIRM_PROD | default "false"}}'
+      SELECTED: '{{.SELECTED | default ""}}'
+      VALUES: '{{.VALUES | default "helm/urban-platform-infra/values.yaml"}}'
+      VALUES_DIR: '{{.VALUES_DIR | default ""}}'
+      CHART_VERSIONS: '{{.CHART_VERSIONS | default ""}}'
+      EXECUTE: '{{.EXECUTE | default "false"}}'
+      CONFIRM: '{{.CONFIRM | default "false"}}'
+    cmds:
+      - >-
+        make management-tools-install
+        ENV="{{.ENV}}"
+        CONFIRM_PROD="{{.CONFIRM_PROD}}"
+        MANAGEMENT_TOOLS_SELECTED="{{.SELECTED}}"
+        MANAGEMENT_TOOLS_VALUES="{{.VALUES}}"
+        MANAGEMENT_TOOLS_VALUES_DIR="{{.VALUES_DIR}}"
+        MANAGEMENT_TOOLS_CHART_VERSIONS="{{.CHART_VERSIONS}}"
+        MANAGEMENT_TOOLS_EXECUTE="{{.EXECUTE}}"
+        MANAGEMENT_TOOLS_CONFIRM="{{.CONFIRM}}"
+  management-tools-compose-plan:
+    vars:
+      ENV: '{{.ENV | default "prod"}}'
+      SELECTED: '{{.SELECTED | default ""}}'
+      VALUES: '{{.VALUES | default "helm/urban-platform-infra/values.yaml"}}'
+      ENV_FILE: '{{.ENV_FILE | default ""}}'
+    cmds:
+      - >-
+        make management-tools-compose-plan
+        ENV="{{.ENV}}"
+        MANAGEMENT_TOOLS_SELECTED="{{.SELECTED}}"
+        MANAGEMENT_TOOLS_VALUES="{{.VALUES}}"
+        MANAGEMENT_TOOLS_ENV_FILE="{{.ENV_FILE}}"
+  management-tools-compose-up:
+    vars:
+      ENV: '{{.ENV | default "prod"}}'
+      CONFIRM_PROD: '{{.CONFIRM_PROD | default "false"}}'
+      SELECTED: '{{.SELECTED | default ""}}'
+      VALUES: '{{.VALUES | default "helm/urban-platform-infra/values.yaml"}}'
+      ENV_FILE: '{{.ENV_FILE | default ""}}'
+      CONTAINER_TOOL: '{{.CONTAINER_TOOL | default "docker"}}'
+      EXECUTE: '{{.EXECUTE | default "false"}}'
+      CONFIRM: '{{.CONFIRM | default "false"}}'
+    cmds:
+      - >-
+        make management-tools-compose-up
+        ENV="{{.ENV}}"
+        CONFIRM_PROD="{{.CONFIRM_PROD}}"
+        MANAGEMENT_TOOLS_SELECTED="{{.SELECTED}}"
+        MANAGEMENT_TOOLS_VALUES="{{.VALUES}}"
+        MANAGEMENT_TOOLS_ENV_FILE="{{.ENV_FILE}}"
+        MANAGEMENT_TOOLS_CONTAINER_TOOL="{{.CONTAINER_TOOL}}"
+        MANAGEMENT_TOOLS_EXECUTE="{{.EXECUTE}}"
+        MANAGEMENT_TOOLS_CONFIRM="{{.CONFIRM}}"
+  management-tools-workstation-check:
+    vars:
+      ENV: '{{.ENV | default "prod"}}'
+      SELECTED: '{{.SELECTED | default ""}}'
+      VALUES: '{{.VALUES | default "helm/urban-platform-infra/values.yaml"}}'
+    cmds:
+      - >-
+        make management-tools-workstation-check
+        ENV="{{.ENV}}"
+        MANAGEMENT_TOOLS_SELECTED="{{.SELECTED}}"
+        MANAGEMENT_TOOLS_VALUES="{{.VALUES}}"
   observability-status:
     cmds:
       - kubectl -n urban-platform get prometheusrules.monitoring.coreos.com,servicemonitors.monitoring.coreos.com 2>/dev/null || true

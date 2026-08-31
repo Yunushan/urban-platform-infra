@@ -8,6 +8,7 @@ The machine-readable contract is [`config/tooling.yaml`](../config/tooling.yaml)
 - `deployment`: Ansible, Helm, Helmfile, kubectl, SSH, and TLS tooling.
 - `import`: image, database, and RKE2 preload prerequisites.
 - `load-test`: the built-in Python fallback plus optional k6, Locust, JMeter, Gatling, Artillery, Fortio, Vegeta, wrk2, Apache Kafka performance tools, PostgreSQL pgbench, and I/O tools.
+- `management-tools`: explicit Helm, Docker/Podman, k9s, and FreeLens prerequisites for the optional management-tool workflow.
 - `all`: the union of the scopes above.
 
 Check a scope and write a public-safe report:
@@ -17,6 +18,7 @@ make tool-inventory TOOL_INVENTORY_SCOPE=validation
 make tool-inventory TOOL_INVENTORY_SCOPE=deployment
 make tool-inventory TOOL_INVENTORY_SCOPE=import
 make tool-inventory TOOL_INVENTORY_SCOPE=load-test
+make tool-inventory TOOL_INVENTORY_SCOPE=management-tools
 ```
 
 The report contains only tool names, versions, and generic availability. It does not inspect kubeconfig contents, private inventories, credentials, registry names, or command arguments beyond version probes.

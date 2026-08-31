@@ -1196,6 +1196,81 @@ platformCapabilities:
       enabled: false
     istio:
       enabled: false
+managementTools:
+  # Management tools are separate from the application platform chart. They
+  # are installed only through the explicit management-tools Make targets.
+  enabled: false
+  mode: plan
+  requireExplicitSelection: true
+  requirePinnedVersions: true
+  requireDigestPins: true
+  allowMutableTags: false
+  allowDockerSocket: false
+  requirePrivateEnvironmentFile: true
+  inCluster:
+    tlsRequired: true
+    valuesDirectory: ''
+    defaultStorageClass: ''
+  rancher:
+    enabled: false
+    chartVersion: ''
+    valuesFile: ''
+    namespace: cattle-system
+    releaseName: rancher
+    host: ''
+    tlsSecretName: ''
+    dedicatedManagementCluster: true
+  portainer:
+    enabled: false
+    chartVersion: ''
+    valuesFile: ''
+    namespace: portainer
+    releaseName: portainer
+    host: ''
+    tlsSecretName: ''
+    storageClass: ''
+  headlamp:
+    enabled: false
+    chartVersion: ''
+    valuesFile: ''
+    namespace: headlamp
+    releaseName: headlamp
+    host: ''
+    tlsSecretName: ''
+  devtron:
+    enabled: false
+    chartVersion: ''
+    valuesFile: ''
+    namespace: devtroncd
+    releaseName: devtron-operator
+    host: ''
+    tlsSecretName: ''
+    storageClass: ''
+  freelens:
+    enabled: false
+    version: 1.10.3
+    kubeconfigContext: ''
+  k9s:
+    enabled: false
+    version: 0.51.0
+    kubeconfigContext: ''
+  komodo:
+    enabled: false
+    composeProfile: komodo
+    externalHost: ''
+    environmentFile: ''
+    coreImage: ''
+    peripheryImage: ''
+    mongoImage: ''
+    peripheryRootDirectory: ''
+  arcane:
+    enabled: false
+    composeProfile: arcane
+    externalHost: ''
+    environmentFile: ''
+    image: ''
+    projectsDirectory: ''
+    buildsDirectory: ''
 databases:
   enabled: true
   provider: cloudnative-pg

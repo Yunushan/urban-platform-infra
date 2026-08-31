@@ -15,7 +15,7 @@ Release integrity depends on five controls:
 The GitHub release workflow packages the Helm chart, renders both the default and production manifests, generates `dist/SHA256SUMS`, generates `dist/urban-platform-infra.spdx.json`, generates `dist/release-evidence.json`, verifies those artifacts with `scripts/release/verify_release_evidence.py`, and attests the evidence with GitHub artifact attestations. The GitLab tag pipeline mirrors the checksum, SBOM, release manifest, production-render policy, and offline verification path for private GitLab users.
 
 The local Article 6 verifier is `scripts/release/verify_release_evidence.py`.
-`make release-evidence` now runs it after generating artifacts, and
+`make release-evidence RELEASE_TAG=v0.1.0` now runs it after generating artifacts, and
 `make verify-release-evidence` can validate an existing `dist/` directory
 without rebuilding. The verifier checks chart version versus tag, required
 artifact presence, SHA-256 contents, SPDX JSON structure, release manifest

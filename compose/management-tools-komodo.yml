@@ -1,0 +1,91 @@
+name: urban-platform-komodo
+
+services:
+  komodo-mongo:
+    profiles: [komodo]
+    image: "${KOMODO_MONGO_IMAGE:?KOMODO_MONGO_IMAGE must be set to a digest-pinned image reference}"
+    command: ["--quiet", "--wiredTigerCacheSizeGB", "0.25"]
+    restart: unless-stopped
+    labels:
+      komodo.skip: "true"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "${KOMODO_DATABASE_USERNAME:?KOMODO_DATABASE_USERNAME must be set in the private environment file}"
+      MONGO_INITDB_ROOT_PASSWORD: "${KOMODO_DATABASE_PASSWORD:?KOMODO_DATABASE_PASSWORD must be set in the private environment file}"
+    volumes:
+      - komodo-mongo-data:/data/db
+      - komodo-mongo-config:/data/configdb
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok' | grep -qx 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  komodo-core:
+    profiles: [komodo]
+    image: "${KOMODO_CORE_IMAGE:?KOMODO_CORE_IMAGE must be set to a digest-pinned image reference}"
+    init: true
+    restart: unless-stopped
+    env_file:
+      - "${KOMODO_ENV_FILE:?KOMODO_ENV_FILE must be set to a private environment file}"
+    depends_on:
+      komodo-mongo:
+        condition: service_healthy
+    ports:
+      - "${KOMODO_BIND_ADDRESS:-127.0.0.1}:${KOMODO_CORE_PORT:-9120}:9120"
+    environment:
+      KOMODO_DATABASE_ADDRESS: komodo-mongo:27017
+      KOMODO_DATABASE_USERNAME: "${KOMODO_DATABASE_USERNAME:?KOMODO_DATABASE_USERNAME must be set in the private environment file}"
+      KOMODO_DATABASE_PASSWORD: "${KOMODO_DATABASE_PASSWORD:?KOMODO_DATABASE_PASSWORD must be set in the private environment file}"
+      KOMODO_HOST: "${KOMODO_HOST:?KOMODO_HOST must be set to the reviewed HTTPS URL}"
+      KOMODO_TITLE: "${KOMODO_TITLE:-Komodo}"
+      KOMODO_PERIPHERY_PUBLIC_KEY: file:/config/keys/periphery.pub
+      KOMODO_LOCAL_AUTH: "${KOMODO_LOCAL_AUTH:-true}"
+      KOMODO_INIT_ADMIN_USERNAME: "${KOMODO_INIT_ADMIN_USERNAME:?KOMODO_INIT_ADMIN_USERNAME must be set in the private environment file}"
+      KOMODO_INIT_ADMIN_PASSWORD: "${KOMODO_INIT_ADMIN_PASSWORD:?KOMODO_INIT_ADMIN_PASSWORD must be set in the private environment file}"
+      KOMODO_FIRST_SERVER_NAME: "${KOMODO_FIRST_SERVER_NAME:?KOMODO_FIRST_SERVER_NAME must be set in the private environment file}"
+      KOMODO_WEBHOOK_SECRET: "${KOMODO_WEBHOOK_SECRET:?KOMODO_WEBHOOK_SECRET must be set in the private environment file}"
+      KOMODO_JWT_SECRET: "${KOMODO_JWT_SECRET:?KOMODO_JWT_SECRET must be set in the private environment file}"
+      KOMODO_DISABLE_CONFIRM_DIALOG: "false"
+      KOMODO_DISABLE_USER_REGISTRATION: "true"
+      TZ: "${TZ:-Etc/UTC}"
+    volumes:
+      - komodo-keys:/config/keys
+      - "${KOMODO_BACKUPS_PATH:?KOMODO_BACKUPS_PATH must be set to an external backup directory}:/backups"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9120/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  komodo-periphery:
+    profiles: [komodo]
+    image: "${KOMODO_PERIPHERY_IMAGE:?KOMODO_PERIPHERY_IMAGE must be set to a digest-pinned image reference}"
+    init: true
+    restart: unless-stopped
+    env_file:
+      - "${KOMODO_ENV_FILE:?KOMODO_ENV_FILE must be set to a private environment file}"
+    depends_on:
+      komodo-core:
+        condition: service_started
+    environment:
+      PERIPHERY_CORE_ADDRESS: ws://komodo-core:9120
+      PERIPHERY_CONNECT_AS: "${KOMODO_FIRST_SERVER_NAME:?KOMODO_FIRST_SERVER_NAME must be set in the private environment file}"
+      PERIPHERY_ONBOARDING_KEY: "${PERIPHERY_ONBOARDING_KEY:?PERIPHERY_ONBOARDING_KEY must be set for first registration}"
+      PERIPHERY_CORE_PUBLIC_KEYS: file:/config/keys/core.pub
+      PERIPHERY_ROOT_DIRECTORY: "${PERIPHERY_ROOT_DIRECTORY:-/etc/komodo}"
+      PERIPHERY_DISABLE_TERMINALS: "${PERIPHERY_DISABLE_TERMINALS:-true}"
+      PERIPHERY_DISABLE_CONTAINER_TERMINALS: "${PERIPHERY_DISABLE_CONTAINER_TERMINALS:-true}"
+      PERIPHERY_INCLUDE_DISK_MOUNTS: /etc/hostname
+      TZ: "${TZ:-Etc/UTC}"
+    volumes:
+      - komodo-keys:/config/keys
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/proc
+      - "${PERIPHERY_ROOT_DIRECTORY:-/etc/komodo}:${PERIPHERY_ROOT_DIRECTORY:-/etc/komodo}"
+
+volumes:
+  komodo-mongo-data:
+  komodo-mongo-config:
+  komodo-keys:

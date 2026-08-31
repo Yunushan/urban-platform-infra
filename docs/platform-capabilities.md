@@ -24,6 +24,7 @@ on a constrained lab cluster unless you are testing that specific capability.
 | 11 | Temporal | Durable service workflows and long-running orchestration | Disabled |
 | 12 | Argo Workflows | Kubernetes-native batch, migration, and operational workflows | Disabled |
 | 13 | Service mesh | mTLS, traffic policy, retries, and mesh telemetry through Linkerd or Istio | Disabled |
+| 14 | Management tools | Rancher Community, Portainer CE, Headlamp, Devtron, FreeLens, k9s, Komodo, or Arcane | Disabled |
 
 ## Values Contract
 
@@ -67,7 +68,35 @@ platformCapabilities:
       enabled: false
   serviceMesh:
     enabled: false
+managementTools:
+  enabled: false
+  mode: plan
+  requireExplicitSelection: true
+  requirePinnedVersions: true
+  allowDockerSocket: false
+  rancher:
+    enabled: false
+  portainer:
+    enabled: false
+  headlamp:
+    enabled: false
+  devtron:
+    enabled: false
+  freelens:
+    enabled: false
+  k9s:
+    enabled: false
+  komodo:
+    enabled: false
+  arcane:
+    enabled: false
 ```
+
+Management tools use a separate guarded workflow documented in
+[`docs/management-tools.md`](management-tools.md). They do not become part of
+the application chart or `make install-operators`; this keeps cluster
+management, application workloads, and external Docker administration as
+separate operational boundaries.
 
 ## Helmfile Install Flags
 
@@ -108,6 +137,9 @@ For a small three-node lab with limited memory:
 - keep Temporal, service mesh, and full Kafka ecosystem components out of the
   lab unless the test specifically requires them
 - run `make validate` and a Helm dry run before enabling a production profile
+- run `make management-tools-plan MANAGEMENT_TOOLS_SELECTED=headlamp` before
+  selecting a management UI; keep FreeLens/k9s on the operator workstation
+  and keep Docker-socket tools off the RKE2 nodes
 
 ## Production Guidance
 
@@ -119,3 +151,5 @@ Before enabling a capability in production:
 - define backup and restore behavior
 - add policy controls for allowed images and namespaces
 - document ownership, alerts, and runbooks
+- for Rancher or Devtron, review whether a separate management cluster is the
+  correct placement before installing them beside application workloads

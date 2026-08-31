@@ -24,6 +24,7 @@ recommendedOrder:
 - temporal
 - argo-workflows
 - service-mesh
+- management-tools
 capabilities:
   minio:
     enabled: false
@@ -107,6 +108,45 @@ capabilities:
       istio:
         enabled: false
         role: enterprise-mesh-traffic-security-and-policy
+    labImpact: high
+  management-tools:
+    enabled: false
+    category: management
+    role: optional-cluster-and-docker-management-interfaces
+    defaultMode: explicit-reviewed-install
+    tools:
+      rancher:
+        enabled: false
+        role: community-cluster-management-plane
+        deploymentModel: in-cluster-helm
+      portainer:
+        enabled: false
+        role: community-container-and-kubernetes-ui
+        deploymentModel: in-cluster-helm
+      headlamp:
+        enabled: false
+        role: kubernetes-web-ui
+        deploymentModel: in-cluster-helm
+      devtron:
+        enabled: false
+        role: oss-gitops-and-delivery-platform
+        deploymentModel: in-cluster-helm
+      freelens:
+        enabled: false
+        role: desktop-kubernetes-client
+        deploymentModel: desktop
+      k9s:
+        enabled: false
+        role: terminal-kubernetes-client
+        deploymentModel: cli
+      komodo:
+        enabled: false
+        role: external-docker-management-plane
+        deploymentModel: external-docker-compose
+      arcane:
+        enabled: false
+        role: external-docker-management-ui
+        deploymentModel: external-docker-compose
     labImpact: high
 validation:
   requiredBeforeEnable:

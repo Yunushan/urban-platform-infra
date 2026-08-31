@@ -16,6 +16,8 @@ PYTHON = sys.executable
 CHART = ROOT / "helm/urban-platform-infra"
 BASE_VALUES = CHART / "values.yaml"
 PRODUCTION_VALUES = CHART / "values-production.yaml"
+COMMAND_TIMEOUT_SECONDS = 300
+HELM_RENDER_TIMEOUT_SECONDS = 180
 
 
 @dataclass(frozen=True)
@@ -26,8 +28,25 @@ class Check:
     detail: str
 
 
-def command_result(command: list[str], *, cwd: Path = ROOT) -> tuple[bool, str]:
-    completed = subprocess.run(command, cwd=cwd, text=True, capture_output=True, check=False)
+def command_result(
+    command: list[str],
+    *,
+    cwd: Path = ROOT,
+    timeout_seconds: int = COMMAND_TIMEOUT_SECONDS,
+) -> tuple[bool, str]:
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"command timed out after {timeout_seconds}s"
+    except OSError:
+        return False, "command could not be executed"
     output = (completed.stdout + completed.stderr).strip().splitlines()
     detail = output[-1] if output else f"exit code {completed.returncode}"
     return completed.returncode == 0, detail
@@ -74,8 +93,26 @@ def helm_render_check() -> Check:
             "--api-versions",
             "cert-manager.io/v1/ClusterIssuer",
         ]
-        with rendered.open("w", encoding="utf-8") as handle:
-            completed = subprocess.run(render_command, cwd=ROOT, stdout=handle, stderr=subprocess.PIPE, text=True, check=False)
+        try:
+            with rendered.open("w", encoding="utf-8") as handle:
+                completed = subprocess.run(
+                    render_command,
+                    cwd=ROOT,
+                    stdout=handle,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=False,
+                    timeout=HELM_RENDER_TIMEOUT_SECONDS,
+                )
+        except subprocess.TimeoutExpired:
+            return Check(
+                "Strict Helm render and workload policy",
+                20,
+                False,
+                f"helm template timed out after {HELM_RENDER_TIMEOUT_SECONDS}s",
+            )
+        except OSError:
+            return Check("Strict Helm render and workload policy", 20, False, "helm could not be executed")
         if completed.returncode != 0:
             detail = completed.stderr.strip().splitlines()[-1] if completed.stderr.strip() else "helm template failed"
             return Check("Strict Helm render and workload policy", 20, False, detail)
@@ -98,6 +135,7 @@ def documentation_check() -> Check:
         "docs/kafka-profiles.md",
         "docs/database-topologies.md",
         "docs/tool-inventory.md",
+        "docs/management-tools.md",
         "docs/load-testing.md",
         "docs/version-management.md",
         "docs/production-readiness.md",
@@ -120,6 +158,7 @@ def documentation_check() -> Check:
         "tests/policy/production_evidence_gate_test.py",
         "tests/policy/production_private_overlay_test.py",
         "tests/policy/tool_inventory_test.py",
+        "tests/policy/management_tools_test.py",
         "tests/policy/version_policy_test.py",
         "tests/policy/release_evidence_test.py",
         "tests/policy/kafka_clickhouse_readiness_test.py",
@@ -161,6 +200,15 @@ def documentation_check() -> Check:
     ):
         if token not in evidence_example:
             return Check("Operations and release evidence coverage", 10, False, "private evidence example does not enforce the signed version 4 live contract")
+    for pdb_name in (
+        "- clickhouse-connect-connect",
+        "- kafka-kafka",
+        "- redis",
+        "- webserver-nginx",
+        "- zabbix-agent2",
+    ):
+        if pdb_name not in evidence_example:
+            return Check("Operations and release evidence coverage", 10, False, "private evidence example does not enumerate the production PDB inventory")
     trust_example = (ROOT / "config/production-evidence-trust.example.yaml").read_text(encoding="utf-8")
     for token in ("version: 2", "provider: cosign-key-bundle", "publicKey:", "bundle:", "trustedApprovers:"):
         if token not in trust_example:

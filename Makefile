@@ -36,7 +36,7 @@ endif
 endif
 endif
 # Check mutating production goals while parsing, before their prerequisites run.
-PRODUCTION_MUTATING_GOALS := bootstrap install-cluster install-operators operator-kubeconfig ensure-storageclass ensure-namespace recover-helm-release configure-edge-ports install-local-path-storage cluster-repair deploy
+PRODUCTION_MUTATING_GOALS := bootstrap install-cluster install-operators operator-kubeconfig ensure-storageclass ensure-namespace recover-helm-release configure-edge-ports install-local-path-storage cluster-repair management-tools-install management-tools-compose-up deploy
 ifneq ($(filter $(PRODUCTION_MUTATING_GOALS),$(MAKECMDGOALS)),)
 ifeq ($(DEPLOY_PROFILE),production)
 ifneq ($(CONFIRM_PROD),true)
@@ -595,6 +595,21 @@ LOAD_TEST_IO_WRITE_IOPS ?=
 LOAD_TEST_OUTPUT ?= reports/load-test.md
 LOAD_TEST_EVIDENCE ?=
 LOAD_TEST_EXECUTE ?= false
+MANAGEMENT_TOOLS_CONFIG ?= config/management-tools.yaml
+MANAGEMENT_TOOLS_VALUES ?= $(VALUES)
+MANAGEMENT_TOOLS_SELECTED ?=
+MANAGEMENT_TOOLS_VALUES_DIR ?=
+MANAGEMENT_TOOLS_CHART_VERSIONS ?=
+MANAGEMENT_TOOLS_KUBECONFIG ?= $(OPERATOR_KUBECONFIG)
+MANAGEMENT_TOOLS_HELM ?= $(HELM)
+MANAGEMENT_TOOLS_TIMEOUT ?= 20m
+MANAGEMENT_TOOLS_EXECUTE ?= false
+MANAGEMENT_TOOLS_CONFIRM ?= false
+MANAGEMENT_TOOLS_OUTPUT ?= reports/management-tools-plan.md
+MANAGEMENT_TOOLS_COMPOSE_OUTPUT ?= reports/management-tools-compose-plan.md
+MANAGEMENT_TOOLS_WORKSTATION_OUTPUT ?= reports/management-tools-workstation.md
+MANAGEMENT_TOOLS_ENV_FILE ?=
+MANAGEMENT_TOOLS_CONTAINER_TOOL ?= docker
 TOOL_INVENTORY_CONFIG ?= config/tooling.yaml
 TOOL_INVENTORY_OUTPUT ?= reports/tool-inventory.md
 TOOL_INVENTORY_SCOPE ?= all
@@ -805,7 +820,7 @@ DISASTER_RECOVERY_POST_DRILL_REVIEW ?= false
 DISASTER_RECOVERY_OUTPUT ?= reports/disaster-recovery-plan.md
 DISASTER_RECOVERY_VALUES ?= reports/disaster-recovery-values.yaml
 
-.PHONY: help setup-local doctor-local ci-contract private-data-audit operator-ready tool-inventory version-policy-check version-update-plan version-update-request version-update-apply validate production-readiness kafka-clickhouse-readiness kafka-clickhouse-reconcile production-readiness-gate production-evidence-gate image-policy image-promotion-plan registry-promotion-plan runtime-hardening-plan gitops-delivery-plan progressive-delivery-plan scaling-policy-plan network-connectivity-plan access-governance-plan compliance-evidence-plan incident-response-plan change-management-plan cutover-gate-plan smoke-test-plan load-test-runners load-test-plan load-test release-runbook-plan cluster-upgrade-plan disaster-recovery-plan lint configure backup-plan observability-plan cluster-doctor cluster-repair lab-deploy-plan capacity-preflight image-cache-plan database-migration-plan edge-migration-plan environment-profile-plan import-check import-plan import-preflight import-recovery-plan import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig configure-edge-ports install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace recover-helm-release production-private-preflight deploy deploy-auto deploy-strimzi-kafka deploy-dry-run package-chart release-evidence verify-release-evidence status observability-status docker-up docker-down docker-status docker-standalone-config docker-standalone-up docker-standalone-down docker-standalone-status policy clean
+.PHONY: help setup-local doctor-local ci-contract private-data-audit operator-ready tool-inventory version-policy-check version-update-plan version-update-request version-update-apply validate production-readiness kafka-clickhouse-readiness kafka-clickhouse-reconcile production-readiness-gate production-evidence-gate image-policy image-promotion-plan registry-promotion-plan runtime-hardening-plan gitops-delivery-plan progressive-delivery-plan scaling-policy-plan network-connectivity-plan access-governance-plan compliance-evidence-plan incident-response-plan change-management-plan cutover-gate-plan smoke-test-plan load-test-runners load-test-plan load-test management-tools-list management-tools-plan management-tools-install management-tools-compose-plan management-tools-compose-up management-tools-workstation-check release-runbook-plan cluster-upgrade-plan disaster-recovery-plan lint configure backup-plan observability-plan cluster-doctor cluster-repair lab-deploy-plan capacity-preflight image-cache-plan database-migration-plan edge-migration-plan environment-profile-plan import-check import-plan import-preflight import-recovery-plan import-migrate import-auto python-deps ansible-collections preflight bootstrap-check bootstrap install-cluster-check install-cluster operator-kubeconfig configure-edge-ports install-helm install-helmfile install-local-path-storage ensure-storageclass install-operators wait-operator-crds ensure-namespace recover-helm-release production-private-preflight deploy deploy-auto deploy-strimzi-kafka deploy-dry-run package-chart release-evidence verify-release-evidence status observability-status docker-up docker-down docker-status docker-standalone-config docker-standalone-up docker-standalone-down docker-standalone-status policy clean
 
 HELM_DEPLOY_SET_ARGS = \
 	--set namespace.create=false \
@@ -1019,6 +1034,33 @@ load-test: ## Execute an explicitly requested load test and write measured evide
 	@if [ "$(LOAD_TEST_CONFIRM)" != "true" ]; then echo "Refusing to generate traffic. Set LOAD_TEST_CONFIRM=true after reviewing the plan for the $(LOAD_TEST_ENV) environment."; exit 2; fi
 	mkdir -p reports
 	$(PYTHON) scripts/load_test.py --config "$(LOAD_TEST_CONFIG)" --profile "$(LOAD_TEST_PROFILE)" --environment "$(LOAD_TEST_ENV)" --target-url "$(LOAD_TEST_TARGET_URL)" --namespace "$(LOAD_TEST_NAMESPACE)" --selector "$(LOAD_TEST_SELECTOR)" --method "$(LOAD_TEST_METHOD)" --path "$(LOAD_TEST_PATH)" --duration "$(LOAD_TEST_DURATION)" --concurrency "$(LOAD_TEST_CONCURRENCY)" --rate "$(LOAD_TEST_RATE)" --max-requests "$(LOAD_TEST_MAX_REQUESTS)" --timeout "$(LOAD_TEST_TIMEOUT)" --sample-interval "$(LOAD_TEST_SAMPLE_INTERVAL)" --runner "$(LOAD_TEST_RUNNER)" --io-enabled "$(LOAD_TEST_IO_ENABLED)" --cpu-limit "$(LOAD_TEST_CPU_LIMIT)" --memory-limit "$(LOAD_TEST_MEMORY_LIMIT)" --max-read-bps "$(LOAD_TEST_IO_READ_BPS)" --max-write-bps "$(LOAD_TEST_IO_WRITE_BPS)" --max-read-iops "$(LOAD_TEST_IO_READ_IOPS)" --max-write-iops "$(LOAD_TEST_IO_WRITE_IOPS)" --evidence "$(LOAD_TEST_EVIDENCE)" --output "$(LOAD_TEST_OUTPUT)" --execute $(if $(filter true,$(IMPORT_REDACT)),--redact-sensitive,)
+
+management-tools-list: ## List optional Rancher, Portainer CE, Headlamp, Devtron, FreeLens, k9s, Komodo, and Arcane support.
+	$(PYTHON) scripts/management_tools.py --config "$(MANAGEMENT_TOOLS_CONFIG)" list
+
+management-tools-plan: ## Generate a public-safe management-tool plan without changing a cluster or host.
+	mkdir -p reports
+	$(PYTHON) scripts/management_tools.py --config "$(MANAGEMENT_TOOLS_CONFIG)" plan --values "$(MANAGEMENT_TOOLS_VALUES)" --selected "$(MANAGEMENT_TOOLS_SELECTED)" --output "$(MANAGEMENT_TOOLS_OUTPUT)"
+
+management-tools-install: ## Install explicitly selected in-cluster management tools with private pinned Helm values.
+	$(call require_prod_confirmation)
+	@if [ "$(MANAGEMENT_TOOLS_EXECUTE)" != "true" ]; then echo "Refusing management-tool Helm mutation. Set MANAGEMENT_TOOLS_EXECUTE=true after reviewing management-tools-plan."; exit 2; fi
+	@if [ "$(MANAGEMENT_TOOLS_CONFIRM)" != "true" ]; then echo "Refusing management-tool Helm mutation. Set MANAGEMENT_TOOLS_CONFIRM=true after reviewing the selected tools and private values."; exit 2; fi
+	$(PYTHON) scripts/management_tools.py --config "$(MANAGEMENT_TOOLS_CONFIG)" install --values "$(MANAGEMENT_TOOLS_VALUES)" --selected "$(MANAGEMENT_TOOLS_SELECTED)" --values-dir "$(MANAGEMENT_TOOLS_VALUES_DIR)" --chart-versions "$(MANAGEMENT_TOOLS_CHART_VERSIONS)" --helm "$(MANAGEMENT_TOOLS_HELM)" --kubeconfig "$(MANAGEMENT_TOOLS_KUBECONFIG)" --timeout "$(MANAGEMENT_TOOLS_TIMEOUT)" --execute --confirm
+
+management-tools-compose-plan: ## Generate a public-safe plan for external Komodo or Arcane Compose deployment.
+	mkdir -p reports
+	$(PYTHON) scripts/management_tools.py --config "$(MANAGEMENT_TOOLS_CONFIG)" compose --values "$(MANAGEMENT_TOOLS_VALUES)" --selected "$(MANAGEMENT_TOOLS_SELECTED)" $(if $(MANAGEMENT_TOOLS_ENV_FILE),--env-file "$(MANAGEMENT_TOOLS_ENV_FILE)",) --output "$(MANAGEMENT_TOOLS_COMPOSE_OUTPUT)"
+
+management-tools-compose-up: ## Start explicitly selected Komodo or Arcane profiles on an external Docker host.
+	$(call require_prod_confirmation)
+	@if [ "$(MANAGEMENT_TOOLS_EXECUTE)" != "true" ]; then echo "Refusing external management-tool startup. Set MANAGEMENT_TOOLS_EXECUTE=true after reviewing management-tools-compose-plan."; exit 2; fi
+	@if [ "$(MANAGEMENT_TOOLS_CONFIRM)" != "true" ]; then echo "Refusing external management-tool startup. Set MANAGEMENT_TOOLS_CONFIRM=true after reviewing the private environment file and host."; exit 2; fi
+	$(PYTHON) scripts/management_tools.py --config "$(MANAGEMENT_TOOLS_CONFIG)" compose --values "$(MANAGEMENT_TOOLS_VALUES)" --selected "$(MANAGEMENT_TOOLS_SELECTED)" --container-tool "$(MANAGEMENT_TOOLS_CONTAINER_TOOL)" $(if $(MANAGEMENT_TOOLS_ENV_FILE),--env-file "$(MANAGEMENT_TOOLS_ENV_FILE)",) --output "$(MANAGEMENT_TOOLS_COMPOSE_OUTPUT)" --execute --confirm
+
+management-tools-workstation-check: ## Verify exact FreeLens or k9s versions without changing the workstation or cluster.
+	mkdir -p reports
+	$(PYTHON) scripts/management_tools.py --config "$(MANAGEMENT_TOOLS_CONFIG)" workstation --values "$(MANAGEMENT_TOOLS_VALUES)" --selected "$(MANAGEMENT_TOOLS_SELECTED)" --output "$(MANAGEMENT_TOOLS_WORKSTATION_OUTPUT)"
 
 tool-inventory: ## Check mandatory and optional tools for the selected execution scope.
 	mkdir -p reports
@@ -1273,7 +1315,9 @@ package-chart: install-helm ## Package the Helm chart into dist/.
 	$(HELM) lint helm/urban-platform-infra
 	$(HELM) package helm/urban-platform-infra -d dist
 
-release-evidence: package-chart ## Generate rendered manifest, SPDX SBOM, and checksums for a release.
+release-evidence: ## Generate rendered manifest, SPDX SBOM, and checksums for a release.
+	@test -n "$(RELEASE_TAG)" || (echo "RELEASE_TAG is required and must match Chart.yaml version." >&2; exit 2)
+	$(MAKE) package-chart
 	$(HELM) template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f $(VALUES) > dist/rendered.yaml
 	$(HELM) template $(PROJECT) helm/urban-platform-infra --namespace $(NAMESPACE) -f helm/urban-platform-infra/values.yaml -f helm/urban-platform-infra/values-production.yaml --api-versions kafka.strimzi.io/v1/Kafka --api-versions kafka.strimzi.io/v1/KafkaNodePool --api-versions kafka.strimzi.io/v1/KafkaTopic --api-versions kafka.strimzi.io/v1/KafkaUser --api-versions kafka.strimzi.io/v1/KafkaConnect --api-versions kafka.strimzi.io/v1/KafkaConnector --api-versions monitoring.coreos.com/v1/PodMonitor --api-versions cert-manager.io/v1/Certificate --api-versions cert-manager.io/v1/ClusterIssuer > dist/production-rendered.yaml
 	$(PYTHON) tests/policy/basic_policy.py dist/production-rendered.yaml

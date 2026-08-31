@@ -135,6 +135,7 @@ jobs:
           python3 tests/policy/release_evidence_test.py
           python3 tests/policy/kafka_clickhouse_readiness_test.py
           python3 tests/policy/kafka_clickhouse_reconcile_test.py
+          python3 tests/policy/management_tools_test.py
       - name: Check validation tool inventory
         run: python3 scripts/tools/tool_inventory.py --config config/tooling.yaml --scope validation --no-fail --output reports/tool-inventory.md
       - name: Validate approval-only version policy

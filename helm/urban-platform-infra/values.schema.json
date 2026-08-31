@@ -1511,6 +1511,38 @@
         }
       }
     },
+    "managementTools": {
+      "type": "object",
+      "description": "Optional operator and platform-management tools; installed outside the core application release",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "mode": { "type": "string", "enum": ["plan", "reviewed"] },
+        "requireExplicitSelection": { "type": "boolean" },
+        "requirePinnedVersions": { "type": "boolean" },
+        "requireDigestPins": { "type": "boolean" },
+        "allowMutableTags": { "type": "boolean" },
+        "allowDockerSocket": { "type": "boolean" },
+        "requirePrivateEnvironmentFile": { "type": "boolean" },
+        "inCluster": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tlsRequired": { "type": "boolean" },
+            "valuesDirectory": { "type": "string" },
+            "defaultStorageClass": { "type": "string" }
+          }
+        },
+        "rancher": { "$ref": "#/$defs/managementToolHelm" },
+        "portainer": { "$ref": "#/$defs/managementToolHelm" },
+        "headlamp": { "$ref": "#/$defs/managementToolHelm" },
+        "devtron": { "$ref": "#/$defs/managementToolHelm" },
+        "freelens": { "$ref": "#/$defs/managementToolDesktop" },
+        "k9s": { "$ref": "#/$defs/managementToolDesktop" },
+        "komodo": { "$ref": "#/$defs/managementToolCompose" },
+        "arcane": { "$ref": "#/$defs/managementToolCompose" }
+      }
+    },
     "zabbixAgent": {
       "type": "object"
     }
@@ -1537,6 +1569,62 @@
     "workloads"
   ],
   "$defs": {
+    "managementToolHelm": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "chartVersion": { "type": "string" },
+        "valuesFile": { "type": "string" },
+        "namespace": { "type": "string" },
+        "releaseName": { "type": "string" },
+        "host": { "type": "string" },
+        "tlsSecretName": { "type": "string" },
+        "storageClass": { "type": "string" },
+        "dedicatedManagementCluster": { "type": "boolean" },
+        "requiredValueChecks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": { "type": "string" },
+              "operator": { "type": "string", "enum": ["equals", "not_equals", "nonempty", "one_of"] },
+              "expected": {}
+            },
+            "required": ["path", "operator"]
+          }
+        }
+      }
+    },
+    "managementToolDesktop": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "version": { "type": "string" },
+        "kubeconfigContext": { "type": "string" },
+        "command": { "type": "string" },
+        "versionArgs": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "managementToolCompose": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "composeProfile": { "type": "string" },
+        "externalHost": { "type": "string" },
+        "environmentFile": { "type": "string" },
+        "coreImage": { "type": "string" },
+        "peripheryImage": { "type": "string" },
+        "mongoImage": { "type": "string" },
+        "peripheryRootDirectory": { "type": "string" },
+        "image": { "type": "string" },
+        "projectsDirectory": { "type": "string" },
+        "buildsDirectory": { "type": "string" }
+      }
+    },
     "imagePromotionController": {
       "type": "object",
       "additionalProperties": false,

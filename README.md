@@ -36,6 +36,7 @@
   <a href="docs/environment-profiles.md">Environment Profiles</a> •
   <a href="docs/storage-tiers.md">Storage Tiers</a> •
   <a href="docs/platform-capabilities.md">Capabilities</a> •
+  <a href="docs/management-tools.md">Management Tools</a> •
   <a href="docs/kafka-profiles.md">Kafka Profiles</a> •
   <a href="docs/backup-restore.md">Backup/Restore</a> •
   <a href="docs/local-toolchain.md">Local Toolchain</a> •
@@ -128,6 +129,8 @@ For deploying a previously packaged application archive onto three local RKE2 no
 For local workstation setup and validation, run `make operator-ready`. It prepares the local Python toolchain, writes public-safe readiness and capacity reports, checks CI workflow contracts, audits private-data exposure, and runs validation/lint without exposing private operator data. See [`docs/operator-workflows.md`](docs/operator-workflows.md) and [`docs/local-toolchain.md`](docs/local-toolchain.md).
 
 Before deployment or import, check the host contract with `make tool-inventory TOOL_INVENTORY_SCOPE=deployment`. For capacity evidence, generate a no-traffic plan with `make load-test-plan LOAD_TEST_RUNNER=k6 LOAD_TEST_PROFILE=smoke IMPORT_REDACT=true`, then run an explicitly approved bounded profile with `make load-test LOAD_TEST_RUNNER=k6 LOAD_TEST_EXECUTE=true LOAD_TEST_CONFIRM=true`. See [`docs/tool-inventory.md`](docs/tool-inventory.md) and [`docs/load-testing.md`](docs/load-testing.md).
+
+Optional management tooling is a separate, explicit workflow: `make management-tools-list`, `make management-tools-plan MANAGEMENT_TOOLS_SELECTED=headlamp`, and `make management-tools-workstation-check MANAGEMENT_TOOLS_SELECTED=freelens,k9s` are read-only. Rancher Community, Portainer CE, Headlamp, and Devtron use private pinned Helm values; FreeLens and k9s remain workstation tools; Komodo and Arcane use external Docker Compose profiles. None is enabled by `make deploy` or CI. See [`docs/management-tools.md`](docs/management-tools.md).
 
 Existing Compose project compatibility check:
 
@@ -428,7 +431,7 @@ Supported database profiles are defined in [`config/databases.catalog.yaml`](con
 25. Run `make cutover-gate-plan` before production traffic switch. Keep DNS, TLS, smoke-test endpoints, tickets, approvals, and rollback evidence in private systems; the public report is a readiness gate, not a traffic switch.
 26. Run `make release-runbook-plan RELEASE_RUNBOOK_PROFILE=production-release IMPORT_REDACT=true` before production promotion. Keep private approval indexes, change records, rollback owners, and evidence attachments outside public reports.
 27. Run `make cluster-upgrade-plan CLUSTER_UPGRADE_PROFILE=production-upgrade IMPORT_REDACT=true` before changing RKE2 or Kubernetes versions. Keep node health, etcd snapshot, release notes, and owner approvals in private systems.
-28. Release only signed/evidenced chart artifacts with `make release-evidence`, SHA-256 checksums, SBOM metadata, and GitHub artifact attestations.
+28. Release only signed/evidenced chart artifacts with `make release-evidence RELEASE_TAG=v0.1.0`, SHA-256 checksums, SBOM metadata, and GitHub artifact attestations.
 29. Keep automatic version updates disabled. Run `make version-policy-check`, create a manual `make version-update-request`, and apply only after approval, CI, rollback, and lifecycle evidence are complete.
 
 ## License

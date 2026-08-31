@@ -123,7 +123,11 @@ liveCluster:
   expectedPostgresClusters: 18
   expectedKafkaVersion: 4.3.0
   # Include every chart-managed and operator-managed PDB in the signed list.
+  # Strimzi 1.1.0 adds kafka-kafka for the Kafka node pool and
+  # clickhouse-connect-connect for the three-worker Kafka Connect cluster.
   expectedPodDisruptionBudgets:
+    - clickhouse-connect-connect
+    - kafka-kafka
     - redis
     - webserver-nginx
     - zabbix-agent2

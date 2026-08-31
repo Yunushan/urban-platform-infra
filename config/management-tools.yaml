@@ -1,0 +1,165 @@
+version: 1
+description: Optional operator and platform-management tool contract.
+enabledByDefault: false
+defaultMode: plan
+selection:
+  requireExplicitSelection: true
+  requirePinnedVersions: true
+  requireDigestPins: true
+  allowMutableTags: false
+  allowDockerSocket: false
+  requirePrivateValuesForHelm: true
+  requirePrivateEnvironmentFile: true
+  requireTlsForInCluster: true
+  productionRequiresPrivateApproval: true
+updatePolicy:
+  mode: approval-only
+  autoUpdate: false
+  requirePullRequest: true
+  requireRollbackPlan: true
+  requireReleaseEvidence: true
+tools:
+  rancher:
+    displayName: Rancher Manager Community
+    deploymentModel: in-cluster-helm
+    repoName: rancher-stable
+    repoUrl: https://releases.rancher.com/server-charts/stable
+    chart: rancher-stable/rancher
+    releaseName: rancher
+    namespace: cattle-system
+    helmMajor: 3
+    chartVersion: ''
+    valuesRequired: true
+    tlsRequired: true
+    dedicatedManagementClusterRecommended: true
+    requiredValueChecks:
+    - path: hostname
+      operator: nonempty
+    - path: ingress.tls.source
+      operator: one_of
+      expected:
+      - rancher
+      - letsEncrypt
+      - secret
+    versionSource: https://ranchermanager.docs.rancher.com/getting-started/installation-and-upgrade/install-upgrade-on-a-kubernetes-cluster/
+    notes: Rancher is a cluster-management plane; use a dedicated management cluster for production when possible.
+  portainer:
+    displayName: Portainer CE
+    deploymentModel: in-cluster-helm
+    repoName: portainer
+    repoUrl: https://portainer.github.io/k8s/
+    chart: portainer/portainer
+    releaseName: portainer
+    namespace: portainer
+    chartVersion: ''
+    valuesRequired: true
+    tlsRequired: true
+    storageClassRequired: true
+    requiredValueChecks:
+    - path: enterpriseEdition.enabled
+      operator: equals
+      expected: false
+    - path: persistence.enabled
+      operator: equals
+      expected: true
+    versionSource: https://docs.portainer.io/start/install-ce/server/kubernetes/baremetal
+  headlamp:
+    displayName: Headlamp
+    deploymentModel: in-cluster-helm
+    repoName: headlamp
+    repoUrl: https://kubernetes-sigs.github.io/headlamp/
+    chart: headlamp/headlamp
+    releaseName: headlamp
+    namespace: headlamp
+    chartVersion: ''
+    valuesRequired: true
+    tlsRequired: true
+    leastPrivilegeRbacRequired: true
+    requiredValueChecks:
+    - path: config.unsafeUseServiceAccountToken
+      operator: equals
+      expected: false
+    - path: clusterRoleBinding.clusterRoleName
+      operator: not_equals
+      expected: cluster-admin
+    versionSource: https://headlamp.dev/docs/latest/installation/
+  devtron:
+    displayName: Devtron OSS
+    deploymentModel: in-cluster-helm
+    repoName: devtron
+    repoUrl: https://helm.devtron.ai
+    chart: devtron/devtron-operator
+    releaseName: devtron-operator
+    namespace: devtroncd
+    helmMajor: 3
+    minHelmVersion: 3.8.0
+    chartVersion: ''
+    valuesRequired: true
+    tlsRequired: true
+    durableStorageRequired: true
+    externalSecretsRequired: true
+    versionSource: https://docs.devtron.ai/docs/setup/install
+    notes: Devtron has a material resource footprint; size storage, ingress, and identity before enabling it.
+  freelens:
+    displayName: FreeLens
+    deploymentModel: desktop
+    command: freelens
+    versionArgs:
+    - --version
+    version: 1.10.3
+    versionSource: https://github.com/freelensapp/freelens/releases
+    clusterInstall: false
+    notes: Install on an operator workstation and import a reviewed kubeconfig; no cluster workload is created.
+  k9s:
+    displayName: k9s
+    deploymentModel: cli
+    command: k9s
+    versionArgs:
+    - version
+    version: 0.51.0
+    versionSource: https://github.com/derailed/k9s/releases
+    clusterInstall: false
+    notes: Install on an operator workstation; use RBAC-scoped kubeconfig contexts.
+  komodo:
+    displayName: Komodo Core and Periphery
+    deploymentModel: external-docker-compose
+    composeFile: compose/management-tools-komodo.yml
+    composeProfile: komodo
+    imageEnv:
+    - KOMODO_MONGO_IMAGE
+    - KOMODO_CORE_IMAGE
+    - KOMODO_PERIPHERY_IMAGE
+    requiredSecretEnv:
+    - KOMODO_DATABASE_PASSWORD
+    - KOMODO_INIT_ADMIN_PASSWORD
+    - KOMODO_WEBHOOK_SECRET
+    - KOMODO_JWT_SECRET
+    requiredEnv:
+    - KOMODO_DATABASE_USERNAME
+    - KOMODO_HOST
+    - KOMODO_INIT_ADMIN_USERNAME
+    - KOMODO_FIRST_SERVER_NAME
+    - KOMODO_BACKUPS_PATH
+    - PERIPHERY_ONBOARDING_KEY
+    requiresDockerSocket: true
+    externalHostRequired: true
+    versionSource: https://komo.do/docs/setup
+    notes: Core stores management state in MongoDB; each managed server needs a Periphery agent and Docker access.
+  arcane:
+    displayName: Arcane
+    deploymentModel: external-docker-compose
+    composeFile: compose/management-tools-arcane.yml
+    composeProfile: arcane
+    imageEnv:
+    - ARCANE_IMAGE
+    requiredSecretEnv:
+    - ARCANE_ENCRYPTION_KEY
+    - ARCANE_JWT_SECRET
+    requiredEnv:
+    - ARCANE_PROJECTS_DIRECTORY
+    - ARCANE_BUILDS_DIRECTORY
+    requiresDockerSocket: true
+    externalHostRequired: true
+    version: 2.8.1
+    versionSource: https://github.com/getarcaneapp/arcane/releases
+    notes: Arcane manages Docker workloads and is intentionally kept outside the Kubernetes workload cluster.

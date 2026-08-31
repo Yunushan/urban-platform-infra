@@ -228,7 +228,7 @@ REQUIRED = [
     'config/secret-provider-adapters.yaml',
     'config/storage-tiers.yaml',
     'config/backup-policy.yaml',
-    'config/platform-capabilities.yaml',
+    'config/platform-capabilities.yaml', 'config/management-tools.yaml',
     'config/import-profiles.yaml',
     'config/lab-capacity.yaml',
     'config/image-cache.yaml',
@@ -281,7 +281,7 @@ REQUIRED = [
     'scripts/database_migration_controller.py',
     'scripts/edge_migration_plan.py',
     'scripts/environment_profile_plan.py',
-    'scripts/load_test.py', 'scripts/version_policy.py', 'scripts/tools/tool_inventory.py',
+    'scripts/load_test.py', 'scripts/version_policy.py', 'scripts/management_tools.py', 'scripts/tools/tool_inventory.py',
     'scripts/production_readiness_score.py',
     'scripts/validate_production_profile.py',
     'scripts/validate_production_private_overlay.py',
@@ -294,7 +294,7 @@ REQUIRED = [
     'scripts/tools/install-local-path-storage.sh', 'scripts/tools/recover-helm-release.sh',
     'scripts/tools/ensure-kubeconfig.sh', 'scripts/tools/standalone-docker-config.sh',
     'helm/urban-platform-infra/templates/release-identity.yaml',
-    'tests/policy/basic_policy.py', 'tests/policy/tool_inventory_test.py', 'tests/policy/release_evidence_test.py', 'tests/policy/production_private_overlay_test.py', 'docs/hld.md', 'docs/lld.md',
+    'tests/policy/basic_policy.py', 'tests/policy/tool_inventory_test.py', 'tests/policy/management_tools_test.py', 'tests/policy/release_evidence_test.py', 'tests/policy/production_private_overlay_test.py', 'docs/hld.md', 'docs/lld.md',
     'docs/local-toolchain.md', 'docs/tool-inventory.md', 'docs/load-testing.md', 'docs/version-management.md', 'docs/database-topologies.md', 'docs/ci-validation.md',
     'docs/operator-workflows.md',
     'docs/bootstrap-safety.md', 'docs/secrets-management.md',
@@ -326,7 +326,8 @@ REQUIRED = [
     'docs/edge-migration.md',
     'docs/environment-profiles.md',
     'docs/backup-restore.md',
-    'docs/platform-capabilities.md',
+    'docs/platform-capabilities.md', 'docs/management-tools.md',
+    'compose/management-tools-komodo.yml', 'compose/management-tools-arcane.yml',
     'docs/kafka-profiles.md',
     'helm/urban-platform-infra/topologies/single-node.yaml',
     'helm/urban-platform-infra/topologies/two-node-lab.yaml',
@@ -1090,6 +1091,7 @@ for release_token in [
     'python3 tests/policy/release_evidence_test.py',
     'python3 tests/policy/kafka_clickhouse_readiness_test.py',
     'python3 tests/policy/kafka_clickhouse_reconcile_test.py',
+    'python3 tests/policy/management_tools_test.py',
     'python3 scripts/production_readiness_score.py',
     'python3 scripts/version_policy.py check --config config/version-policy.yaml',
 ]:
@@ -1117,6 +1119,7 @@ for ci_token in [
     'scripts/production_readiness_score.py',
     'production-contract',
     'production_readiness_score.py',
+    'python3 tests/policy/management_tools_test.py',
     "exit-code: '1'",
 ]:
     if ci_token not in ci_workflow_text:
@@ -1184,6 +1187,7 @@ for gitlab_token in [
     'release-evidence-verification.md',
     'dist/production-rendered.yaml',
     'python3 tests/policy/production_render.py dist/production-rendered.yaml',
+    'python3 tests/policy/management_tools_test.py',
 ]:
     if gitlab_token not in gitlab_ci_text:
         errors.append(f'GitLab CI missing release integrity control: {gitlab_token}')
@@ -1590,6 +1594,7 @@ for unsafe_taskfile_token in [
         errors.append(f'Taskfile deploy must not use an unpinned production Pod Security version: {unsafe_taskfile_token}')
 for taskfile_release_token in [
     'release-evidence:',
+    'RELEASE_TAG is required and must match Chart.yaml version.',
     'dist/production-rendered.yaml',
     '--api-versions kafka.strimzi.io/v1/Kafka',
     'python3 tests/policy/production_render.py dist/production-rendered.yaml',
@@ -1599,6 +1604,8 @@ for taskfile_release_token in [
 ]:
     if taskfile_release_token not in taskfile_text:
         errors.append(f'Taskfile release evidence is missing production integrity control: {taskfile_release_token}')
+if 'RELEASE_TAG is required and must match Chart.yaml version.' not in makefile_text:
+    errors.append('Makefile release evidence must fail before packaging when RELEASE_TAG is missing')
 for production_evidence_token in [
     'PRODUCTION_EVIDENCE_TRUST_POLICY ?=',
     '--trust-policy "$(PRODUCTION_EVIDENCE_TRUST_POLICY)"',
@@ -1636,6 +1643,16 @@ for production_evidence_gate_token in [
 ]:
     if production_evidence_gate_token not in production_evidence_gate_text:
         errors.append(f'Production evidence gate missing anti-replay or runtime binding: {production_evidence_gate_token}')
+production_evidence_example_text = (ROOT / 'config/production-evidence.example.yaml').read_text(encoding='utf-8')
+for production_pdb_token in [
+    '- clickhouse-connect-connect',
+    '- kafka-kafka',
+    '- redis',
+    '- webserver-nginx',
+    '- zabbix-agent2',
+]:
+    if production_pdb_token not in production_evidence_example_text:
+        errors.append(f'Production evidence example is missing expected PDB inventory entry: {production_pdb_token}')
 release_identity_template_text = (ROOT / 'helm/urban-platform-infra/templates/release-identity.yaml').read_text(encoding='utf-8')
 for release_identity_token in ['urban-platform-release-identity', 'releaseTag:', 'sourceRevision:', 'deploymentId:']:
     if release_identity_token not in release_identity_template_text:
@@ -1675,6 +1692,25 @@ for makefile_helm_token in [
     'LOAD_TEST_EXECUTE ?',
     'load-test-plan:',
     'tool-inventory:',
+    'MANAGEMENT_TOOLS_CONFIG ?=',
+    'MANAGEMENT_TOOLS_VALUES ?=',
+    'MANAGEMENT_TOOLS_SELECTED ?=',
+    'MANAGEMENT_TOOLS_VALUES_DIR ?=',
+    'MANAGEMENT_TOOLS_CHART_VERSIONS ?=',
+    'MANAGEMENT_TOOLS_HELM ?=',
+    'MANAGEMENT_TOOLS_WORKSTATION_OUTPUT ?=',
+    'MANAGEMENT_TOOLS_EXECUTE ?=',
+    'MANAGEMENT_TOOLS_CONFIRM ?=',
+    'management-tools-list:',
+    'management-tools-plan:',
+    'management-tools-install:',
+    'management-tools-compose-plan:',
+    'management-tools-compose-up:',
+    'management-tools-workstation-check:',
+    'scripts/management_tools.py',
+    'management-tools-install management-tools-compose-up',
+    'Refusing management-tool Helm mutation',
+    'Refusing external management-tool startup',
     '$(MAKE) tool-inventory TOOL_INVENTORY_SCOPE=validation',
     'global.resourceDefaults.requests.cpu',
     'global.ioCost.measurement',
@@ -3942,6 +3978,16 @@ for platform_capabilities_config_token in [
     'service-mesh:',
     'linkerd:',
     'istio:',
+    'management-tools:',
+    'category: management',
+    'rancher:',
+    'portainer:',
+    'headlamp:',
+    'devtron:',
+    'freelens:',
+    'k9s:',
+    'komodo:',
+    'arcane:',
 ]:
     if platform_capabilities_config_token not in platform_capabilities_config_text:
         errors.append(f'Platform capabilities catalog missing token: {platform_capabilities_config_token}')
@@ -3966,9 +4012,135 @@ for platform_capabilities_docs_token in [
     'Argo Workflows',
     'Service mesh',
     'DEPLOY_ENABLE_MINIO=true',
+    'Management tools',
+    'Rancher Community',
+    'Portainer CE',
+    'Headlamp',
+    'Devtron',
+    'FreeLens',
+    'k9s',
+    'Komodo',
+    'Arcane',
+    'management-tools.md',
 ]:
     if platform_capabilities_docs_token not in platform_capabilities_docs_text:
         errors.append(f'Platform capabilities docs missing token: {platform_capabilities_docs_token}')
+
+management_tools_config_path = ROOT / 'config/management-tools.yaml'
+management_tools_config = safe_load(management_tools_config_path.read_text(encoding='utf-8'))
+management_tool_names = {
+    'rancher', 'portainer', 'headlamp', 'devtron', 'freelens', 'k9s', 'komodo', 'arcane',
+}
+if management_tools_config.get('version') != 1:
+    errors.append('Management-tools catalog must use version 1')
+if management_tools_config.get('enabledByDefault') is not False:
+    errors.append('Management-tools catalog must be disabled by default')
+for management_tools_token in [
+    'requireExplicitSelection: true',
+    'requirePinnedVersions: true',
+    'requireDigestPins: true',
+    'allowMutableTags: false',
+    'allowDockerSocket: false',
+    'requirePrivateValuesForHelm: true',
+    'requirePrivateEnvironmentFile: true',
+    'requireTlsForInCluster: true',
+    'mode: approval-only',
+    'autoUpdate: false',
+    'Rancher Manager Community',
+    'Portainer CE',
+    'Headlamp',
+    'Devtron OSS',
+    'FreeLens',
+    'k9s',
+    'Komodo Core and Periphery',
+    'Arcane',
+    'deploymentModel: in-cluster-helm',
+    'deploymentModel: desktop',
+    'deploymentModel: cli',
+    'deploymentModel: external-docker-compose',
+    'repoUrl: https://releases.rancher.com/server-charts/stable',
+    'repoUrl: https://portainer.github.io/k8s/',
+    'repoUrl: https://kubernetes-sigs.github.io/headlamp/',
+    'repoUrl: https://helm.devtron.ai',
+    'helmMajor: 3',
+    'minHelmVersion: 3.8.0',
+    'requiredValueChecks:',
+    'enterpriseEdition.enabled',
+    'config.unsafeUseServiceAccountToken',
+    'command: freelens',
+    'versionArgs:',
+    'composeFile: compose/management-tools-komodo.yml',
+    'composeFile: compose/management-tools-arcane.yml',
+]:
+    if management_tools_token not in management_tools_config_path.read_text(encoding='utf-8'):
+        errors.append(f'Management-tools catalog missing token: {management_tools_token}')
+if not isinstance(management_tools_config.get('tools'), dict) or set(management_tools_config.get('tools', {})) != management_tool_names:
+    errors.append('Management-tools catalog must contain exactly the eight supported tools')
+management_tools_values_text = '\n'.join(
+    (ROOT / values_path).read_text(encoding='utf-8')
+    for values_path in [
+        'helm/urban-platform-infra/values.yaml',
+        'helm/urban-platform-infra/values-production.yaml',
+    ]
+)
+for management_tools_values_token in [
+    'managementTools:',
+    'requireExplicitSelection: true',
+    'requirePinnedVersions: true',
+    'requireDigestPins: true',
+    'allowMutableTags: false',
+    'allowDockerSocket: false',
+    'rancher:',
+    'portainer:',
+    'headlamp:',
+    'devtron:',
+    'freelens:',
+    'k9s:',
+    'komodo:',
+    'arcane:',
+]:
+    if management_tools_values_token not in management_tools_values_text:
+        errors.append(f'Helm values missing management-tools safety token: {management_tools_values_token}')
+for values_path in [
+    ROOT / 'helm/urban-platform-infra/values.yaml',
+    ROOT / 'helm/urban-platform-infra/values-production.yaml',
+]:
+    values = safe_load(values_path.read_text(encoding='utf-8'))
+    management_values = values.get('managementTools', {}) if isinstance(values, dict) else {}
+    if not isinstance(management_values, dict) or management_values.get('enabled') is not False:
+        errors.append(f'{values_path.name} must keep managementTools.enabled=false')
+    for management_tool_name in management_tool_names:
+        tool_values = management_values.get(management_tool_name, {}) if isinstance(management_values, dict) else {}
+        if not isinstance(tool_values, dict) or tool_values.get('enabled') is not False:
+            errors.append(f'{values_path.name} must keep managementTools.{management_tool_name}.enabled=false')
+management_tools_compose_text = '\n'.join(
+    (ROOT / compose_path).read_text(encoding='utf-8')
+    for compose_path in [
+        'compose/management-tools-komodo.yml',
+        'compose/management-tools-arcane.yml',
+    ]
+)
+for management_tools_compose_token in [
+    'profiles: [komodo]',
+    'profiles: [arcane]',
+    'KOMODO_MONGO_IMAGE:?',
+    'KOMODO_CORE_IMAGE:?',
+    'KOMODO_PERIPHERY_IMAGE:?',
+    'ARCANE_IMAGE:?',
+    'KOMODO_DATABASE_PASSWORD:?',
+    'KOMODO_INIT_ADMIN_PASSWORD:?',
+    'KOMODO_JWT_SECRET:?',
+    'KOMODO_ENV_FILE:?',
+    'ARCANE_ENCRYPTION_KEY:?',
+    'ARCANE_JWT_SECRET:?',
+    'ARCANE_ENV_FILE:?',
+    '/var/run/docker.sock:/var/run/docker.sock',
+    'cgroup: host',
+]:
+    if management_tools_compose_token not in management_tools_compose_text:
+        errors.append(f'Management-tools Compose file missing safety token: {management_tools_compose_token}')
+if ':latest' in management_tools_compose_text.lower():
+    errors.append('Management-tools Compose file must not use mutable latest image tags')
 
 import_profiles_text = (ROOT / 'config/import-profiles.yaml').read_text(encoding='utf-8')
 for import_profile_token in [
@@ -4013,6 +4185,15 @@ values_schema_text = (ROOT / 'helm/urban-platform-infra/values.schema.json').rea
 for values_schema_capability_token in [
     '"platformCapabilities"',
     '"Optional platform capability catalog"',
+    '"managementTools"',
+    '"Optional operator and platform-management tools',
+    '"requireExplicitSelection"',
+    '"requirePinnedVersions"',
+    '"allowMutableTags"',
+    '"allowDockerSocket"',
+    '"managementToolHelm"',
+    '"managementToolDesktop"',
+    '"managementToolCompose"',
     '"enabled"',
     '"secretProviderAdapter"',
     '"providerAdapters"',

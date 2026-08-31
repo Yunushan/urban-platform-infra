@@ -1,0 +1,31 @@
+name: urban-platform-arcane
+
+services:
+  arcane:
+    profiles: [arcane]
+    image: "${ARCANE_IMAGE:?ARCANE_IMAGE must be set to a digest-pinned image reference}"
+    restart: unless-stopped
+    env_file:
+      - "${ARCANE_ENV_FILE:?ARCANE_ENV_FILE must be set to a private environment file}"
+    ports:
+      - "${ARCANE_BIND_ADDRESS:-127.0.0.1}:${ARCANE_PORT:-3552}:3552"
+    environment:
+      ENCRYPTION_KEY: "${ARCANE_ENCRYPTION_KEY:?ARCANE_ENCRYPTION_KEY must be set in the private environment file}"
+      JWT_SECRET: "${ARCANE_JWT_SECRET:?ARCANE_JWT_SECRET must be set in the private environment file}"
+      PROJECTS_DIRECTORY: /host/projects
+      TZ: "${TZ:-Etc/UTC}"
+    volumes:
+      - arcane-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      - "${ARCANE_PROJECTS_DIRECTORY:?ARCANE_PROJECTS_DIRECTORY must be set to an external projects directory}:/host/projects"
+      - "${ARCANE_BUILDS_DIRECTORY:?ARCANE_BUILDS_DIRECTORY must be set to an external builds directory}:/builds"
+    cgroup: host
+    healthcheck:
+      test: ["CMD", "./arcane", "health", "--timeout", "2s"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  arcane-data:

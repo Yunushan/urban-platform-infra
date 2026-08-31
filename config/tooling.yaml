@@ -75,8 +75,18 @@ scopes:
     - hey
     - fio
     - iostat
+  management-tools:
+    description: Explicitly selected Kubernetes and Docker management-tool operations.
+    mandatory:
+    - python
+    optional:
+    - helm
+    - kubectl
+    - docker-or-podman
+    - k9s
+    - freelens
   all:
-    description: Union of validation, deployment, import, production-evidence, and load-test requirements.
+    description: Union of validation, deployment, import, production-evidence, load-test, and management-tool requirements.
     mandatory: []
     optional: []
 tools:
@@ -277,3 +287,17 @@ tools:
     - iostat
     versionArgs:
     - -V
+  k9s:
+    displayName: k9s Kubernetes terminal UI
+    expectedVersion: 0.51.0
+    commands:
+    - k9s
+    versionArgs:
+    - version
+  freelens:
+    displayName: FreeLens Kubernetes desktop client
+    expectedVersion: 1.10.3
+    commands:
+    - freelens
+    versionArgs:
+    - --version

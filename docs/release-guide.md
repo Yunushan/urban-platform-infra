@@ -18,16 +18,21 @@ make deploy-dry-run
 4. Package release evidence locally when Helm is available:
 
 ```bash
-make release-evidence
+make release-evidence RELEASE_TAG=v0.1.0
 make verify-release-evidence RELEASE_TAG=v0.1.0
 make release-runbook-plan RELEASE_RUNBOOK_PROFILE=production-release IMPORT_REDACT=true
 ```
+
+The release-evidence command requires a tag that matches the chart version. With
+Task installed, `task release-evidence RELEASE_TAG=v0.1.0` runs the equivalent
+production render, policy, SBOM, checksum, and evidence-verification checks.
 
 The generated evidence set is public-safe by default:
 
 ```text
 dist/urban-platform-infra-<version>.tgz
 dist/rendered.yaml
+dist/production-rendered.yaml
 dist/urban-platform-infra.spdx.json
 dist/release-evidence.json
 dist/SHA256SUMS
@@ -42,7 +47,7 @@ git tag -a v0.1.0 -m "urban-platform-infra v0.1.0"
 git push origin v0.1.0
 ```
 
-GitHub Actions packages the Helm chart on tags matching `v*.*.*`, renders the default manifest, generates SPDX SBOM metadata, writes the public-safe release evidence manifest, writes SHA-256 checksums, uploads the evidence artifact, and creates GitHub artifact attestations. GitLab CI mirrors the checksum, SBOM, and release manifest evidence generation on SemVer tags.
+GitHub Actions packages the Helm chart on tags matching `v*.*.*`, renders both the default and production manifests, runs the production policy checks, generates SPDX SBOM metadata, writes the public-safe release evidence manifest, writes SHA-256 checksums, uploads the evidence artifact, and creates GitHub artifact attestations. GitLab CI mirrors the checksum, SBOM, release manifest, production render policy, and offline verification path on SemVer tags.
 
 ## Verify Release Evidence
 
