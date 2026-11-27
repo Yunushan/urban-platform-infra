@@ -1,4 +1,4 @@
 # Modern CI lane: Python 3.12+ with ansible-core 2.20.x.
 ansible-core==2.20.5
-PyYAML==6.0.3
+PyYAML==6.0.4
 yamllint==1.38.0
