@@ -1,2 +1,2 @@
 # Release lane: only dependencies required by the offline release evidence verifier.
-PyYAML==6.0.3
+PyYAML==6.0.4
